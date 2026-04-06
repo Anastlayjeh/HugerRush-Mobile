@@ -5,9 +5,12 @@ allprojects {
     }
 }
 
+// Keep Gradle build outputs outside OneDrive to avoid file-lock issues on clean tasks.
+val userHome = System.getProperty("user.home")
+val externalBuildRoot = File(userHome, ".flutter-build/HugerRush-Mobile")
 val newBuildDir: Directory =
-    rootProject.layout.buildDirectory
-        .dir("../../build")
+    rootProject.layout
+        .dir(providers.provider { externalBuildRoot })
         .get()
 rootProject.layout.buildDirectory.value(newBuildDir)
 
