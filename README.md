@@ -1,3 +1,6 @@
+flutter run // to run the app
+php artisan serve // in hungerRush-web/api folder
+
 # HungerRush Mobile
 
 Flutter mobile app connected to a Laravel backend through REST APIs.
