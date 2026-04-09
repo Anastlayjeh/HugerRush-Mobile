@@ -1,5 +1,5 @@
-flutter run // to run the app
-php artisan serve // in hungerRush-web/api folder
+# flutter run // to run the app
+# php artisan serve // in hungerRush-web/api folder
 
 # HungerRush Mobile
 
