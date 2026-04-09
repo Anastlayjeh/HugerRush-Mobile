@@ -1,17 +1,39 @@
-# flutter_application_1
+# HungerRush Mobile
 
-A new Flutter project.
+Flutter mobile app connected to a Laravel backend through REST APIs.
 
-## Getting Started
+## Laravel Connection Setup
 
-This project is a starting point for a Flutter application.
+1. Start Laravel (example):
+```bash
+php artisan serve --host=0.0.0.0 --port=8000
+```
 
-A few resources to get you started if this is your first Flutter project:
+2. Run Flutter with your backend base URL:
+```bash
+flutter run --dart-define=API_BASE_URL=http://192.168.1.100:8000
+```
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+Notes:
+- Android emulator can use `http://10.0.2.2:8000`.
+- iOS simulator can use `http://127.0.0.1:8000` (if Laravel runs locally).
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Expected API Endpoints
+
+- `POST /api/v1/auth/login`
+  - Body: `email`, `password`, `device_name`
+- `POST /api/v1/auth/register`
+  - Hungry user body: `name`, `email`, `phone`, `password`, `password_confirmation`, `role=customer`, `device_name`
+  - Restaurant body: `name` (restaurant name), `email`, `phone`, `password`, `password_confirmation`, `role=restaurant_owner`, `device_name`
+
+The app expects JSON responses and reads:
+- `message`
+- `data.token` or `data.access_token` (if returned)
+- `data.user` (optional object)
+
+## Useful Commands
+
+```bash
+flutter pub get
+flutter analyze
+```

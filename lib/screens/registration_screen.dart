@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../services/auth_api_service.dart';
 import '../widgets/auth_social_buttons.dart';
 
 enum RegistrationType { hungryUser, restaurant }
@@ -14,10 +15,179 @@ class RegistrationScreen extends StatefulWidget {
 }
 
 class _RegistrationScreenState extends State<RegistrationScreen> {
+  final _authApiService = AuthApiService();
+
+  final _fullNameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
+
+  final _restaurantNameController = TextEditingController();
+  final _cuisineController = TextEditingController();
+  final _restaurantEmailController = TextEditingController();
+  final _restaurantPhoneController = TextEditingController();
+  final _countryController = TextEditingController();
+  final _cityController = TextEditingController();
+  final _streetController = TextEditingController();
+  final _postalCodeController = TextEditingController();
+  final _restaurantPasswordController = TextEditingController();
+  final _restaurantConfirmPasswordController = TextEditingController();
+
   RegistrationType _type = RegistrationType.hungryUser;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   bool _acceptedTerms = false;
+  bool _isSubmitting = false;
+
+  @override
+  void dispose() {
+    _fullNameController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
+    _restaurantNameController.dispose();
+    _cuisineController.dispose();
+    _restaurantEmailController.dispose();
+    _restaurantPhoneController.dispose();
+    _countryController.dispose();
+    _cityController.dispose();
+    _streetController.dispose();
+    _postalCodeController.dispose();
+    _restaurantPasswordController.dispose();
+    _restaurantConfirmPasswordController.dispose();
+    super.dispose();
+  }
+
+  bool _isValidEmail(String value) {
+    return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value.trim());
+  }
+
+  Future<void> _submitRegistration() async {
+    if (!_acceptedTerms) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please accept the Terms of Service first.'),
+          backgroundColor: Color(0xFFB7372B),
+        ),
+      );
+      return;
+    }
+
+    Map<String, dynamic> payload;
+    String? validationError;
+
+    if (_type == RegistrationType.hungryUser) {
+      final name = _fullNameController.text.trim();
+      final email = _emailController.text.trim();
+      final phone = _phoneController.text.trim();
+      final password = _passwordController.text;
+      final confirmPassword = _confirmPasswordController.text;
+
+      if (name.isEmpty ||
+          email.isEmpty ||
+          phone.isEmpty ||
+          password.isEmpty ||
+          confirmPassword.isEmpty) {
+        validationError = 'Please complete all required fields.';
+      } else if (!_isValidEmail(email)) {
+        validationError = 'Enter a valid email address.';
+      } else if (password != confirmPassword) {
+        validationError = 'Passwords do not match.';
+      }
+
+      payload = {
+        'name': name,
+        'email': email,
+        'phone': phone,
+        'password': password,
+        'password_confirmation': confirmPassword,
+        'role': 'customer',
+        'device_name': 'hunger-rush-mobile',
+      };
+    } else {
+      final restaurantName = _restaurantNameController.text.trim();
+      final cuisine = _cuisineController.text.trim();
+      final email = _restaurantEmailController.text.trim();
+      final phone = _restaurantPhoneController.text.trim();
+      final country = _countryController.text.trim();
+      final city = _cityController.text.trim();
+      final street = _streetController.text.trim();
+      final postalCode = _postalCodeController.text.trim();
+      final password = _restaurantPasswordController.text;
+      final confirmPassword = _restaurantConfirmPasswordController.text;
+
+      if (restaurantName.isEmpty ||
+          cuisine.isEmpty ||
+          email.isEmpty ||
+          phone.isEmpty ||
+          country.isEmpty ||
+          city.isEmpty ||
+          street.isEmpty ||
+          postalCode.isEmpty ||
+          password.isEmpty ||
+          confirmPassword.isEmpty) {
+        validationError = 'Please complete all required fields.';
+      } else if (!_isValidEmail(email)) {
+        validationError = 'Enter a valid business email address.';
+      } else if (password != confirmPassword) {
+        validationError = 'Passwords do not match.';
+      }
+
+      payload = {
+        'name': restaurantName,
+        'restaurant_name': restaurantName,
+        'cuisine_type': cuisine,
+        'email': email,
+        'phone': phone,
+        'country': country,
+        'city': city,
+        'street': street,
+        'postal_code': postalCode,
+        'password': password,
+        'password_confirmation': confirmPassword,
+        'role': 'restaurant_owner',
+        'device_name': 'hunger-rush-mobile',
+      };
+    }
+
+    if (validationError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(validationError),
+          backgroundColor: const Color(0xFFB7372B),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+    try {
+      final result = await _authApiService.register(payload: payload);
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.message)),
+      );
+      Navigator.of(context).pop();
+    } on AuthApiException catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: const Color(0xFFB7372B),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -71,6 +241,10 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                               label: _type == RegistrationType.hungryUser
                                   ? 'Create Account'
                                   : 'Request for approve',
+                              isLoading: _isSubmitting,
+                              onPressed: _isSubmitting
+                                  ? null
+                                  : _submitRegistration,
                             ),
                             if (_type == RegistrationType.hungryUser) ...[
                               const SizedBox(height: 16),
@@ -140,23 +314,30 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
 
   List<Widget> _buildHungryUserFields() {
     return [
-      const _LabeledField(label: 'Full Name', hint: 'Jon Doe'),
+      _LabeledField(
+        label: 'Full Name',
+        hint: 'Jon Doe',
+        controller: _fullNameController,
+      ),
       const SizedBox(height: 12),
-      const _LabeledField(
+      _LabeledField(
         label: 'Email',
         hint: 'john@example.com',
+        controller: _emailController,
         keyboardType: TextInputType.emailAddress,
       ),
       const SizedBox(height: 12),
-      const _PhoneNumberBlock(
+      _PhoneNumberBlock(
         label: 'Phone Number',
         countryCode: 'LB +961',
         phoneHint: '03 123 456',
+        controller: _phoneController,
       ),
       const SizedBox(height: 12),
       _LabeledField(
         label: 'Password',
         hint: '********',
+        controller: _passwordController,
         obscureText: _obscurePassword,
         suffix: _EyeButton(
           onPressed: () {
@@ -169,6 +350,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
       _LabeledField(
         label: 'Confirm Password',
         hint: '********',
+        controller: _confirmPasswordController,
         obscureText: _obscureConfirmPassword,
         suffix: _EyeButton(
           onPressed: () {
@@ -184,13 +366,22 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
 
   List<Widget> _buildRestaurantFields() {
     return [
-      const _LabeledField(label: 'Restaurant Name', hint: 'The Pizza Hub'),
+      _LabeledField(
+        label: 'Restaurant Name',
+        hint: 'The Pizza Hub',
+        controller: _restaurantNameController,
+      ),
       const SizedBox(height: 12),
-      const _LabeledField(label: 'Cuisine Type', hint: 'e.g. Italian, Lebanese'),
+      _LabeledField(
+        label: 'Cuisine Type',
+        hint: 'e.g. Italian, Lebanese',
+        controller: _cuisineController,
+      ),
       const SizedBox(height: 12),
-      const _LabeledField(
+      _LabeledField(
         label: 'Email',
         hint: 'contact@restaurant.com',
+        controller: _restaurantEmailController,
         keyboardType: TextInputType.emailAddress,
       ),
       const SizedBox(height: 12),
@@ -199,32 +390,54 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
         actionLabel: 'Add another',
       ),
       const SizedBox(height: 8),
-      const _InlinePhoneRow(
+      _InlinePhoneRow(
         countryCode: '+961',
         countryFlag: 'LB',
         phoneHint: '03 123 456',
+        controller: _restaurantPhoneController,
       ),
       const SizedBox(height: 14),
       const _SectionTitle(text: 'LOCATION DETAILS'),
       const SizedBox(height: 10),
-      const Row(
+      Row(
         children: [
-          Expanded(child: _LabeledField(label: 'Country', hint: 'Lebanon')),
+          Expanded(
+            child: _LabeledField(
+              label: 'Country',
+              hint: 'Lebanon',
+              controller: _countryController,
+            ),
+          ),
           SizedBox(width: 10),
-          Expanded(child: _LabeledField(label: 'City', hint: 'Beirut')),
+          Expanded(
+            child: _LabeledField(
+              label: 'City',
+              hint: 'Beirut',
+              controller: _cityController,
+            ),
+          ),
         ],
       ),
       const SizedBox(height: 12),
-      const _LabeledField(label: 'Street', hint: 'Hamra St, Bldg 42'),
+      _LabeledField(
+        label: 'Street',
+        hint: 'Hamra St, Bldg 42',
+        controller: _streetController,
+      ),
       const SizedBox(height: 12),
-      const SizedBox(
+      SizedBox(
         width: 125,
-        child: _LabeledField(label: 'Postal Code', hint: '1103'),
+        child: _LabeledField(
+          label: 'Postal Code',
+          hint: '1103',
+          controller: _postalCodeController,
+        ),
       ),
       const SizedBox(height: 12),
       _LabeledField(
         label: 'Password',
         hint: '********',
+        controller: _restaurantPasswordController,
         obscureText: _obscurePassword,
         suffix: _EyeButton(
           onPressed: () {
@@ -237,6 +450,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
       _LabeledField(
         label: 'Confirm Password',
         hint: '********',
+        controller: _restaurantConfirmPasswordController,
         obscureText: _obscureConfirmPassword,
         suffix: _EyeButton(
           onPressed: () {
@@ -459,6 +673,7 @@ class _LabeledField extends StatelessWidget {
   const _LabeledField({
     required this.label,
     required this.hint,
+    required this.controller,
     this.keyboardType,
     this.obscureText = false,
     this.suffix,
@@ -466,6 +681,7 @@ class _LabeledField extends StatelessWidget {
 
   final String label;
   final String hint;
+  final TextEditingController controller;
   final TextInputType? keyboardType;
   final bool obscureText;
   final Widget? suffix;
@@ -479,6 +695,7 @@ class _LabeledField extends StatelessWidget {
         const SizedBox(height: 8),
         _RoundedTextInput(
           hint: hint,
+          controller: controller,
           keyboardType: keyboardType,
           obscureText: obscureText,
           suffix: suffix,
@@ -491,12 +708,14 @@ class _LabeledField extends StatelessWidget {
 class _RoundedTextInput extends StatelessWidget {
   const _RoundedTextInput({
     required this.hint,
+    required this.controller,
     this.keyboardType,
     this.obscureText = false,
     this.suffix,
   });
 
   final String hint;
+  final TextEditingController controller;
   final TextInputType? keyboardType;
   final bool obscureText;
   final Widget? suffix;
@@ -511,6 +730,7 @@ class _RoundedTextInput extends StatelessWidget {
         border: Border.all(color: const Color(0xFFE2D5C8)),
       ),
       child: TextField(
+        controller: controller,
         keyboardType: keyboardType,
         obscureText: obscureText,
         decoration: InputDecoration(
@@ -563,11 +783,13 @@ class _PhoneNumberBlock extends StatelessWidget {
     required this.label,
     required this.countryCode,
     required this.phoneHint,
+    required this.controller,
   });
 
   final String label;
   final String countryCode;
   final String phoneHint;
+  final TextEditingController controller;
 
   @override
   Widget build(BuildContext context) {
@@ -610,6 +832,7 @@ class _PhoneNumberBlock extends StatelessWidget {
             Expanded(
               child: _RoundedTextInput(
                 hint: phoneHint,
+                controller: controller,
                 keyboardType: TextInputType.phone,
               ),
             ),
@@ -660,11 +883,13 @@ class _InlinePhoneRow extends StatelessWidget {
     required this.countryCode,
     required this.countryFlag,
     required this.phoneHint,
+    required this.controller,
   });
 
   final String countryCode;
   final String countryFlag;
   final String phoneHint;
+  final TextEditingController controller;
 
   @override
   Widget build(BuildContext context) {
@@ -704,6 +929,7 @@ class _InlinePhoneRow extends StatelessWidget {
         Expanded(
           child: _RoundedTextInput(
             hint: phoneHint,
+            controller: controller,
             keyboardType: TextInputType.phone,
           ),
         ),
@@ -811,9 +1037,15 @@ class _TermsRow extends StatelessWidget {
 }
 
 class _PrimaryActionButton extends StatelessWidget {
-  const _PrimaryActionButton({required this.label});
+  const _PrimaryActionButton({
+    required this.label,
+    required this.isLoading,
+    this.onPressed,
+  });
 
   final String label;
+  final bool isLoading;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -821,7 +1053,7 @@ class _PrimaryActionButton extends StatelessWidget {
       width: double.infinity,
       height: 54,
       child: FilledButton(
-        onPressed: () {},
+        onPressed: onPressed,
         style: FilledButton.styleFrom(
           backgroundColor: const Color(0xFFF68B1F),
           foregroundColor: Colors.white,
@@ -837,9 +1069,20 @@ class _PrimaryActionButton extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(label),
-            const SizedBox(width: 8),
-            const Icon(Icons.arrow_forward, size: 18),
+            if (isLoading) ...[
+              const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              ),
+            ] else ...[
+              Text(label),
+              const SizedBox(width: 8),
+              const Icon(Icons.arrow_forward, size: 18),
+            ],
           ],
         ),
       ),
