@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../services/auth_api_service.dart';
 import '../widgets/auth_social_buttons.dart';
 import 'registration_screen.dart';
+import 'restaurant_dashboard_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -45,6 +46,77 @@ class _LoginScreenState extends State<LoginScreen> {
     return null;
   }
 
+  String? _normalizeRole(dynamic value) {
+    if (value is String) {
+      final normalized = value.trim().toLowerCase();
+      return normalized.isEmpty ? null : normalized;
+    }
+
+    if (value is Map) {
+      return _normalizeRole(
+        value['name'] ?? value['slug'] ?? value['role'] ?? value['type'],
+      );
+    }
+
+    if (value is List) {
+      for (final item in value) {
+        final role = _normalizeRole(item);
+        if (role != null) {
+          return role;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  String? _extractRole(Map<String, dynamic>? user) {
+    if (user == null) {
+      return null;
+    }
+
+    final directRole = _normalizeRole(
+      user['role'] ??
+          user['user_role'] ??
+          user['user_type'] ??
+          user['account_type'] ??
+          user['type'],
+    );
+    if (directRole != null) {
+      return directRole;
+    }
+
+    return _normalizeRole(user['roles']);
+  }
+
+  bool _isRestaurantRole(String role) {
+    return role.contains('restaurant') ||
+        role.contains('vendor') ||
+        role.contains('merchant');
+  }
+
+  String _extractRestaurantName(Map<String, dynamic>? user) {
+    if (user == null) {
+      return 'Restaurant';
+    }
+
+    final possibleKeys = [
+      'restaurant_name',
+      'business_name',
+      'store_name',
+      'name',
+      'full_name',
+    ];
+    for (final key in possibleKeys) {
+      final value = user[key];
+      if (value is String && value.trim().isNotEmpty) {
+        return value.trim();
+      }
+    }
+
+    return 'Restaurant';
+  }
+
   Future<void> _submit() async {
     final validationError = _validateInputs();
     if (validationError != null) {
@@ -66,8 +138,24 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) {
         return;
       }
+
+      final role = _extractRole(result.user);
+      if (role != null && _isRestaurantRole(role)) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute<void>(
+            builder: (_) => RestaurantDashboardScreen(
+              restaurantName: _extractRestaurantName(result.user),
+            ),
+          ),
+        );
+        return;
+      }
+
+      final displayRole = role == null
+          ? 'unknown role'
+          : role.replaceAll('_', ' ');
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result.message)),
+        SnackBar(content: Text('${result.message} ($displayRole)')),
       );
     } on AuthApiException catch (e) {
       if (!mounted) {
@@ -105,203 +193,203 @@ class _LoginScreenState extends State<LoginScreen> {
                   constraints: BoxConstraints(maxWidth: maxWidth),
                   child: Column(
                     children: [
-                        Container(
-                          width: 72,
-                          height: 72,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF3F3F3),
-                            borderRadius: BorderRadius.circular(24),
-                          ),
-                          child: const Icon(
-                            Icons.lunch_dining_rounded,
-                            color: Color(0xFFFF7E4D),
-                            size: 38,
+                      Container(
+                        width: 72,
+                        height: 72,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF3F3F3),
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                        child: const Icon(
+                          Icons.lunch_dining_rounded,
+                          color: Color(0xFFFF7E4D),
+                          size: 38,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      const Text(
+                        'HungerRush',
+                        style: TextStyle(
+                          color: Color(0xFF2E2521),
+                          fontSize: 33,
+                          height: 1,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Discover food. Order instantly.',
+                        style: TextStyle(
+                          color: Color(0xFFA69485),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 28),
+                      _RoundedField(
+                        hint: 'Email address',
+                        icon: Icons.mail_rounded,
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        textInputAction: TextInputAction.next,
+                      ),
+                      const SizedBox(height: 14),
+                      _RoundedField(
+                        hint: 'Password',
+                        icon: Icons.lock_rounded,
+                        controller: _passwordController,
+                        obscureText: _obscurePassword,
+                        textInputAction: TextInputAction.done,
+                        onFieldSubmitted: (_) => _submit(),
+                        trailing: IconButton(
+                          onPressed: () {
+                            setState(() {
+                              _obscurePassword = !_obscurePassword;
+                            });
+                          },
+                          splashRadius: 20,
+                          icon: Icon(
+                            _obscurePassword
+                                ? Icons.visibility_rounded
+                                : Icons.visibility_off_rounded,
+                            color: const Color(0xFF9E8B7D),
+                            size: 20,
                           ),
                         ),
-                        const SizedBox(height: 20),
-                        const Text(
-                          'HungerRush',
-                          style: TextStyle(
-                            color: Color(0xFF2E2521),
-                            fontSize: 33,
-                            height: 1,
-                            fontWeight: FontWeight.w900,
+                      ),
+                      Container(
+                        alignment: Alignment.centerRight,
+                        margin: const EdgeInsets.only(top: 8, right: 4),
+                        child: TextButton(
+                          onPressed: () {},
+                          style: TextButton.styleFrom(
+                            foregroundColor: const Color(0xFFA08E80),
+                            padding: EdgeInsets.zero,
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
-                        ),
-                        const SizedBox(height: 10),
-                        const Text(
-                          'Discover food. Order instantly.',
-                          style: TextStyle(
-                            color: Color(0xFFA69485),
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 28),
-                        _RoundedField(
-                          hint: 'Email address',
-                          icon: Icons.mail_rounded,
-                          controller: _emailController,
-                          keyboardType: TextInputType.emailAddress,
-                          textInputAction: TextInputAction.next,
-                        ),
-                        const SizedBox(height: 14),
-                        _RoundedField(
-                          hint: 'Password',
-                          icon: Icons.lock_rounded,
-                          controller: _passwordController,
-                          obscureText: _obscurePassword,
-                          textInputAction: TextInputAction.done,
-                          onFieldSubmitted: (_) => _submit(),
-                          trailing: IconButton(
-                            onPressed: () {
-                              setState(() {
-                                _obscurePassword = !_obscurePassword;
-                              });
-                            },
-                            splashRadius: 20,
-                            icon: Icon(
-                              _obscurePassword
-                                  ? Icons.visibility_rounded
-                                  : Icons.visibility_off_rounded,
-                              color: const Color(0xFF9E8B7D),
-                              size: 20,
+                          child: const Text(
+                            'Forgot password?',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
                             ),
                           ),
                         ),
-                        Container(
-                          alignment: Alignment.centerRight,
-                          margin: const EdgeInsets.only(top: 8, right: 4),
-                          child: TextButton(
-                            onPressed: () {},
+                      ),
+                      const SizedBox(height: 18),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 56,
+                        child: FilledButton(
+                          onPressed: _isSubmitting ? null : _submit,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFFFF7E4D),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            textStyle: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          child: _isSubmitting
+                              ? const SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Text('Log In'),
+                        ),
+                      ),
+                      const SizedBox(height: 30),
+                      const Row(
+                        children: [
+                          Expanded(
+                            child: Divider(
+                              height: 1,
+                              thickness: 1,
+                              color: Color(0xFFEADFD5),
+                            ),
+                          ),
+                          Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 12),
+                            child: Text(
+                              'OR CONTINUE WITH',
+                              style: TextStyle(
+                                color: Color(0xFFB6A495),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: Divider(
+                              height: 1,
+                              thickness: 1,
+                              color: Color(0xFFEADFD5),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 26),
+                      const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          AuthSocialButton(child: GoogleMark()),
+                          SizedBox(width: 16),
+                          AuthSocialButton(
+                            child: Icon(
+                              Icons.apple,
+                              color: Colors.black,
+                              size: 24,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 30),
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          const Text(
+                            "Don't have an account? ",
+                            style: TextStyle(
+                              color: Color(0xFF2E2521),
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => const RegistrationScreen(),
+                                ),
+                              );
+                            },
                             style: TextButton.styleFrom(
-                              foregroundColor: const Color(0xFFA08E80),
+                              foregroundColor: const Color(0xFFFF7E4D),
                               padding: EdgeInsets.zero,
                               minimumSize: Size.zero,
                               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             ),
                             child: const Text(
-                              'Forgot password?',
+                              'Sign Up',
                               style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 56,
-                          child: FilledButton(
-                            onPressed: _isSubmitting ? null : _submit,
-                            style: FilledButton.styleFrom(
-                              backgroundColor: const Color(0xFFFF7E4D),
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              textStyle: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            child: _isSubmitting
-                                ? const SizedBox(
-                                    width: 22,
-                                    height: 22,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : const Text('Log In'),
-                          ),
-                        ),
-                        const SizedBox(height: 30),
-                        const Row(
-                          children: [
-                            Expanded(
-                              child: Divider(
-                                height: 1,
-                                thickness: 1,
-                                color: Color(0xFFEADFD5),
-                              ),
-                            ),
-                            Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 12),
-                              child: Text(
-                                'OR CONTINUE WITH',
-                                style: TextStyle(
-                                  color: Color(0xFFB6A495),
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 0.3,
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              child: Divider(
-                                height: 1,
-                                thickness: 1,
-                                color: Color(0xFFEADFD5),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 26),
-                        const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            AuthSocialButton(child: GoogleMark()),
-                            SizedBox(width: 16),
-                            AuthSocialButton(
-                              child: Icon(
-                                Icons.apple,
-                                color: Colors.black,
-                                size: 24,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 30),
-                        Wrap(
-                          alignment: WrapAlignment.center,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            const Text(
-                              "Don't have an account? ",
-                              style: TextStyle(
-                                color: Color(0xFF2E2521),
                                 fontSize: 15,
-                                fontWeight: FontWeight.w800,
+                                fontWeight: FontWeight.w900,
                               ),
                             ),
-                            TextButton(
-                              onPressed: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute<void>(
-                                    builder: (_) => const RegistrationScreen(),
-                                  ),
-                                );
-                              },
-                              style: TextButton.styleFrom(
-                                foregroundColor: const Color(0xFFFF7E4D),
-                                padding: EdgeInsets.zero,
-                                minimumSize: Size.zero,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                              child: const Text(
-                                'Sign Up',
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ),
