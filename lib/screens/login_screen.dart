@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../services/auth_api_service.dart';
 import '../widgets/auth_social_buttons.dart';
 import 'registration_screen.dart';
-import 'restaurant_dashboard_screen.dart';
+import 'restaurant_feed_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -143,7 +143,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (role != null && _isRestaurantRole(role)) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute<void>(
-            builder: (_) => RestaurantDashboardScreen(
+            builder: (_) => RestaurantFeedScreen(
               restaurantName: _extractRestaurantName(result.user),
             ),
           ),
