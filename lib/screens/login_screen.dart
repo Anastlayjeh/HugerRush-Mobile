@@ -6,6 +6,7 @@ import '../services/auth_api_service.dart';
 import '../widgets/auth_social_buttons.dart';
 import 'registration_screen.dart';
 import 'restaurant_feed_screen.dart';
+import 'user_home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -89,10 +90,35 @@ class _LoginScreenState extends State<LoginScreen> {
     return _normalizeRole(user['roles']);
   }
 
+  String? _extractRoleFromMessage(String message) {
+    final normalized = message.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return null;
+    }
+
+    if (_isRestaurantRole(normalized)) {
+      return 'restaurant';
+    }
+    if (_isNormalUserRole(normalized)) {
+      return 'customer';
+    }
+
+    return null;
+  }
+
   bool _isRestaurantRole(String role) {
     return role.contains('restaurant') ||
         role.contains('vendor') ||
         role.contains('merchant');
+  }
+
+  bool _isNormalUserRole(String role) {
+    return role.contains('customer') ||
+        role.contains('user') ||
+        role.contains('client') ||
+        role.contains('diner') ||
+        role.contains('consumer') ||
+        role.contains('hungry');
   }
 
   String _extractRestaurantName(Map<String, dynamic>? user) {
@@ -117,6 +143,49 @@ class _LoginScreenState extends State<LoginScreen> {
     return 'Restaurant';
   }
 
+  String _extractUserName(Map<String, dynamic>? user, {String? fallbackEmail}) {
+    if (user == null) {
+      if (fallbackEmail != null && fallbackEmail.contains('@')) {
+        final prefix = fallbackEmail.split('@').first.trim();
+        if (prefix.isNotEmpty) {
+          return prefix;
+        }
+      }
+      return 'FoodExplorer';
+    }
+
+    final possibleKeys = [
+      'name',
+      'full_name',
+      'username',
+      'display_name',
+      'first_name',
+    ];
+    for (final key in possibleKeys) {
+      final value = user[key];
+      if (value is String && value.trim().isNotEmpty) {
+        return value.trim();
+      }
+    }
+
+    final email = user['email'];
+    if (email is String && email.contains('@')) {
+      final prefix = email.split('@').first.trim();
+      if (prefix.isNotEmpty) {
+        return prefix;
+      }
+    }
+
+    if (fallbackEmail != null && fallbackEmail.contains('@')) {
+      final prefix = fallbackEmail.split('@').first.trim();
+      if (prefix.isNotEmpty) {
+        return prefix;
+      }
+    }
+
+    return 'FoodExplorer';
+  }
+
   Future<void> _submit() async {
     final validationError = _validateInputs();
     if (validationError != null) {
@@ -139,7 +208,10 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      final role = _extractRole(result.user);
+      final role =
+          _extractRole(result.user) ??
+          _normalizeRole(result.role) ??
+          _extractRoleFromMessage(result.message);
       if (role != null && _isRestaurantRole(role)) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute<void>(
@@ -151,11 +223,27 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      final displayRole = role == null
-          ? 'unknown role'
-          : role.replaceAll('_', ' ');
+      if (role == null || _isNormalUserRole(role)) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute<void>(
+            builder: (_) => UserHomeScreen(
+              userName: _extractUserName(
+                result.user,
+                fallbackEmail: _emailController.text.trim(),
+              ),
+            ),
+          ),
+        );
+        return;
+      }
+
+      final displayRole = role.replaceAll('_', ' ');
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${result.message} ($displayRole)')),
+        SnackBar(
+          content: Text(
+            '${result.message} ($displayRole). Role is not mapped to a screen yet.',
+          ),
+        ),
       );
     } on AuthApiException catch (e) {
       if (!mounted) {

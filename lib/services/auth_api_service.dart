@@ -9,10 +9,7 @@ class AuthApiService {
 
   final http.Client _client;
 
-  Future<AuthResult> login({
-    required String email,
-    required String password,
-  }) {
+  Future<AuthResult> login({required String email, required String password}) {
     return _sendAuthRequest(
       endpoint: '/api/v1/auth/login',
       payload: {
@@ -23,9 +20,7 @@ class AuthApiService {
     );
   }
 
-  Future<AuthResult> register({
-    required Map<String, dynamic> payload,
-  }) {
+  Future<AuthResult> register({required Map<String, dynamic> payload}) {
     return _sendAuthRequest(
       endpoint: '/api/v1/auth/register',
       payload: payload,
@@ -46,17 +41,23 @@ class AuthApiService {
         },
         body: jsonEncode(payload),
       );
-    } catch (_) {
-      throw const AuthApiException(
-        'Unable to reach the server. Check your API URL and internet connection.',
+    } catch (error) {
+      throw AuthApiException(
+        'Unable to reach ${AppConfig.apiBaseUrl}. '
+        'Check your API URL and network access. '
+        'Details: $error',
       );
     }
 
     Map<String, dynamic> data = <String, dynamic>{};
     if (response.body.isNotEmpty) {
-      final decoded = jsonDecode(response.body);
-      if (decoded is Map<String, dynamic>) {
-        data = decoded;
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic>) {
+          data = decoded;
+        }
+      } on FormatException {
+        // Keep data empty when backend responds with non-JSON body.
       }
     }
 
@@ -92,25 +93,42 @@ class AuthResult {
   const AuthResult({
     this.token,
     this.user,
+    this.role,
     this.message = 'Success',
   });
 
   final String? token;
   final Map<String, dynamic>? user;
+  final dynamic role;
   final String message;
 
   factory AuthResult.fromJson(Map<String, dynamic> json) {
     final data = json['data'];
-    final mappedData = data is Map<String, dynamic> ? data : <String, dynamic>{};
-    final token = (mappedData['token'] as String?) ??
+    final mappedData = data is Map<String, dynamic>
+        ? data
+        : <String, dynamic>{};
+    final token =
+        (mappedData['token'] as String?) ??
         (mappedData['access_token'] as String?) ??
         (json['token'] as String?) ??
         (json['access_token'] as String?);
     final user = mappedData['user'] ?? json['user'];
+    final role =
+        mappedData['role'] ??
+        mappedData['user_role'] ??
+        mappedData['user_type'] ??
+        mappedData['account_type'] ??
+        mappedData['type'] ??
+        json['role'] ??
+        json['user_role'] ??
+        json['user_type'] ??
+        json['account_type'] ??
+        json['type'];
 
     return AuthResult(
       token: token,
       user: user is Map<String, dynamic> ? user : null,
+      role: role,
       message: (json['message'] as String?) ?? 'Success',
     );
   }
