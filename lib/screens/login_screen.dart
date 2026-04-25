@@ -217,6 +217,8 @@ class _LoginScreenState extends State<LoginScreen> {
           MaterialPageRoute<void>(
             builder: (_) => RestaurantFeedScreen(
               restaurantName: _extractRestaurantName(result.user),
+              authToken: result.token,
+              initialUserData: result.user,
             ),
           ),
         );
