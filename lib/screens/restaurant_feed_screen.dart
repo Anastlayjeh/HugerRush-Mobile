@@ -1,44 +1,171 @@
 import 'package:flutter/material.dart';
 
+import '../services/restaurant_menu_api_service.dart';
+import '../services/restaurant_profile_api_service.dart';
+
 double _clampDouble(double value, double min, double max) {
   return value.clamp(min, max).toDouble();
 }
 
 class RestaurantFeedScreen extends StatefulWidget {
-  const RestaurantFeedScreen({super.key, required this.restaurantName});
+  const RestaurantFeedScreen({
+    super.key,
+    required this.restaurantName,
+    this.authToken,
+    this.initialUserData,
+  });
 
   final String restaurantName;
+  final String? authToken;
+  final Map<String, dynamic>? initialUserData;
 
   @override
   State<RestaurantFeedScreen> createState() => _RestaurantFeedScreenState();
 }
 
 class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
+  static const int _menuTabIndex = 1;
+  static const int _profileTabIndex = 4;
+
   int _selectedTopTab = 1;
   int _selectedBottomIndex = 0;
+  final _profileApiService = RestaurantProfileApiService();
+  final _menuApiService = RestaurantMenuApiService();
 
-  String get _restaurantName {
-    final cleaned = widget.restaurantName.trim();
-    if (cleaned.isEmpty) {
-      return 'Bella Italia';
+  late _RestaurantProfileInfo _profileInfo;
+  bool _isRefreshingProfile = false;
+  String? _profileSyncError;
+  List<RestaurantMenuItem> _restaurantMenuItems = const [];
+  bool _isRefreshingMenu = false;
+  bool _hasLoadedMenu = false;
+  String? _menuSyncError;
+
+  @override
+  void initState() {
+    super.initState();
+    _profileInfo = _RestaurantProfileInfo.fromData(
+      primary: widget.initialUserData,
+      fallbackName: widget.restaurantName,
+    );
+    _refreshRestaurantProfile();
+  }
+
+  @override
+  void dispose() {
+    _profileApiService.dispose();
+    _menuApiService.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refreshRestaurantProfile() async {
+    final token = widget.authToken?.trim() ?? '';
+    if (token.isEmpty) {
+      return;
     }
-    return cleaned;
+
+    setState(() {
+      _isRefreshingProfile = true;
+      _profileSyncError = null;
+    });
+
+    try {
+      final payload = await _profileApiService.fetchProfile(token: token);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _profileInfo = _RestaurantProfileInfo.fromData(
+          primary: payload,
+          secondary: widget.initialUserData,
+          fallbackName: widget.restaurantName,
+        );
+        _isRefreshingProfile = false;
+      });
+    } on RestaurantProfileApiException catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isRefreshingProfile = false;
+        _profileSyncError = e.message;
+      });
+    }
   }
 
-  String get _restaurantHandle {
-    return _restaurantName.replaceAll(RegExp(r'\s+'), '');
-  }
+  String get _restaurantName => _profileInfo.name;
 
-  bool get _isProfileTabSelected => _selectedBottomIndex == 4;
+  String get _restaurantHandle => _profileInfo.handle;
+
+  bool get _isProfileTabSelected => _selectedBottomIndex == _profileTabIndex;
+  bool get _isMenuTabSelected => _selectedBottomIndex == _menuTabIndex;
 
   void _onBottomNavSelected(int index) {
     setState(() => _selectedBottomIndex = index);
+    if (index == _menuTabIndex) {
+      _refreshRestaurantMenu();
+    }
+  }
+
+  void _openMenuSection() {
+    _onBottomNavSelected(_menuTabIndex);
+    _refreshRestaurantMenu(force: true);
+  }
+
+  Future<void> _refreshRestaurantMenu({bool force = false}) async {
+    if (_isRefreshingMenu) {
+      return;
+    }
+    if (_hasLoadedMenu && !force) {
+      return;
+    }
+
+    final token = widget.authToken?.trim() ?? '';
+    if (token.isEmpty) {
+      setState(() {
+        _restaurantMenuItems = const <RestaurantMenuItem>[];
+        _hasLoadedMenu = true;
+        _isRefreshingMenu = false;
+        _menuSyncError = 'Missing auth token. Please log in again.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isRefreshingMenu = true;
+      _menuSyncError = null;
+    });
+
+    try {
+      final items = await _menuApiService.fetchMenu(token: token);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _restaurantMenuItems = items;
+        _hasLoadedMenu = true;
+        _isRefreshingMenu = false;
+        _menuSyncError = null;
+      });
+    } on RestaurantMenuApiException catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _restaurantMenuItems = const <RestaurantMenuItem>[];
+        _hasLoadedMenu = true;
+        _isRefreshingMenu = false;
+        _menuSyncError = e.message;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     if (_isProfileTabSelected) {
       return _buildProfileScaffold();
+    }
+    if (_isMenuTabSelected) {
+      return _buildMenuScaffold();
     }
     return _buildFeedScaffold();
   }
@@ -140,8 +267,11 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                   Expanded(
                     child: _ProfileSection(
                       metrics: metrics,
-                      restaurantName: _restaurantName,
-                      restaurantHandle: _restaurantHandle,
+                      profileInfo: _profileInfo,
+                      isSyncingProfile: _isRefreshingProfile,
+                      profileSyncError: _profileSyncError,
+                      onRetryProfileSync: _refreshRestaurantProfile,
+                      onManageFullMenu: _openMenuSection,
                     ),
                   ),
                   SizedBox(height: metrics.sectionGapSmall),
@@ -157,6 +287,79 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         ),
       ),
     );
+  }
+
+  Widget _buildMenuScaffold() {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8EFE8),
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final metrics = _ResponsiveMetrics.from(constraints);
+            final availableCount = _restaurantMenuItems
+                .where((item) => item.isAvailable)
+                .length;
+            final popularCount = _restaurantMenuItems
+                .where((item) => item.isPopular)
+                .length;
+            final averagePrice = _computeAveragePrice(_restaurantMenuItems);
+
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                metrics.horizontalPadding,
+                metrics.topPadding,
+                metrics.horizontalPadding,
+                metrics.bottomPadding,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _MenuScreenHeader(
+                    metrics: metrics,
+                    restaurantName: _restaurantName,
+                    isRefreshing: _isRefreshingMenu,
+                    onRefresh: () => _refreshRestaurantMenu(force: true),
+                  ),
+                  SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
+                  _MenuStatsRow(
+                    metrics: metrics,
+                    totalItems: _restaurantMenuItems.length,
+                    availableItems: availableCount,
+                    popularItems: popularCount,
+                    averagePrice: averagePrice,
+                  ),
+                  SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
+                  Expanded(
+                    child: _MenuSection(
+                      metrics: metrics,
+                      items: _restaurantMenuItems,
+                      isLoading: _isRefreshingMenu,
+                      errorMessage: _menuSyncError,
+                      onRetry: () => _refreshRestaurantMenu(force: true),
+                    ),
+                  ),
+                  SizedBox(height: metrics.sectionGapSmall),
+                  _BottomNavBar(
+                    metrics: metrics,
+                    selectedIndex: _selectedBottomIndex,
+                    onSelected: _onBottomNavSelected,
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  double? _computeAveragePrice(List<RestaurantMenuItem> items) {
+    final prices = items.map((item) => item.price).whereType<double>().toList();
+    if (prices.isEmpty) {
+      return null;
+    }
+    final sum = prices.fold<double>(0, (value, item) => value + item);
+    return sum / prices.length;
   }
 }
 
@@ -232,13 +435,19 @@ class _FeedBackground extends StatelessWidget {
 class _ProfileSection extends StatelessWidget {
   const _ProfileSection({
     required this.metrics,
-    required this.restaurantName,
-    required this.restaurantHandle,
+    required this.profileInfo,
+    required this.isSyncingProfile,
+    required this.profileSyncError,
+    required this.onRetryProfileSync,
+    required this.onManageFullMenu,
   });
 
   final _ResponsiveMetrics metrics;
-  final String restaurantName;
-  final String restaurantHandle;
+  final _RestaurantProfileInfo profileInfo;
+  final bool isSyncingProfile;
+  final String? profileSyncError;
+  final VoidCallback onRetryProfileSync;
+  final VoidCallback onManageFullMenu;
 
   static const List<_PopularMenuItemData> _popularItems = [
     _PopularMenuItemData(
@@ -327,10 +536,18 @@ class _ProfileSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (isSyncingProfile || profileSyncError != null) ...[
+            _ProfileSyncBanner(
+              metrics: metrics,
+              isLoading: isSyncingProfile,
+              errorMessage: profileSyncError,
+              onRetry: onRetryProfileSync,
+            ),
+            SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
+          ],
           _OwnerProfileHero(
             metrics: metrics,
-            restaurantName: restaurantName,
-            restaurantHandle: restaurantHandle,
+            profileInfo: profileInfo,
           ),
           SizedBox(height: sectionGap),
           _ProfileSectionTabs(metrics: metrics, selectedIndex: 1),
@@ -393,7 +610,7 @@ class _ProfileSection extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: () {},
+              onPressed: onManageFullMenu,
               style: ElevatedButton.styleFrom(
                 elevation: 0,
                 backgroundColor: const Color(0xFFFF6D47),
@@ -426,19 +643,733 @@ class _ProfileSection extends StatelessWidget {
   }
 }
 
-class _OwnerProfileHero extends StatelessWidget {
-  const _OwnerProfileHero({
+class _MenuScreenHeader extends StatelessWidget {
+  const _MenuScreenHeader({
     required this.metrics,
     required this.restaurantName,
-    required this.restaurantHandle,
+    required this.isRefreshing,
+    required this.onRefresh,
   });
 
   final _ResponsiveMetrics metrics;
   final String restaurantName;
-  final String restaurantHandle;
+  final bool isRefreshing;
+  final VoidCallback onRefresh;
 
-  static const _coverImage =
-      'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=1400&q=80';
+  @override
+  Widget build(BuildContext context) {
+    final titleSize = _clampDouble(32 * metrics.scale, 22, 32) * 0.56;
+    final subtitleSize = _clampDouble(15 * metrics.scale, 11, 15);
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(_clampDouble(16 * metrics.scale, 12, 16)),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F0EC),
+        borderRadius: BorderRadius.circular(_clampDouble(24 * metrics.scale, 18, 24)),
+        border: Border.all(color: const Color(0xFFE5DACF)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Menu Section',
+                      style: TextStyle(
+                        color: const Color(0xFF1F1B19),
+                        fontSize: titleSize,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    SizedBox(height: _clampDouble(4 * metrics.scale, 3, 4)),
+                    Text(
+                      'Manage dishes for $restaurantName',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: const Color(0xFF8F7F73),
+                        fontSize: subtitleSize,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFEFE9),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFFFD9CC)),
+                ),
+                child: IconButton(
+                  onPressed: isRefreshing ? null : onRefresh,
+                  icon: isRefreshing
+                      ? SizedBox(
+                          width: _clampDouble(18 * metrics.scale, 14, 18),
+                          height: _clampDouble(18 * metrics.scale, 14, 18),
+                          child: const CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Color(0xFFFF7E4D),
+                          ),
+                        )
+                      : Icon(
+                          Icons.refresh_rounded,
+                          color: const Color(0xFFFF7E4D),
+                          size: _clampDouble(22 * metrics.scale, 18, 22),
+                        ),
+                  tooltip: 'Refresh menu',
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.symmetric(
+              horizontal: _clampDouble(12 * metrics.scale, 10, 12),
+              vertical: _clampDouble(9 * metrics.scale, 7, 9),
+            ),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8EFE8),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.storage_rounded,
+                  color: const Color(0xFFFF7E4D),
+                  size: _clampDouble(18 * metrics.scale, 14, 18),
+                ),
+                SizedBox(width: _clampDouble(8 * metrics.scale, 6, 8)),
+                Expanded(
+                  child: Text(
+                    'Menu data is synced from your SQL-backed backend API.',
+                    style: TextStyle(
+                      color: const Color(0xFF7D6D61),
+                      fontSize: _clampDouble(13 * metrics.scale, 10, 13),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MenuStatsRow extends StatelessWidget {
+  const _MenuStatsRow({
+    required this.metrics,
+    required this.totalItems,
+    required this.availableItems,
+    required this.popularItems,
+    required this.averagePrice,
+  });
+
+  final _ResponsiveMetrics metrics;
+  final int totalItems;
+  final int availableItems;
+  final int popularItems;
+  final double? averagePrice;
+
+  @override
+  Widget build(BuildContext context) {
+    final cardWidth = (metrics.width - (metrics.horizontalPadding * 2) - 8) / 2;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        _MenuStatCard(
+          metrics: metrics,
+          width: cardWidth,
+          icon: Icons.format_list_bulleted_rounded,
+          label: 'Total Items',
+          value: '$totalItems',
+        ),
+        _MenuStatCard(
+          metrics: metrics,
+          width: cardWidth,
+          icon: Icons.check_circle_outline_rounded,
+          label: 'Available',
+          value: '$availableItems',
+        ),
+        _MenuStatCard(
+          metrics: metrics,
+          width: cardWidth,
+          icon: Icons.local_fire_department_outlined,
+          label: 'Popular',
+          value: '$popularItems',
+        ),
+        _MenuStatCard(
+          metrics: metrics,
+          width: cardWidth,
+          icon: Icons.payments_outlined,
+          label: 'Avg Price',
+          value: _formatUsd(averagePrice, fallback: '--'),
+        ),
+      ],
+    );
+  }
+}
+
+class _MenuStatCard extends StatelessWidget {
+  const _MenuStatCard({
+    required this.metrics,
+    required this.width,
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final _ResponsiveMetrics metrics;
+  final double width;
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      padding: EdgeInsets.symmetric(
+        horizontal: _clampDouble(12 * metrics.scale, 10, 12),
+        vertical: _clampDouble(10 * metrics.scale, 8, 10),
+      ),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F0EC),
+        borderRadius: BorderRadius.circular(_clampDouble(18 * metrics.scale, 14, 18)),
+        border: Border.all(color: const Color(0xFFE5DACF)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: _clampDouble(32 * metrics.scale, 28, 32),
+            height: _clampDouble(32 * metrics.scale, 28, 32),
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Color(0xFFFFEFE8),
+            ),
+            child: Icon(
+              icon,
+              color: const Color(0xFFFF7E4D),
+              size: _clampDouble(18 * metrics.scale, 14, 18),
+            ),
+          ),
+          SizedBox(width: _clampDouble(8 * metrics.scale, 6, 8)),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: const Color(0xFF1F1B19),
+                    fontSize: _clampDouble(18 * metrics.scale, 13, 18),
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: const Color(0xFF8D7E73),
+                    fontSize: _clampDouble(12 * metrics.scale, 9, 12),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MenuSection extends StatelessWidget {
+  const _MenuSection({
+    required this.metrics,
+    required this.items,
+    required this.isLoading,
+    required this.errorMessage,
+    required this.onRetry,
+  });
+
+  final _ResponsiveMetrics metrics;
+  final List<RestaurantMenuItem> items;
+  final bool isLoading;
+  final String? errorMessage;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasError = errorMessage != null && errorMessage!.trim().isNotEmpty;
+
+    if (isLoading && items.isEmpty) {
+      return const Center(
+        child: CircularProgressIndicator(color: Color(0xFFFF7E4D)),
+      );
+    }
+
+    return Column(
+      children: [
+        if (hasError) ...[
+          _MenuSyncBanner(
+            metrics: metrics,
+            message: errorMessage!.trim(),
+            onRetry: onRetry,
+          ),
+          SizedBox(height: _clampDouble(10 * metrics.scale, 8, 10)),
+        ],
+        Expanded(
+          child: RefreshIndicator(
+            color: const Color(0xFFFF7E4D),
+            onRefresh: onRetry,
+            child: items.isEmpty
+                ? _EmptyMenuState(metrics: metrics)
+                : ListView.separated(
+                    physics: const BouncingScrollPhysics(
+                      parent: AlwaysScrollableScrollPhysics(),
+                    ),
+                    itemCount: items.length,
+                    separatorBuilder: (_, _) =>
+                        SizedBox(height: _clampDouble(10 * metrics.scale, 8, 10)),
+                    itemBuilder: (context, index) {
+                      return _ManagedMenuItemCard(
+                        metrics: metrics,
+                        item: items[index],
+                      );
+                    },
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MenuSyncBanner extends StatelessWidget {
+  const _MenuSyncBanner({
+    required this.metrics,
+    required this.message,
+    required this.onRetry,
+  });
+
+  final _ResponsiveMetrics metrics;
+  final String message;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(
+        horizontal: _clampDouble(12 * metrics.scale, 10, 12),
+        vertical: _clampDouble(10 * metrics.scale, 8, 10),
+      ),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF2EC),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFFFD3C5)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.error_outline_rounded,
+            color: const Color(0xFFCE5A3E),
+            size: _clampDouble(18 * metrics.scale, 14, 18),
+          ),
+          SizedBox(width: _clampDouble(8 * metrics.scale, 6, 8)),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: const Color(0xFF8D4B39),
+                fontSize: _clampDouble(12 * metrics.scale, 10, 12),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => onRetry(),
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFFFF7E4D),
+              padding: EdgeInsets.symmetric(
+                horizontal: _clampDouble(8 * metrics.scale, 6, 8),
+              ),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: Text(
+              'Retry',
+              style: TextStyle(
+                fontSize: _clampDouble(12 * metrics.scale, 10, 12),
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyMenuState extends StatelessWidget {
+  const _EmptyMenuState({required this.metrics});
+
+  final _ResponsiveMetrics metrics;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        SizedBox(height: _clampDouble(80 * metrics.scale, 60, 80)),
+        Center(
+          child: Container(
+            width: _clampDouble(78 * metrics.scale, 64, 78),
+            height: _clampDouble(78 * metrics.scale, 64, 78),
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Color(0xFFFFEFE7),
+            ),
+            child: Icon(
+              Icons.restaurant_menu_rounded,
+              color: const Color(0xFFFF7E4D),
+              size: _clampDouble(36 * metrics.scale, 28, 36),
+            ),
+          ),
+        ),
+        SizedBox(height: _clampDouble(14 * metrics.scale, 10, 14)),
+        Text(
+          'No menu items found',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: const Color(0xFF2A231E),
+            fontSize: _clampDouble(20 * metrics.scale, 15, 20),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        SizedBox(height: _clampDouble(6 * metrics.scale, 4, 6)),
+        Text(
+          'Add dishes from your backend and pull to refresh.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: const Color(0xFF8D7E73),
+            fontSize: _clampDouble(13 * metrics.scale, 10, 13),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ManagedMenuItemCard extends StatelessWidget {
+  const _ManagedMenuItemCard({required this.metrics, required this.item});
+
+  final _ResponsiveMetrics metrics;
+  final RestaurantMenuItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final thumbnailSize = _clampDouble(90 * metrics.scale, 72, 90);
+    return Container(
+      padding: EdgeInsets.all(_clampDouble(12 * metrics.scale, 10, 12)),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F1ED),
+        borderRadius: BorderRadius.circular(_clampDouble(22 * metrics.scale, 18, 22)),
+        border: Border.all(color: const Color(0xFFE4D9CF)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: SizedBox(
+              width: thumbnailSize,
+              height: thumbnailSize,
+              child: Image.network(
+                item.imageUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) {
+                  return const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Color(0xFFE7D9CC), Color(0xFFD9C8B8)],
+                      ),
+                    ),
+                    child: Center(
+                      child: Icon(
+                        Icons.fastfood_rounded,
+                        color: Color(0xFF816B5B),
+                        size: 30,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+          SizedBox(width: _clampDouble(12 * metrics.scale, 8, 12)),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        item.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: const Color(0xFF1F1B19),
+                          fontSize: _clampDouble(18 * metrics.scale, 14, 18),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: _clampDouble(8 * metrics.scale, 6, 8)),
+                    Text(
+                      _formatUsd(item.price),
+                      style: TextStyle(
+                        color: const Color(0xFFFF7E4D),
+                        fontSize: _clampDouble(16 * metrics.scale, 12, 16),
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: _clampDouble(5 * metrics.scale, 3, 5)),
+                Text(
+                  item.description,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: const Color(0xFF8C7D71),
+                    fontSize: _clampDouble(13 * metrics.scale, 10, 13),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                SizedBox(height: _clampDouble(8 * metrics.scale, 6, 8)),
+                Wrap(
+                  spacing: _clampDouble(6 * metrics.scale, 4, 6),
+                  runSpacing: _clampDouble(5 * metrics.scale, 3, 5),
+                  children: [
+                    _MenuBadge(
+                      metrics: metrics,
+                      label: item.category,
+                      backgroundColor: const Color(0xFFEFE8E1),
+                      textColor: const Color(0xFF786658),
+                    ),
+                    _MenuBadge(
+                      metrics: metrics,
+                      label: item.isAvailable ? 'Available' : 'Paused',
+                      backgroundColor: item.isAvailable
+                          ? const Color(0xFFE1F5E8)
+                          : const Color(0xFFFDE4E2),
+                      textColor: item.isAvailable
+                          ? const Color(0xFF2E9B57)
+                          : const Color(0xFFC6463E),
+                    ),
+                    if (item.isPopular)
+                      _MenuBadge(
+                        metrics: metrics,
+                        label: 'Popular',
+                        backgroundColor: const Color(0xFFE8EFF7),
+                        textColor: const Color(0xFF43739C),
+                      ),
+                    if (item.rating != null)
+                      _MenuBadge(
+                        metrics: metrics,
+                        label: '${item.rating!.toStringAsFixed(1)}★',
+                        backgroundColor: const Color(0xFFFFF1CC),
+                        textColor: const Color(0xFFB07800),
+                      ),
+                  ],
+                ),
+                if (item.ordersCount != null) ...[
+                  SizedBox(height: _clampDouble(7 * metrics.scale, 5, 7)),
+                  Text(
+                    '${item.ordersCount} orders',
+                    style: TextStyle(
+                      color: const Color(0xFF9A8A7E),
+                      fontSize: _clampDouble(12 * metrics.scale, 9, 12),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MenuBadge extends StatelessWidget {
+  const _MenuBadge({
+    required this.metrics,
+    required this.label,
+    required this.backgroundColor,
+    required this.textColor,
+  });
+
+  final _ResponsiveMetrics metrics;
+  final String label;
+  final Color backgroundColor;
+  final Color textColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: _clampDouble(8 * metrics.scale, 6, 8),
+        vertical: _clampDouble(4 * metrics.scale, 3, 4),
+      ),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: textColor,
+          fontSize: _clampDouble(11 * metrics.scale, 8, 11),
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+String _formatUsd(double? value, {String fallback = '\$0.00'}) {
+  if (value == null) {
+    return fallback;
+  }
+  return '\$${value.toStringAsFixed(2)}';
+}
+
+class _ProfileSyncBanner extends StatelessWidget {
+  const _ProfileSyncBanner({
+    required this.metrics,
+    required this.isLoading,
+    required this.errorMessage,
+    required this.onRetry,
+  });
+
+  final _ResponsiveMetrics metrics;
+  final bool isLoading;
+  final String? errorMessage;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasError = errorMessage != null && errorMessage!.trim().isNotEmpty;
+    final background = hasError
+        ? const Color(0xFFFFF3EE)
+        : const Color(0xFFEFF7F1);
+    final borderColor = hasError
+        ? const Color(0xFFFFD2C4)
+        : const Color(0xFFCBE5D2);
+    final message = isLoading
+        ? 'Refreshing restaurant profile from database...'
+        : (hasError
+              ? errorMessage!.trim()
+              : 'Restaurant profile data is up to date.');
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(
+        horizontal: _clampDouble(14 * metrics.scale, 10, 14),
+        vertical: _clampDouble(10 * metrics.scale, 8, 10),
+      ),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(
+          _clampDouble(16 * metrics.scale, 12, 16),
+        ),
+        border: Border.all(color: borderColor),
+      ),
+      child: Row(
+        children: [
+          if (isLoading)
+            SizedBox(
+              width: _clampDouble(17 * metrics.scale, 14, 17),
+              height: _clampDouble(17 * metrics.scale, 14, 17),
+              child: const CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Color(0xFF2F8A4E),
+              ),
+            )
+          else
+            Icon(
+              hasError ? Icons.error_outline_rounded : Icons.check_circle_rounded,
+              color: hasError
+                  ? const Color(0xFFCE5A3E)
+                  : const Color(0xFF2F8A4E),
+              size: _clampDouble(20 * metrics.scale, 16, 20),
+            ),
+          SizedBox(width: _clampDouble(10 * metrics.scale, 8, 10)),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: hasError
+                    ? const Color(0xFF8D4B39)
+                    : const Color(0xFF2A6F3E),
+                fontSize: _clampDouble(13 * metrics.scale, 10, 13),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          if (hasError)
+            TextButton(
+              onPressed: onRetry,
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFFE16D4D),
+                padding: EdgeInsets.symmetric(
+                  horizontal: _clampDouble(8 * metrics.scale, 6, 8),
+                ),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(
+                'Retry',
+                style: TextStyle(
+                  fontSize: _clampDouble(13 * metrics.scale, 10, 13),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OwnerProfileHero extends StatelessWidget {
+  const _OwnerProfileHero({
+    required this.metrics,
+    required this.profileInfo,
+  });
+
+  final _ResponsiveMetrics metrics;
+  final _RestaurantProfileInfo profileInfo;
 
   static String _initials(String value) {
     final words = value
@@ -478,7 +1409,7 @@ class _OwnerProfileHero extends StatelessWidget {
                 fit: StackFit.expand,
                 children: [
                   Image.network(
-                    _coverImage,
+                    profileInfo.coverImageUrl,
                     fit: BoxFit.cover,
                     errorBuilder: (context, error, stackTrace) {
                       return const DecoratedBox(
@@ -561,7 +1492,7 @@ class _OwnerProfileHero extends StatelessWidget {
               child: Column(
                 children: [
                   Text(
-                    restaurantName,
+                    profileInfo.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -572,7 +1503,7 @@ class _OwnerProfileHero extends StatelessWidget {
                   ),
                   SizedBox(height: _clampDouble(8 * metrics.scale, 5, 8)),
                   Text(
-                    'Authentic Italian | Pizza | Pasta',
+                    profileInfo.cuisineSummary,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -591,19 +1522,19 @@ class _OwnerProfileHero extends StatelessWidget {
                         metrics: metrics,
                         icon: Icons.star_rounded,
                         iconColor: const Color(0xFFF5B826),
-                        label: '4.8 (1.2k)',
+                        label: profileInfo.ratingLabel,
                       ),
                       _HeroMetaItem(
                         metrics: metrics,
-                        icon: Icons.schedule_rounded,
+                        icon: Icons.call_rounded,
                         iconColor: const Color(0xFFFF7E4D),
-                        label: '25-35 min',
+                        label: profileInfo.phoneLabel,
                       ),
                       _HeroMetaItem(
                         metrics: metrics,
-                        icon: Icons.local_shipping_rounded,
+                        icon: Icons.location_on_rounded,
                         iconColor: const Color(0xFF23A455),
-                        label: 'Free delivery',
+                        label: profileInfo.locationLabel,
                       ),
                     ],
                   ),
@@ -656,7 +1587,7 @@ class _OwnerProfileHero extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
-                      _initials(restaurantName),
+                      _initials(profileInfo.name),
                       style: TextStyle(
                         color: Colors.white,
                         fontSize:
@@ -667,7 +1598,7 @@ class _OwnerProfileHero extends StatelessWidget {
                     ),
                     SizedBox(height: _clampDouble(2 * metrics.scale, 1, 2)),
                     Text(
-                      '@$restaurantHandle',
+                      '@${profileInfo.handle}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -737,12 +1668,19 @@ class _HeroMetaItem extends StatelessWidget {
           size: _clampDouble(20 * metrics.scale, 14, 20) * 0.82,
         ),
         SizedBox(width: _clampDouble(5 * metrics.scale, 3, 5)),
-        Text(
-          label,
-          style: TextStyle(
-            color: const Color(0xFF2D241F),
-            fontSize: _clampDouble(14 * metrics.scale, 10, 14),
-            fontWeight: FontWeight.w600,
+        ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: _clampDouble(140 * metrics.scale, 92, 140),
+          ),
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: const Color(0xFF2D241F),
+              fontSize: _clampDouble(14 * metrics.scale, 10, 14),
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
       ],
@@ -1175,6 +2113,321 @@ class _OwnerMenuTagData {
   final String label;
   final Color backgroundColor;
   final Color textColor;
+}
+
+class _RestaurantProfileInfo {
+  const _RestaurantProfileInfo({
+    required this.name,
+    required this.handle,
+    required this.cuisineSummary,
+    required this.ratingLabel,
+    required this.phoneLabel,
+    required this.locationLabel,
+    required this.coverImageUrl,
+  });
+
+  static const String _defaultCoverImage =
+      'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=1400&q=80';
+
+  final String name;
+  final String handle;
+  final String cuisineSummary;
+  final String ratingLabel;
+  final String phoneLabel;
+  final String locationLabel;
+  final String coverImageUrl;
+
+  factory _RestaurantProfileInfo.fromData({
+    required String fallbackName,
+    Map<String, dynamic>? primary,
+    Map<String, dynamic>? secondary,
+  }) {
+    final allMaps = _collectMaps([primary, secondary]);
+    final sanitizedFallback = fallbackName.trim();
+
+    final name =
+        _firstString(allMaps, const [
+          'restaurant_name',
+          'business_name',
+          'store_name',
+          'name',
+          'full_name',
+          'display_name',
+        ]) ??
+        (sanitizedFallback.isEmpty ? 'Restaurant' : sanitizedFallback);
+
+    final handle = _normalizeHandle(
+      _firstString(allMaps, const ['handle', 'username', 'slug', 'restaurant_slug']) ??
+          name,
+    );
+
+    final cuisine = _firstString(allMaps, const [
+      'cuisine_type',
+      'cuisine',
+      'cuisine_name',
+      'category',
+      'food_category',
+    ]);
+    final city = _firstString(allMaps, const ['city', 'town']);
+    final country = _firstString(allMaps, const ['country']);
+    final street = _firstString(allMaps, const ['street', 'address', 'location']);
+
+    final phone = _firstString(allMaps, const [
+      'phone',
+      'phone_number',
+      'mobile',
+      'mobile_number',
+      'contact_number',
+      'telephone',
+    ]);
+
+    final rating = _firstDouble(allMaps, const [
+      'rating',
+      'average_rating',
+      'avg_rating',
+      'restaurant_rating',
+    ]);
+    final reviewsCount = _firstInt(allMaps, const [
+      'reviews_count',
+      'ratings_count',
+      'total_reviews',
+      'reviews',
+    ]);
+
+    final coverImageUrl =
+        _firstString(allMaps, const [
+          'cover_image_url',
+          'cover_image',
+          'banner_url',
+          'banner_image',
+          'hero_image',
+          'image_url',
+          'image',
+          'photo_url',
+        ]) ??
+        _defaultCoverImage;
+
+    return _RestaurantProfileInfo(
+      name: name,
+      handle: handle,
+      cuisineSummary: _buildCuisineSummary(
+        cuisine: cuisine,
+        city: city,
+        country: country,
+      ),
+      ratingLabel: _buildRatingLabel(rating, reviewsCount),
+      phoneLabel: phone ?? 'Phone unavailable',
+      locationLabel: _buildLocationLabel(
+        street: street,
+        city: city,
+        country: country,
+      ),
+      coverImageUrl: coverImageUrl,
+    );
+  }
+
+  static List<Map<String, dynamic>> _collectMaps(
+    List<Map<String, dynamic>?> sources,
+  ) {
+    final output = <Map<String, dynamic>>[];
+
+    void visit(dynamic node, int depth) {
+      if (depth > 4) {
+        return;
+      }
+
+      if (node is Map) {
+        final mapped = <String, dynamic>{};
+        node.forEach((key, value) {
+          if (key is String) {
+            mapped[key] = value;
+          }
+        });
+        if (mapped.isEmpty) {
+          return;
+        }
+        output.add(mapped);
+        for (final value in mapped.values) {
+          if (value is Map || value is List) {
+            visit(value, depth + 1);
+          }
+        }
+        return;
+      }
+
+      if (node is List) {
+        for (final item in node) {
+          if (item is Map || item is List) {
+            visit(item, depth + 1);
+          }
+        }
+      }
+    }
+
+    for (final source in sources) {
+      if (source != null) {
+        visit(source, 0);
+      }
+    }
+    return output;
+  }
+
+  static String? _firstString(
+    List<Map<String, dynamic>> maps,
+    List<String> keys,
+  ) {
+    for (final map in maps) {
+      for (final key in keys) {
+        final value = map[key];
+        final normalized = _asCleanString(value);
+        if (normalized != null) {
+          return normalized;
+        }
+      }
+    }
+    return null;
+  }
+
+  static double? _firstDouble(
+    List<Map<String, dynamic>> maps,
+    List<String> keys,
+  ) {
+    for (final map in maps) {
+      for (final key in keys) {
+        final value = map[key];
+        if (value is num) {
+          return value.toDouble();
+        }
+        if (value is String) {
+          final cleaned = value.trim();
+          if (cleaned.isEmpty) {
+            continue;
+          }
+          final parsed = double.tryParse(cleaned);
+          if (parsed != null) {
+            return parsed;
+          }
+          final match = RegExp(r'[-+]?\d*\.?\d+').firstMatch(cleaned);
+          if (match != null) {
+            final fallbackParsed = double.tryParse(match.group(0)!);
+            if (fallbackParsed != null) {
+              return fallbackParsed;
+            }
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  static int? _firstInt(List<Map<String, dynamic>> maps, List<String> keys) {
+    for (final map in maps) {
+      for (final key in keys) {
+        final value = map[key];
+        if (value is int) {
+          return value;
+        }
+        if (value is num) {
+          return value.toInt();
+        }
+        if (value is String) {
+          final cleaned = value.trim();
+          if (cleaned.isEmpty) {
+            continue;
+          }
+          final parsed = int.tryParse(cleaned);
+          if (parsed != null) {
+            return parsed;
+          }
+          final match = RegExp(r'\d+').firstMatch(cleaned);
+          if (match != null) {
+            final fallbackParsed = int.tryParse(match.group(0)!);
+            if (fallbackParsed != null) {
+              return fallbackParsed;
+            }
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  static String? _asCleanString(dynamic value) {
+    if (value is String) {
+      final cleaned = value.trim();
+      if (cleaned.isNotEmpty) {
+        return cleaned;
+      }
+    }
+    return null;
+  }
+
+  static String _normalizeHandle(String value) {
+    final cleaned = value
+        .trim()
+        .replaceAll(RegExp(r'\s+'), '')
+        .replaceAll(RegExp(r'[^A-Za-z0-9_.]'), '')
+        .toLowerCase();
+    if (cleaned.isEmpty) {
+      return 'restaurant';
+    }
+    return cleaned;
+  }
+
+  static String _buildCuisineSummary({
+    String? cuisine,
+    String? city,
+    String? country,
+  }) {
+    final parts = <String>[?cuisine, ?city, ?country];
+    if (parts.isEmpty) {
+      return 'Restaurant Partner';
+    }
+    return parts.take(3).join(' | ');
+  }
+
+  static String _buildLocationLabel({
+    String? street,
+    String? city,
+    String? country,
+  }) {
+    final locality = <String>[?city, ?country].join(', ');
+    if (locality.isNotEmpty) {
+      return locality;
+    }
+    if (street != null) {
+      return street;
+    }
+    return 'Location unavailable';
+  }
+
+  static String _buildRatingLabel(double? rating, int? reviewsCount) {
+    if (rating == null) {
+      return 'No ratings yet';
+    }
+    final ratingText = rating.toStringAsFixed(1);
+    if (reviewsCount != null && reviewsCount > 0) {
+      return '$ratingText (${_formatCompactCount(reviewsCount)})';
+    }
+    return ratingText;
+  }
+
+  static String _formatCompactCount(int value) {
+    if (value >= 1000000) {
+      return '${_trimTrailingZero((value / 1000000).toStringAsFixed(1))}M';
+    }
+    if (value >= 1000) {
+      return '${_trimTrailingZero((value / 1000).toStringAsFixed(1))}k';
+    }
+    return value.toString();
+  }
+
+  static String _trimTrailingZero(String value) {
+    if (value.endsWith('.0')) {
+      return value.substring(0, value.length - 2);
+    }
+    return value;
+  }
 }
 
 class _ResponsiveMetrics {
@@ -1647,12 +2900,12 @@ class _BottomNavBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final items = [
       (icon: Icons.home_rounded, label: 'Feed'),
-      (icon: Icons.chat_bubble_outline_rounded, label: 'Messages'),
+      (icon: Icons.restaurant_menu_rounded, label: 'Menu'),
       (
         icon: Icons.grid_view_rounded,
         label: metrics.tiny ? 'Dash' : 'Dashboard',
       ),
-      (icon: Icons.restaurant_menu_rounded, label: 'Menu'),
+      (icon: Icons.chat_bubble_outline_rounded, label: 'Messages'),
       (icon: Icons.person_outline_rounded, label: 'Profile'),
     ];
 
