@@ -4214,6 +4214,19 @@ class _EditableProfileData {
       postalCode: profile.postalCode ?? '',
     );
   }
+
+  bool matches(_EditableProfileData other) {
+    return _normalized(restaurantName) == _normalized(other.restaurantName) &&
+        _normalized(cuisineType) == _normalized(other.cuisineType) &&
+        _normalized(email) == _normalized(other.email) &&
+        _normalized(phone) == _normalized(other.phone) &&
+        _normalized(country) == _normalized(other.country) &&
+        _normalized(city) == _normalized(other.city) &&
+        _normalized(street) == _normalized(other.street) &&
+        _normalized(postalCode) == _normalized(other.postalCode);
+  }
+
+  String _normalized(String value) => value.trim();
 }
 
 class _EditProfileScreen extends StatefulWidget {
@@ -4234,6 +4247,29 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
   late final TextEditingController _cityController;
   late final TextEditingController _streetController;
   late final TextEditingController _postalCodeController;
+  bool _hasChanges = false;
+
+  List<TextEditingController> get _controllers => [
+    _restaurantNameController,
+    _cuisineTypeController,
+    _emailController,
+    _phoneController,
+    _countryController,
+    _cityController,
+    _streetController,
+    _postalCodeController,
+  ];
+
+  _EditableProfileData get _currentData => _EditableProfileData(
+    restaurantName: _restaurantNameController.text.trim(),
+    cuisineType: _cuisineTypeController.text.trim(),
+    email: _emailController.text.trim(),
+    phone: _phoneController.text.trim(),
+    country: _countryController.text.trim(),
+    city: _cityController.text.trim(),
+    street: _streetController.text.trim(),
+    postalCode: _postalCodeController.text.trim(),
+  );
 
   @override
   void initState() {
@@ -4254,18 +4290,18 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
     _postalCodeController = TextEditingController(
       text: widget.initialData.postalCode,
     );
+
+    for (final controller in _controllers) {
+      controller.addListener(_handleFormChanged);
+    }
   }
 
   @override
   void dispose() {
-    _restaurantNameController.dispose();
-    _cuisineTypeController.dispose();
-    _emailController.dispose();
-    _phoneController.dispose();
-    _countryController.dispose();
-    _cityController.dispose();
-    _streetController.dispose();
-    _postalCodeController.dispose();
+    for (final controller in _controllers) {
+      controller.removeListener(_handleFormChanged);
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -4273,17 +4309,19 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
     return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value.trim());
   }
 
+  void _handleFormChanged() {
+    final hasChanges = !_currentData.matches(widget.initialData);
+    if (hasChanges == _hasChanges) {
+      return;
+    }
+
+    setState(() {
+      _hasChanges = hasChanges;
+    });
+  }
+
   void _saveChanges() {
-    final data = _EditableProfileData(
-      restaurantName: _restaurantNameController.text.trim(),
-      cuisineType: _cuisineTypeController.text.trim(),
-      email: _emailController.text.trim(),
-      phone: _phoneController.text.trim(),
-      country: _countryController.text.trim(),
-      city: _cityController.text.trim(),
-      street: _streetController.text.trim(),
-      postalCode: _postalCodeController.text.trim(),
-    );
+    final data = _currentData;
 
     if (data.restaurantName.isEmpty ||
         data.cuisineType.isEmpty ||
@@ -4313,6 +4351,48 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
     }
 
     Navigator.of(context).pop(data);
+  }
+
+  Widget _buildSaveActionBar() {
+    return Container(
+      key: const ValueKey('save-action-bar'),
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFFE2D2), Color(0xFFFFF7F1)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFFFC8AF)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x33FF7E4D),
+            blurRadius: 22,
+            offset: Offset(0, 12),
+          ),
+        ],
+      ),
+      child: SizedBox(
+        width: double.infinity,
+        height: 46,
+        child: FilledButton(
+          onPressed: _saveChanges,
+          style: FilledButton.styleFrom(
+            elevation: 0,
+            backgroundColor: const Color(0xFFFF7E4D),
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+          ),
+          child: const Text(
+            'Save Changes',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -4400,24 +4480,47 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
       ),
       bottomNavigationBar: SafeArea(
         top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 8, 18, 18),
-          child: SizedBox(
-            height: 54,
-            child: ElevatedButton(
-              onPressed: _saveChanges,
-              style: ElevatedButton.styleFrom(
-                elevation: 0,
-                backgroundColor: const Color(0xFFFF7E4D),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
-                ),
-              ),
-              child: const Text(
-                'Save Changes',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-              ),
+        bottom: _hasChanges,
+        child: AnimatedSize(
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(18, _hasChanges ? 8 : 0, 18, 18),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 420),
+              switchInCurve: Curves.easeOutBack,
+              switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (child, animation) {
+                final slideAnimation =
+                    Tween<Offset>(
+                      begin: const Offset(0, 0.28),
+                      end: Offset.zero,
+                    ).animate(
+                      CurvedAnimation(
+                        parent: animation,
+                        curve: Curves.easeOutBack,
+                        reverseCurve: Curves.easeInCubic,
+                      ),
+                    );
+                final scaleAnimation = Tween<double>(begin: 0.94, end: 1)
+                    .animate(
+                      CurvedAnimation(
+                        parent: animation,
+                        curve: Curves.easeOutBack,
+                        reverseCurve: Curves.easeInCubic,
+                      ),
+                    );
+                return FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: slideAnimation,
+                    child: ScaleTransition(scale: scaleAnimation, child: child),
+                  ),
+                );
+              },
+              child: _hasChanges
+                  ? _buildSaveActionBar()
+                  : const SizedBox.shrink(key: ValueKey('save-action-empty')),
             ),
           ),
         ),
