@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -7,29 +8,44 @@ import '../config/app_config.dart';
 class AuthApiService {
   AuthApiService({http.Client? client}) : _client = client ?? http.Client();
 
+  static const String deviceName = 'hunger-rush-mobile';
+
   final http.Client _client;
 
-  Future<AuthResult> login({
-    required String email,
-    required String password,
-  }) {
+  Future<AuthResult> login({required String email, required String password}) {
     return _sendAuthRequest(
       endpoint: '/api/v1/auth/login',
       payload: {
         'email': email.trim(),
         'password': password,
-        'device_name': 'hunger-rush-mobile',
+        'device_name': deviceName,
       },
     );
   }
 
-  Future<AuthResult> register({
-    required Map<String, dynamic> payload,
-  }) {
+  Future<AuthResult> register({required Map<String, dynamic> payload}) {
     return _sendAuthRequest(
       endpoint: '/api/v1/auth/register',
       payload: payload,
     );
+  }
+
+  Future<AuthResult> refresh({required String refreshToken}) {
+    return _sendAuthRequest(
+      endpoint: '/api/v1/auth/refresh',
+      payload: <String, dynamic>{
+        'refresh_token': refreshToken,
+        'device_name': deviceName,
+      },
+    );
+  }
+
+  Map<String, String> authorizationHeaders(String token) {
+    return <String, String>{
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
   }
 
   Future<AuthResult> _sendAuthRequest({
@@ -38,13 +54,19 @@ class AuthApiService {
   }) async {
     http.Response response;
     try {
-      response = await _client.post(
-        AppConfig.apiUri(endpoint),
-        headers: const {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(payload),
+      response = await _client
+          .post(
+            AppConfig.apiUri(endpoint),
+            headers: const {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(payload),
+          )
+          .timeout(const Duration(seconds: 20));
+    } on TimeoutException {
+      throw const AuthApiException(
+        'Request timed out. Please check your connection and try again.',
       );
     } catch (_) {
       throw const AuthApiException(
@@ -54,9 +76,15 @@ class AuthApiService {
 
     Map<String, dynamic> data = <String, dynamic>{};
     if (response.body.isNotEmpty) {
-      final decoded = jsonDecode(response.body);
-      if (decoded is Map<String, dynamic>) {
-        data = decoded;
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic>) {
+          data = decoded;
+        }
+      } on FormatException {
+        throw const AuthApiException(
+          'Server returned an unreadable response format.',
+        );
       }
     }
 
@@ -64,7 +92,9 @@ class AuthApiService {
       return AuthResult.fromJson(data);
     }
 
-    throw AuthApiException(_extractError(data));
+    throw AuthApiException(
+      '${_extractError(data)} (HTTP ${response.statusCode})',
+    );
   }
 
   String _extractError(Map<String, dynamic> data) {
@@ -91,25 +121,36 @@ class AuthApiService {
 class AuthResult {
   const AuthResult({
     this.token,
+    this.refreshToken,
     this.user,
     this.message = 'Success',
   });
 
   final String? token;
+  final String? refreshToken;
   final Map<String, dynamic>? user;
   final String message;
 
   factory AuthResult.fromJson(Map<String, dynamic> json) {
     final data = json['data'];
-    final mappedData = data is Map<String, dynamic> ? data : <String, dynamic>{};
-    final token = (mappedData['token'] as String?) ??
+    final mappedData = data is Map<String, dynamic>
+        ? data
+        : <String, dynamic>{};
+    final token =
+        (mappedData['token'] as String?) ??
         (mappedData['access_token'] as String?) ??
         (json['token'] as String?) ??
         (json['access_token'] as String?);
+    final refreshToken =
+        (mappedData['refresh_token'] as String?) ??
+        (mappedData['refreshToken'] as String?) ??
+        (json['refresh_token'] as String?) ??
+        (json['refreshToken'] as String?);
     final user = mappedData['user'] ?? json['user'];
 
     return AuthResult(
       token: token,
+      refreshToken: refreshToken,
       user: user is Map<String, dynamic> ? user : null,
       message: (json['message'] as String?) ?? 'Success',
     );
