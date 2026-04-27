@@ -13,11 +13,13 @@ class RestaurantFeedScreen extends StatefulWidget {
     required this.restaurantName,
     this.authToken,
     this.initialUserData,
+    this.onLogout,
   });
 
   final String restaurantName;
   final String? authToken;
   final Map<String, dynamic>? initialUserData;
+  final Future<void> Function()? onLogout;
 
   @override
   State<RestaurantFeedScreen> createState() => _RestaurantFeedScreenState();
@@ -31,6 +33,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   int _selectedBottomIndex = 0;
   final _profileApiService = RestaurantProfileApiService();
   final _menuApiService = RestaurantMenuApiService();
+  bool _isLoggingOut = false;
 
   late _RestaurantProfileInfo _profileInfo;
   bool _isRefreshingProfile = false;
@@ -159,6 +162,18 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     }
   }
 
+  Future<void> _handleLogout() async {
+    final logout = widget.onLogout;
+    if (logout == null || _isLoggingOut) {
+      return;
+    }
+    setState(() => _isLoggingOut = true);
+    await logout();
+    if (mounted) {
+      setState(() => _isLoggingOut = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isProfileTabSelected) {
@@ -251,6 +266,24 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   Widget _buildProfileScaffold() {
     return Scaffold(
       backgroundColor: const Color(0xFFF8EFE8),
+      floatingActionButton: widget.onLogout == null
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: _isLoggingOut ? null : _handleLogout,
+              backgroundColor: const Color(0xFF2E2521),
+              foregroundColor: Colors.white,
+              icon: _isLoggingOut
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.logout_rounded),
+              label: Text(_isLoggingOut ? 'Signing out...' : 'Sign out'),
+            ),
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -545,10 +578,7 @@ class _ProfileSection extends StatelessWidget {
             ),
             SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
           ],
-          _OwnerProfileHero(
-            metrics: metrics,
-            profileInfo: profileInfo,
-          ),
+          _OwnerProfileHero(metrics: metrics, profileInfo: profileInfo),
           SizedBox(height: sectionGap),
           _ProfileSectionTabs(metrics: metrics, selectedIndex: 1),
           SizedBox(height: sectionGap),
@@ -666,7 +696,9 @@ class _MenuScreenHeader extends StatelessWidget {
       padding: EdgeInsets.all(_clampDouble(16 * metrics.scale, 12, 16)),
       decoration: BoxDecoration(
         color: const Color(0xFFF3F0EC),
-        borderRadius: BorderRadius.circular(_clampDouble(24 * metrics.scale, 18, 24)),
+        borderRadius: BorderRadius.circular(
+          _clampDouble(24 * metrics.scale, 18, 24),
+        ),
         border: Border.all(color: const Color(0xFFE5DACF)),
       ),
       child: Column(
@@ -845,7 +877,9 @@ class _MenuStatCard extends StatelessWidget {
       ),
       decoration: BoxDecoration(
         color: const Color(0xFFF3F0EC),
-        borderRadius: BorderRadius.circular(_clampDouble(18 * metrics.scale, 14, 18)),
+        borderRadius: BorderRadius.circular(
+          _clampDouble(18 * metrics.scale, 14, 18),
+        ),
         border: Border.all(color: const Color(0xFFE5DACF)),
       ),
       child: Row(
@@ -943,8 +977,9 @@ class _MenuSection extends StatelessWidget {
                       parent: AlwaysScrollableScrollPhysics(),
                     ),
                     itemCount: items.length,
-                    separatorBuilder: (_, _) =>
-                        SizedBox(height: _clampDouble(10 * metrics.scale, 8, 10)),
+                    separatorBuilder: (_, _) => SizedBox(
+                      height: _clampDouble(10 * metrics.scale, 8, 10),
+                    ),
                     itemBuilder: (context, index) {
                       return _ManagedMenuItemCard(
                         metrics: metrics,
@@ -1089,7 +1124,9 @@ class _ManagedMenuItemCard extends StatelessWidget {
       padding: EdgeInsets.all(_clampDouble(12 * metrics.scale, 10, 12)),
       decoration: BoxDecoration(
         color: const Color(0xFFF4F1ED),
-        borderRadius: BorderRadius.circular(_clampDouble(22 * metrics.scale, 18, 22)),
+        borderRadius: BorderRadius.circular(
+          _clampDouble(22 * metrics.scale, 18, 22),
+        ),
         border: Border.all(color: const Color(0xFFE4D9CF)),
       ),
       child: Row(
@@ -1318,7 +1355,9 @@ class _ProfileSyncBanner extends StatelessWidget {
             )
           else
             Icon(
-              hasError ? Icons.error_outline_rounded : Icons.check_circle_rounded,
+              hasError
+                  ? Icons.error_outline_rounded
+                  : Icons.check_circle_rounded,
               color: hasError
                   ? const Color(0xFFCE5A3E)
                   : const Color(0xFF2F8A4E),
@@ -1363,10 +1402,7 @@ class _ProfileSyncBanner extends StatelessWidget {
 }
 
 class _OwnerProfileHero extends StatelessWidget {
-  const _OwnerProfileHero({
-    required this.metrics,
-    required this.profileInfo,
-  });
+  const _OwnerProfileHero({required this.metrics, required this.profileInfo});
 
   final _ResponsiveMetrics metrics;
   final _RestaurantProfileInfo profileInfo;
@@ -2157,7 +2193,12 @@ class _RestaurantProfileInfo {
         (sanitizedFallback.isEmpty ? 'Restaurant' : sanitizedFallback);
 
     final handle = _normalizeHandle(
-      _firstString(allMaps, const ['handle', 'username', 'slug', 'restaurant_slug']) ??
+      _firstString(allMaps, const [
+            'handle',
+            'username',
+            'slug',
+            'restaurant_slug',
+          ]) ??
           name,
     );
 
@@ -2170,7 +2211,11 @@ class _RestaurantProfileInfo {
     ]);
     final city = _firstString(allMaps, const ['city', 'town']);
     final country = _firstString(allMaps, const ['country']);
-    final street = _firstString(allMaps, const ['street', 'address', 'location']);
+    final street = _firstString(allMaps, const [
+      'street',
+      'address',
+      'location',
+    ]);
 
     final phone = _firstString(allMaps, const [
       'phone',

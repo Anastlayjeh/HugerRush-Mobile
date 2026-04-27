@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -7,6 +8,8 @@ import '../config/app_config.dart';
 class AuthApiService {
   AuthApiService({http.Client? client}) : _client = client ?? http.Client();
 
+  static const String deviceName = 'hunger-rush-mobile';
+
   final http.Client _client;
 
   Future<AuthResult> login({required String email, required String password}) {
@@ -15,7 +18,7 @@ class AuthApiService {
       payload: {
         'email': email.trim(),
         'password': password,
-        'device_name': 'hunger-rush-mobile',
+        'device_name': deviceName,
       },
     );
   }
@@ -27,19 +30,43 @@ class AuthApiService {
     );
   }
 
+  Future<AuthResult> refresh({required String refreshToken}) {
+    return _sendAuthRequest(
+      endpoint: '/api/v1/auth/refresh',
+      payload: <String, dynamic>{
+        'refresh_token': refreshToken,
+        'device_name': deviceName,
+      },
+    );
+  }
+
+  Map<String, String> authorizationHeaders(String token) {
+    return <String, String>{
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
+  }
+
   Future<AuthResult> _sendAuthRequest({
     required String endpoint,
     required Map<String, dynamic> payload,
   }) async {
     http.Response response;
     try {
-      response = await _client.post(
-        AppConfig.apiUri(endpoint),
-        headers: const {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(payload),
+      response = await _client
+          .post(
+            AppConfig.apiUri(endpoint),
+            headers: const {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(payload),
+          )
+          .timeout(const Duration(seconds: 20));
+    } on TimeoutException {
+      throw const AuthApiException(
+        'Request timed out. Please check your connection and try again.',
       );
     } catch (error) {
       throw AuthApiException(
@@ -57,7 +84,11 @@ class AuthApiService {
           data = decoded;
         }
       } on FormatException {
-        // Keep data empty when backend responds with non-JSON body.
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          throw const AuthApiException(
+            'Server returned an unreadable response format.',
+          );
+        }
       }
     }
 
@@ -65,7 +96,9 @@ class AuthApiService {
       return AuthResult.fromJson(data);
     }
 
-    throw AuthApiException(_extractError(data));
+    throw AuthApiException(
+      '${_extractError(data)} (HTTP ${response.statusCode})',
+    );
   }
 
   String _extractError(Map<String, dynamic> data) {
@@ -92,12 +125,14 @@ class AuthApiService {
 class AuthResult {
   const AuthResult({
     this.token,
+    this.refreshToken,
     this.user,
     this.role,
     this.message = 'Success',
   });
 
   final String? token;
+  final String? refreshToken;
   final Map<String, dynamic>? user;
   final dynamic role;
   final String message;
@@ -112,6 +147,11 @@ class AuthResult {
         (mappedData['access_token'] as String?) ??
         (json['token'] as String?) ??
         (json['access_token'] as String?);
+    final refreshToken =
+        (mappedData['refresh_token'] as String?) ??
+        (mappedData['refreshToken'] as String?) ??
+        (json['refresh_token'] as String?) ??
+        (json['refreshToken'] as String?);
     final user = mappedData['user'] ?? json['user'];
     final role =
         mappedData['role'] ??
@@ -127,6 +167,7 @@ class AuthResult {
 
     return AuthResult(
       token: token,
+      refreshToken: refreshToken,
       user: user is Map<String, dynamic> ? user : null,
       role: role,
       message: (json['message'] as String?) ?? 'Success',

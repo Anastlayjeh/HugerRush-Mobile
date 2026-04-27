@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
-import 'screens/login_screen.dart';
+import 'config/app_config.dart';
+import 'screens/app_shell.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  AppConfig.validate();
   runApp(const HungerRushApp());
 }
 
@@ -18,7 +21,7 @@ class HungerRushApp extends StatelessWidget {
         useMaterial3: true,
         scaffoldBackgroundColor: const Color(0xFFF8EFE8),
       ),
-      home: const LoginScreen(),
+      home: const AppShell(),
     );
   }
 }
