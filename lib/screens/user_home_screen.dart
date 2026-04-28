@@ -1,7 +1,27 @@
 import 'package:flutter/material.dart';
 
+import '../models/demo_app_models.dart';
+import '../services/demo_app_repository.dart';
+import 'app_support_screens.dart';
+
 double _clampDouble(double value, double min, double max) {
   return value.clamp(min, max).toDouble();
+}
+
+String _formatCompactCount(int value) {
+  if (value >= 1000000) {
+    final millions = (value / 1000000).toStringAsFixed(1);
+    return millions.endsWith('.0')
+        ? '${millions.substring(0, millions.length - 2)}M'
+        : '${millions}M';
+  }
+  if (value >= 1000) {
+    final thousands = (value / 1000).toStringAsFixed(1);
+    return thousands.endsWith('.0')
+        ? '${thousands.substring(0, thousands.length - 2)}k'
+        : '${thousands}k';
+  }
+  return value.toString();
 }
 
 class UserHomeScreen extends StatefulWidget {
@@ -14,15 +34,147 @@ class UserHomeScreen extends StatefulWidget {
 }
 
 class _UserHomeScreenState extends State<UserHomeScreen> {
+  final _repository = DemoAppRepository.instance;
   int _selectedTopTab = 1;
   int _selectedBottomIndex = 0;
+  late DemoFeedPost _feedPost;
 
-  String get _userHandle {
-    final cleaned = widget.userName.trim();
-    if (cleaned.isEmpty) {
-      return 'FoodExplorer';
+  @override
+  void initState() {
+    super.initState();
+    _syncFeedPost();
+  }
+
+  void _syncFeedPost() {
+    _feedPost = _repository.getFeedPost(following: _selectedTopTab == 0);
+  }
+
+  Future<void> _openSearch() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const SearchScreen()));
+  }
+
+  Future<void> _openNotifications() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
+    );
+  }
+
+  Future<void> _openRestaurantDetails() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => RestaurantDetailsScreen(
+          restaurantName: _feedPost.restaurantName,
+          handle: _feedPost.restaurantHandle,
+          rating: _feedPost.rating,
+          caption: _feedPost.caption,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _toggleFollow() async {
+    final updated = await _repository.toggleFollow(_feedPost.id);
+    if (!mounted) {
+      return;
     }
-    return cleaned.replaceAll(RegExp(r'\s+'), '');
+    setState(() => _feedPost = updated);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          updated.isFollowing
+              ? 'Added ${updated.restaurantName} to following.'
+              : 'Removed ${updated.restaurantName} from following.',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _toggleLike() async {
+    final updated = await _repository.toggleLike(_feedPost.id);
+    if (!mounted) {
+      return;
+    }
+    setState(() => _feedPost = updated);
+  }
+
+  Future<void> _openComments() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CommentsScreen(
+          postId: _feedPost.id,
+          postTitle: _feedPost.restaurantName,
+        ),
+      ),
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() => _syncFeedPost());
+  }
+
+  Future<void> _sharePromo() async {
+    await showShareFallbackDialog(
+      context,
+      title: _feedPost.restaurantName,
+      body: _feedPost.caption,
+    );
+  }
+
+  Future<void> _openPromoDetails() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PromoDetailsScreen(
+          title: _feedPost.restaurantName,
+          caption: _feedPost.caption,
+          audioLabel: _feedPost.audioLabel,
+        ),
+      ),
+    );
+  }
+
+  void _handleBottomNav(int index) {
+    if (index == 0) {
+      setState(() => _selectedBottomIndex = index);
+      return;
+    }
+    Widget destination;
+    switch (index) {
+      case 1:
+        destination = const SearchScreen();
+        break;
+      case 2:
+        destination = OrderListScreen(
+          title: 'My Orders',
+          orders: _repository.getOrders(),
+        );
+        break;
+      case 3:
+        destination = const SimplePlaceholderScreen(
+          title: 'Customer Chat',
+          message: 'Customer support and order chat can plug in here.',
+        );
+        break;
+      case 4:
+        destination = const SimplePlaceholderScreen(
+          title: 'My Profile',
+          message: 'Customer profile details can be connected here.',
+        );
+        break;
+      default:
+        return;
+    }
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => destination));
+  }
+
+  void _handleTopTabSelected(int index) {
+    setState(() {
+      _selectedTopTab = index;
+      _syncFeedPost();
+    });
   }
 
   @override
@@ -64,9 +216,9 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
                       _TopControls(
                         metrics: metrics,
                         selectedTab: _selectedTopTab,
-                        onTabSelected: (index) {
-                          setState(() => _selectedTopTab = index);
-                        },
+                        onTabSelected: _handleTopTabSelected,
+                        onOpenSearch: _openSearch,
+                        onOpenNotifications: _openNotifications,
                       ),
                       SizedBox(height: metrics.gapAfterTop),
                       Expanded(
@@ -77,25 +229,37 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
                             children: [
                               Expanded(
                                 child: _FeedDetails(
-                                  userHandle: _userHandle,
+                                  post: _feedPost,
                                   metrics: metrics,
+                                  onOpenRestaurant: _openRestaurantDetails,
+                                  onOpenAudio: _openPromoDetails,
                                 ),
                               ),
                               SizedBox(width: metrics.railGap),
-                              _ActionRail(metrics: metrics),
+                              _ActionRail(
+                                metrics: metrics,
+                                post: _feedPost,
+                                onOpenRestaurant: _openRestaurantDetails,
+                                onToggleFollow: _toggleFollow,
+                                onToggleLike: _toggleLike,
+                                onOpenComments: _openComments,
+                                onShare: _sharePromo,
+                              ),
                             ],
                           ),
                         ),
                       ),
                       SizedBox(height: metrics.sectionGapSmall),
-                      _OrderNowBar(metrics: metrics),
+                      _OrderNowBar(
+                        metrics: metrics,
+                        onTap: _openRestaurantDetails,
+                        onMoreTap: _sharePromo,
+                      ),
                       SizedBox(height: metrics.sectionGapSmall),
                       _BottomNavBar(
                         metrics: metrics,
                         selectedIndex: _selectedBottomIndex,
-                        onSelected: (index) {
-                          setState(() => _selectedBottomIndex = index);
-                        },
+                        onSelected: _handleBottomNav,
                       ),
                     ],
                   ),
@@ -211,10 +375,21 @@ class _ResponsiveMetrics {
 
   double get horizontalPadding => _clampDouble(width * 0.043, 12, 18);
   double get topPadding => _clampDouble(height * 0.012, 8, 14);
-  double get bottomPadding => _clampDouble(height * 0.009, 8, 12);
+  double get bottomPadding => compact
+      ? _clampDouble(height * 0.007, 6, 10)
+      : _clampDouble(height * 0.009, 8, 12);
   double get sideGap => _clampDouble(16 * scale, 8, 16);
   double get gapAfterTop => _clampDouble(12 * scale, 6, 12);
-  double get sectionGapSmall => _clampDouble(14 * scale, 8, 14);
+  double get sectionGapSmall {
+    if (tiny) {
+      return _clampDouble(8 * scale, 4, 8);
+    }
+    if (compact) {
+      return _clampDouble(12 * scale, 6, 12);
+    }
+    return _clampDouble(14 * scale, 8, 14);
+  }
+
   double get railGap => _clampDouble(10 * scale, 6, 10);
   double get railWidth => _clampDouble(78 * scale, 60, 78);
   double get railItemGap => _clampDouble(14 * scale, 8, 14);
@@ -239,14 +414,20 @@ class _ResponsiveMetrics {
   double get actionIconSize => _clampDouble(34 * scale, 24, 34);
   double get actionTextSize => _clampDouble(14 * scale, 11, 14);
 
-  double get ctaHeight => _clampDouble(66 * scale, 50, 66);
-  double get ctaRadius => _clampDouble(33 * scale, 24, 33);
+  double get ctaHeight => tiny
+      ? _clampDouble(58 * scale, 44, 58)
+      : _clampDouble(66 * scale, 50, 66);
+  double get ctaRadius => tiny
+      ? _clampDouble(30 * scale, 22, 30)
+      : _clampDouble(33 * scale, 24, 33);
   double get ctaMainSize => _clampDouble(28 * scale, 20, 28);
   double get ctaSubSize => _clampDouble(11 * scale, 8.5, 11);
   double get ctaPriceSize => _clampDouble(24 * scale, 16, 24);
   double get ctaIconSize => _clampDouble(22 * scale, 15, 22);
 
-  double get navHeight => _clampDouble(96 * scale, 72, 96);
+  double get navHeight => tiny
+      ? _clampDouble(86 * scale, 66, 86)
+      : _clampDouble(96 * scale, 72, 96);
   double get navRadius => _clampDouble(32 * scale, 22, 32);
   double get navIconSize => _clampDouble(30 * scale, 21, 30);
   double get navLabelSize => _clampDouble(12.5 * scale, 9, 12.5);
@@ -257,17 +438,26 @@ class _TopControls extends StatelessWidget {
     required this.metrics,
     required this.selectedTab,
     required this.onTabSelected,
+    required this.onOpenSearch,
+    required this.onOpenNotifications,
   });
 
   final _ResponsiveMetrics metrics;
   final int selectedTab;
   final ValueChanged<int> onTabSelected;
+  final VoidCallback onOpenSearch;
+  final VoidCallback onOpenNotifications;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        _RoundIconButton(icon: Icons.search_rounded, metrics: metrics),
+        _RoundIconButton(
+          icon: Icons.search_rounded,
+          metrics: metrics,
+          onTap: onOpenSearch,
+          tooltip: 'Search',
+        ),
         SizedBox(width: metrics.sideGap),
         Expanded(
           child: Center(
@@ -295,6 +485,8 @@ class _TopControls extends StatelessWidget {
         _RoundIconButton(
           icon: Icons.notifications_none_rounded,
           metrics: metrics,
+          onTap: onOpenNotifications,
+          tooltip: 'Notifications',
         ),
       ],
     );
@@ -355,31 +547,59 @@ class _TopTab extends StatelessWidget {
 }
 
 class _RoundIconButton extends StatelessWidget {
-  const _RoundIconButton({required this.icon, required this.metrics});
+  const _RoundIconButton({
+    required this.icon,
+    required this.metrics,
+    required this.onTap,
+    required this.tooltip,
+  });
 
   final IconData icon;
   final _ResponsiveMetrics metrics;
+  final VoidCallback onTap;
+  final String tooltip;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: metrics.topControlButtonSize,
-      height: metrics.topControlButtonSize,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: const Color(0x38FFFFFF),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Tooltip(
+          message: tooltip,
+          child: Container(
+            width: metrics.topControlButtonSize,
+            height: metrics.topControlButtonSize,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0x38FFFFFF),
+              border: Border.all(color: const Color(0x26FFFFFF)),
+            ),
+            child: Icon(
+              icon,
+              color: Colors.white,
+              size: metrics.topControlIconSize,
+            ),
+          ),
+        ),
       ),
-      child: Icon(icon, color: Colors.white, size: metrics.topControlIconSize),
     );
   }
 }
 
 class _FeedDetails extends StatelessWidget {
-  const _FeedDetails({required this.userHandle, required this.metrics});
+  const _FeedDetails({
+    required this.post,
+    required this.metrics,
+    required this.onOpenRestaurant,
+    required this.onOpenAudio,
+  });
 
-  final String userHandle;
+  final DemoFeedPost post;
   final _ResponsiveMetrics metrics;
+  final VoidCallback onOpenRestaurant;
+  final VoidCallback onOpenAudio;
 
   @override
   Widget build(BuildContext context) {
@@ -387,72 +607,76 @@ class _FeedDetails extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Flexible(
-              child: RichText(
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                text: TextSpan(
-                  children: [
-                    TextSpan(
-                      text: '@',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: metrics.handleAtFontSize,
-                        height: 1.1,
-                        fontWeight: FontWeight.w800,
+        InkWell(
+          onTap: onOpenRestaurant,
+          borderRadius: BorderRadius.circular(20),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Flexible(
+                child: RichText(
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  text: TextSpan(
+                    children: [
+                      TextSpan(
+                        text: '@',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: metrics.handleAtFontSize,
+                          height: 1.1,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
+                      TextSpan(
+                        text: post.restaurantHandle,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: metrics.handleFontSize,
+                          height: 1,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              SizedBox(width: _clampDouble(8 * metrics.scale, 4, 8)),
+              Container(
+                padding: EdgeInsets.symmetric(
+                  horizontal: _clampDouble(10 * metrics.scale, 7, 10),
+                  vertical: _clampDouble(6 * metrics.scale, 4, 6),
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xBF2E2521),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.star_rounded,
+                      color: const Color(0xFFF9C949),
+                      size: metrics.ratingStarSize,
                     ),
-                    TextSpan(
-                      text: userHandle,
+                    SizedBox(width: _clampDouble(4 * metrics.scale, 2, 4)),
+                    Text(
+                      post.rating.toStringAsFixed(1),
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: metrics.handleFontSize,
-                        height: 1,
-                        fontWeight: FontWeight.w900,
+                        fontSize: metrics.ratingFontSize,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                   ],
                 ),
               ),
-            ),
-            SizedBox(width: _clampDouble(8 * metrics.scale, 4, 8)),
-            Container(
-              padding: EdgeInsets.symmetric(
-                horizontal: _clampDouble(10 * metrics.scale, 7, 10),
-                vertical: _clampDouble(6 * metrics.scale, 4, 6),
-              ),
-              decoration: BoxDecoration(
-                color: const Color(0xBF2E2521),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.star_rounded,
-                    color: const Color(0xFFF9C949),
-                    size: metrics.ratingStarSize,
-                  ),
-                  SizedBox(width: _clampDouble(4 * metrics.scale, 2, 4)),
-                  Text(
-                    '4.8',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: metrics.ratingFontSize,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
         SizedBox(height: _clampDouble(8 * metrics.scale, 4, 8)),
         Text(
-          'Feeling hungry? Our new Pepperoni Feast is here. Cheesy and absolutely delicious.',
+          post.caption,
           maxLines: metrics.tiny ? 2 : 3,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
@@ -464,7 +688,7 @@ class _FeedDetails extends StatelessWidget {
         ),
         SizedBox(height: _clampDouble(4 * metrics.scale, 2, 4)),
         Text(
-          '#pizza #yum #foodie',
+          post.tags,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
@@ -474,27 +698,31 @@ class _FeedDetails extends StatelessWidget {
           ),
         ),
         SizedBox(height: _clampDouble(12 * metrics.scale, 6, 14)),
-        Row(
-          children: [
-            Icon(
-              Icons.music_note_rounded,
-              color: Colors.white,
-              size: _clampDouble(metrics.audioFontSize + 4, 14, 20),
-            ),
-            SizedBox(width: _clampDouble(6 * metrics.scale, 4, 6)),
-            Flexible(
-              child: Text(
-                'Original Audio - Bella Italia Promo',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: const Color(0xD9FFFFFF),
-                  fontSize: metrics.audioFontSize,
-                  fontWeight: FontWeight.w600,
+        InkWell(
+          onTap: onOpenAudio,
+          borderRadius: BorderRadius.circular(16),
+          child: Row(
+            children: [
+              Icon(
+                Icons.music_note_rounded,
+                color: Colors.white,
+                size: _clampDouble(metrics.audioFontSize + 4, 14, 20),
+              ),
+              SizedBox(width: _clampDouble(6 * metrics.scale, 4, 6)),
+              Flexible(
+                child: Text(
+                  post.audioLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: const Color(0xD9FFFFFF),
+                    fontSize: metrics.audioFontSize,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ],
     );
@@ -502,9 +730,23 @@ class _FeedDetails extends StatelessWidget {
 }
 
 class _ActionRail extends StatelessWidget {
-  const _ActionRail({required this.metrics});
+  const _ActionRail({
+    required this.metrics,
+    required this.post,
+    required this.onOpenRestaurant,
+    required this.onToggleFollow,
+    required this.onToggleLike,
+    required this.onOpenComments,
+    required this.onShare,
+  });
 
   final _ResponsiveMetrics metrics;
+  final DemoFeedPost post;
+  final VoidCallback onOpenRestaurant;
+  final VoidCallback onToggleFollow;
+  final VoidCallback onToggleLike;
+  final VoidCallback onOpenComments;
+  final VoidCallback onShare;
 
   @override
   Widget build(BuildContext context) {
@@ -513,25 +755,33 @@ class _ActionRail extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _CreatorAvatar(metrics: metrics),
+          _CreatorAvatar(
+            metrics: metrics,
+            isFollowing: post.isFollowing,
+            onOpenRestaurant: onOpenRestaurant,
+            onToggleFollow: onToggleFollow,
+          ),
           SizedBox(height: metrics.railItemGap),
           _ActionButton(
             icon: Icons.favorite_rounded,
-            value: '4.2k',
-            iconColor: const Color(0xFFFF7E4D),
+            value: _formatCompactCount(post.likeCount),
+            iconColor: post.isLiked ? const Color(0xFFFF7E4D) : Colors.white,
             metrics: metrics,
+            onTap: onToggleLike,
           ),
           SizedBox(height: metrics.railItemGap),
           _ActionButton(
             icon: Icons.mode_comment_outlined,
-            value: '156',
+            value: _formatCompactCount(post.commentCount),
             metrics: metrics,
+            onTap: onOpenComments,
           ),
           SizedBox(height: metrics.railItemGap),
           _ActionButton(
             icon: Icons.share_outlined,
             value: 'Share',
             metrics: metrics,
+            onTap: onShare,
           ),
         ],
       ),
@@ -540,55 +790,71 @@ class _ActionRail extends StatelessWidget {
 }
 
 class _CreatorAvatar extends StatelessWidget {
-  const _CreatorAvatar({required this.metrics});
+  const _CreatorAvatar({
+    required this.metrics,
+    required this.isFollowing,
+    required this.onOpenRestaurant,
+    required this.onToggleFollow,
+  });
 
   final _ResponsiveMetrics metrics;
+  final bool isFollowing;
+  final VoidCallback onOpenRestaurant;
+  final VoidCallback onToggleFollow;
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        Container(
-          width: metrics.creatorSize,
-          height: metrics.creatorSize,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 2),
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF135D42), Color(0xFF0E3D2D)],
+        InkWell(
+          onTap: onOpenRestaurant,
+          customBorder: const CircleBorder(),
+          child: Container(
+            width: metrics.creatorSize,
+            height: metrics.creatorSize,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2),
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF135D42), Color(0xFF0E3D2D)],
+              ),
             ),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            'BELLA ITALIA',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: _clampDouble(8 * metrics.scale, 6, 8),
-              height: 1.2,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.3,
+            alignment: Alignment.center,
+            child: Text(
+              'BELLA ITALIA',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: _clampDouble(8 * metrics.scale, 6, 8),
+                height: 1.2,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.3,
+              ),
             ),
           ),
         ),
         Positioned(
           bottom: -4,
           right: -4,
-          child: Container(
-            width: metrics.creatorPlusSize,
-            height: metrics.creatorPlusSize,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xFFFF7E4D),
-              border: Border.all(color: Colors.white, width: 2),
-            ),
-            child: Icon(
-              Icons.add_rounded,
-              color: Colors.white,
-              size: metrics.creatorPlusSize * 0.62,
+          child: InkWell(
+            onTap: onToggleFollow,
+            customBorder: const CircleBorder(),
+            child: Container(
+              width: metrics.creatorPlusSize,
+              height: metrics.creatorPlusSize,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0xFFFF7E4D),
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+              child: Icon(
+                isFollowing ? Icons.check_rounded : Icons.add_rounded,
+                color: Colors.white,
+                size: metrics.creatorPlusSize * 0.62,
+              ),
             ),
           ),
         ),
@@ -602,6 +868,7 @@ class _ActionButton extends StatelessWidget {
     required this.icon,
     required this.value,
     required this.metrics,
+    required this.onTap,
     this.iconColor = Colors.white,
   });
 
@@ -609,20 +876,28 @@ class _ActionButton extends StatelessWidget {
   final String value;
   final _ResponsiveMetrics metrics;
   final Color iconColor;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Container(
-          width: metrics.actionBubbleSize,
-          height: metrics.actionBubbleSize,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: const Color(0x36FFFFFF),
-            border: Border.all(color: const Color(0x2BFFFFFF)),
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            customBorder: const CircleBorder(),
+            child: Container(
+              width: metrics.actionBubbleSize,
+              height: metrics.actionBubbleSize,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0x36FFFFFF),
+                border: Border.all(color: const Color(0x2BFFFFFF)),
+              ),
+              child: Icon(icon, color: iconColor, size: metrics.actionIconSize),
+            ),
           ),
-          child: Icon(icon, color: iconColor, size: metrics.actionIconSize),
         ),
         SizedBox(height: _clampDouble(6 * metrics.scale, 3, 6)),
         Text(
@@ -641,9 +916,15 @@ class _ActionButton extends StatelessWidget {
 }
 
 class _OrderNowBar extends StatelessWidget {
-  const _OrderNowBar({required this.metrics});
+  const _OrderNowBar({
+    required this.metrics,
+    required this.onTap,
+    required this.onMoreTap,
+  });
 
   final _ResponsiveMetrics metrics;
+  final VoidCallback onTap;
+  final VoidCallback onMoreTap;
 
   @override
   Widget build(BuildContext context) {
@@ -652,138 +933,160 @@ class _OrderNowBar extends StatelessWidget {
         final compact = constraints.maxWidth < 360;
         final showMoreButton = constraints.maxWidth >= 340;
 
-        return Container(
-          height: metrics.ctaHeight,
-          padding: EdgeInsets.symmetric(
-            horizontal: _clampDouble(12 * metrics.scale, 8, 12),
-            vertical: _clampDouble(8 * metrics.scale, 5, 8),
-          ),
-          decoration: BoxDecoration(
-            color: const Color(0xFFFF8A5B),
-            borderRadius: BorderRadius.circular(metrics.ctaRadius),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x4A5A2B17),
-                blurRadius: 14,
-                offset: Offset(0, 6),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: _clampDouble(42 * metrics.scale, 30, 42),
-                height: _clampDouble(42 * metrics.scale, 30, 42),
-                decoration: const BoxDecoration(
-                  color: Color(0x2EFFFFFF),
-                  shape: BoxShape.circle,
+        return InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(metrics.ctaRadius),
+          child: Container(
+            height: metrics.ctaHeight,
+            padding: EdgeInsets.symmetric(
+              horizontal: _clampDouble(12 * metrics.scale, 8, 12),
+              vertical: _clampDouble(8 * metrics.scale, 5, 8),
+            ),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFF8A5B),
+              borderRadius: BorderRadius.circular(metrics.ctaRadius),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x4A5A2B17),
+                  blurRadius: 14,
+                  offset: Offset(0, 6),
                 ),
-                child: Icon(
-                  Icons.restaurant_menu_rounded,
-                  color: Colors.white,
-                  size: metrics.ctaIconSize,
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: _clampDouble(42 * metrics.scale, 30, 42),
+                  height: _clampDouble(42 * metrics.scale, 30, 42),
+                  decoration: const BoxDecoration(
+                    color: Color(0x2EFFFFFF),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.restaurant_menu_rounded,
+                    color: Colors.white,
+                    size: metrics.ctaIconSize,
+                  ),
                 ),
-              ),
-              SizedBox(width: _clampDouble(12 * metrics.scale, 6, 12)),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Order Now',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: compact
-                            ? _clampDouble(metrics.ctaMainSize - 4, 16, 24)
-                            : metrics.ctaMainSize,
-                        height: 1,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    SizedBox(height: _clampDouble(3 * metrics.scale, 1, 3)),
-                    Text(
-                      'DELIVERY IN 25M',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: const Color(0xF2FFFFFF),
-                        fontSize: metrics.ctaSubSize,
-                        letterSpacing: 0.8,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              SizedBox(width: _clampDouble(6 * metrics.scale, 2, 6)),
-              Flexible(
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 1,
-                          margin: EdgeInsets.symmetric(
-                            horizontal: _clampDouble(8 * metrics.scale, 4, 8),
-                            vertical: _clampDouble(6 * metrics.scale, 4, 6),
-                          ),
-                          color: const Color(0x58FFFFFF),
+                SizedBox(width: _clampDouble(12 * metrics.scale, 6, 12)),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Order Now',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: compact
+                              ? _clampDouble(metrics.ctaMainSize - 4, 16, 24)
+                              : metrics.ctaMainSize,
+                          height: 1,
+                          fontWeight: FontWeight.w900,
                         ),
-                        Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: _clampDouble(14 * metrics.scale, 8, 14),
-                            vertical: _clampDouble(8 * metrics.scale, 4, 8),
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0x1DFFFFFF),
-                            borderRadius: BorderRadius.circular(24),
-                            border: Border.all(color: const Color(0x49FFFFFF)),
-                          ),
-                          child: Text(
-                            '\$14.99',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: compact
-                                  ? _clampDouble(
-                                      metrics.ctaPriceSize - 3,
-                                      14,
-                                      20,
-                                    )
-                                  : metrics.ctaPriceSize,
-                              fontWeight: FontWeight.w900,
+                      ),
+                      SizedBox(height: _clampDouble(3 * metrics.scale, 1, 3)),
+                      Text(
+                        'DELIVERY IN 25M',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: const Color(0xF2FFFFFF),
+                          fontSize: metrics.ctaSubSize,
+                          letterSpacing: 0.8,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(width: _clampDouble(6 * metrics.scale, 2, 6)),
+                Flexible(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 1,
+                            margin: EdgeInsets.symmetric(
+                              horizontal: _clampDouble(8 * metrics.scale, 4, 8),
+                              vertical: _clampDouble(6 * metrics.scale, 4, 6),
                             ),
-                          ),
-                        ),
-                        if (showMoreButton) ...[
-                          SizedBox(
-                            width: _clampDouble(8 * metrics.scale, 4, 8),
+                            color: const Color(0x58FFFFFF),
                           ),
                           Container(
-                            width: _clampDouble(34 * metrics.scale, 24, 34),
-                            height: _clampDouble(34 * metrics.scale, 24, 34),
-                            decoration: const BoxDecoration(
-                              color: Color(0x1DFFFFFF),
-                              shape: BoxShape.circle,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: _clampDouble(
+                                14 * metrics.scale,
+                                8,
+                                14,
+                              ),
+                              vertical: _clampDouble(8 * metrics.scale, 4, 8),
                             ),
-                            child: Icon(
-                              Icons.more_horiz_rounded,
-                              color: Colors.white,
-                              size: _clampDouble(22 * metrics.scale, 14, 22),
+                            decoration: BoxDecoration(
+                              color: const Color(0x1DFFFFFF),
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(
+                                color: const Color(0x49FFFFFF),
+                              ),
+                            ),
+                            child: Text(
+                              '\$14.99',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: compact
+                                    ? _clampDouble(
+                                        metrics.ctaPriceSize - 3,
+                                        14,
+                                        20,
+                                      )
+                                    : metrics.ctaPriceSize,
+                                fontWeight: FontWeight.w900,
+                              ),
                             ),
                           ),
+                          if (showMoreButton) ...[
+                            SizedBox(
+                              width: _clampDouble(8 * metrics.scale, 4, 8),
+                            ),
+                            InkWell(
+                              onTap: onMoreTap,
+                              customBorder: const CircleBorder(),
+                              child: Container(
+                                width: _clampDouble(34 * metrics.scale, 24, 34),
+                                height: _clampDouble(
+                                  34 * metrics.scale,
+                                  24,
+                                  34,
+                                ),
+                                decoration: const BoxDecoration(
+                                  color: Color(0x1DFFFFFF),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  Icons.more_horiz_rounded,
+                                  color: Colors.white,
+                                  size: _clampDouble(
+                                    22 * metrics.scale,
+                                    14,
+                                    22,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -816,7 +1119,7 @@ class _BottomNavBar extends StatelessWidget {
       height: metrics.navHeight,
       padding: EdgeInsets.symmetric(
         horizontal: metrics.compact ? 6 : 10,
-        vertical: metrics.compact ? 6 : 8,
+        vertical: metrics.tiny ? 4 : (metrics.compact ? 6 : 8),
       ),
       decoration: BoxDecoration(
         color: const Color(0xFFF8F5F2),
