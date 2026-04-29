@@ -225,15 +225,46 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   }
 
   Future<void> _openRestaurantDetails() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => RestaurantDetailsScreen(
-          restaurantName: _vendorFeedPost.restaurantName,
-          handle: _vendorFeedPost.restaurantHandle,
-          rating: _vendorFeedPost.rating,
-          caption: _vendorFeedPost.caption,
-        ),
-      ),
+    final videoPreviews = _uploadedVideos
+        .map(
+          (video) => RestaurantProfileVideoPreview(
+            title: video.name,
+            meta:
+                '${_formatFileSize(video.sizeBytes)} - ${_timeAgoShort(video.uploadedAt)}',
+          ),
+        )
+        .toList();
+    final customerComments = _demoRepository
+        .getComments(_vendorFeedPost.id)
+        .where((comment) => !comment.isRestaurantReply)
+        .toList();
+    final reviewPreviews = customerComments.asMap().entries.map((entry) {
+      final index = entry.key;
+      final comment = entry.value;
+      final simulatedRating = (4.9 - (index * 0.15)).clamp(4.0, 5.0).toDouble();
+      return RestaurantProfileReviewPreview(
+        customerName: comment.authorName,
+        rating: simulatedRating,
+        comment: comment.body,
+        timeLabel: _timeAgoShort(comment.createdAt),
+        orderLabel: '#47${20 + index}',
+      );
+    }).toList();
+
+    await showRestaurantProfilePopup(
+      context,
+      restaurantName: _vendorFeedPost.restaurantName,
+      handle: _vendorFeedPost.restaurantHandle,
+      rating: _vendorFeedPost.rating,
+      caption: _vendorFeedPost.caption,
+      cuisineSummary: _profileInfo.cuisineSummary,
+      phoneLabel: _profileInfo.phoneLabel,
+      locationLabel: _profileInfo.locationLabel,
+      followersCountLabel: _profileInfo.followersCountLabel,
+      profileImageUrl: _profileInfo.coverImageUrl,
+      menuItems: _menuItemsForDisplay,
+      uploadedVideos: videoPreviews,
+      reviews: reviewPreviews,
     );
   }
 
@@ -359,6 +390,20 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
   void _onProfileTabSelected(int index) {
     setState(() => _selectedProfileTabIndex = index);
+  }
+
+  static String _timeAgoShort(DateTime dateTime) {
+    final diff = DateTime.now().difference(dateTime);
+    if (diff.inMinutes < 1) {
+      return 'Just now';
+    }
+    if (diff.inHours < 1) {
+      return '${diff.inMinutes}m ago';
+    }
+    if (diff.inDays < 1) {
+      return '${diff.inHours}h ago';
+    }
+    return '${diff.inDays}d ago';
   }
 
   Future<void> _openEditProfile() async {
@@ -3132,20 +3177,33 @@ class _ProfileSection extends StatelessWidget {
         ),
       ),
       SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
-      ...List.generate(uploadedVideos.length, (index) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: index == uploadedVideos.length - 1
-                ? 0
-                : _clampDouble(10 * metrics.scale, 8, 10),
+      Container(
+        width: double.infinity,
+        padding: EdgeInsets.all(_clampDouble(10 * metrics.scale, 8, 10)),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF3ECE4),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE4D8CA)),
+        ),
+        child: GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: uploadedVideos.length,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            crossAxisSpacing: _clampDouble(8 * metrics.scale, 6, 8),
+            mainAxisSpacing: _clampDouble(8 * metrics.scale, 6, 8),
+            childAspectRatio: metrics.tiny ? 0.68 : 0.74,
           ),
-          child: _UploadedVideoCard(
-            metrics: metrics,
-            video: uploadedVideos[index],
-            index: index,
-          ),
-        );
-      }),
+          itemBuilder: (context, index) {
+            return _UploadedVideoGridTile(
+              metrics: metrics,
+              video: uploadedVideos[index],
+              index: index,
+            );
+          },
+        ),
+      ),
       SizedBox(height: sectionGap * 0.4),
     ];
   }
@@ -3289,8 +3347,8 @@ class _ProfileTabEmptyState extends StatelessWidget {
   }
 }
 
-class _UploadedVideoCard extends StatelessWidget {
-  const _UploadedVideoCard({
+class _UploadedVideoGridTile extends StatelessWidget {
+  const _UploadedVideoGridTile({
     required this.metrics,
     required this.video,
     required this.index,
@@ -3317,73 +3375,75 @@ class _UploadedVideoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: double.infinity,
-      padding: EdgeInsets.all(_clampDouble(12 * metrics.scale, 10, 12)),
+      padding: EdgeInsets.all(_clampDouble(7 * metrics.scale, 6, 7)),
       decoration: BoxDecoration(
-        color: const Color(0xFFF4F1ED),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFE4D9CF)),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE6DCCF)),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: _clampDouble(62 * metrics.scale, 52, 62),
-            height: _clampDouble(62 * metrics.scale, 52, 62),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFEFE8),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Icon(
-              Icons.play_circle_fill_rounded,
-              color: const Color(0xFFFF7E4D),
-              size: _clampDouble(34 * metrics.scale, 26, 34),
-            ),
-          ),
-          SizedBox(width: _clampDouble(10 * metrics.scale, 8, 10)),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Stack(
               children: [
-                Text(
-                  video.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: const Color(0xFF1F1B19),
-                    fontSize: _clampDouble(15 * metrics.scale, 12, 15),
-                    fontWeight: FontWeight.w800,
+                Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFEFE8),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    Icons.play_circle_fill_rounded,
+                    color: const Color(0xFFFF7E4D),
+                    size: _clampDouble(30 * metrics.scale, 22, 30),
                   ),
                 ),
-                SizedBox(height: _clampDouble(4 * metrics.scale, 2, 4)),
-                Text(
-                  '${_formatFileSize(video.sizeBytes)} • ${_timeAgo(video.uploadedAt)}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: const Color(0xFF8D7E73),
-                    fontSize: _clampDouble(12 * metrics.scale, 10, 12),
-                    fontWeight: FontWeight.w600,
+                Positioned(
+                  top: 4,
+                  left: 4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xD9000000),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '#${index + 1}',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: _clampDouble(9 * metrics.scale, 8, 9),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-          Container(
-            padding: EdgeInsets.symmetric(
-              horizontal: _clampDouble(8 * metrics.scale, 6, 8),
-              vertical: _clampDouble(4 * metrics.scale, 3, 4),
+          SizedBox(height: _clampDouble(6 * metrics.scale, 4, 6)),
+          Text(
+            video.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: const Color(0xFF1F1B19),
+              fontSize: _clampDouble(11 * metrics.scale, 9, 11),
+              fontWeight: FontWeight.w800,
             ),
-            decoration: BoxDecoration(
-              color: const Color(0xFFEFF7F1),
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Text(
-              'Post ${index + 1}',
-              style: TextStyle(
-                color: const Color(0xFF2E9B57),
-                fontSize: _clampDouble(11 * metrics.scale, 9, 11),
-                fontWeight: FontWeight.w700,
-              ),
+          ),
+          SizedBox(height: _clampDouble(2 * metrics.scale, 1, 2)),
+          Text(
+            '${_formatFileSize(video.sizeBytes)} • ${_timeAgo(video.uploadedAt)}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: const Color(0xFF8D7E73),
+              fontSize: _clampDouble(9.5 * metrics.scale, 8, 9.5),
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],
@@ -4046,7 +4106,7 @@ class _ManagedMenuItemCard extends StatelessWidget {
                     if (item.rating != null)
                       _MenuBadge(
                         metrics: metrics,
-                        label: '${item.rating!.toStringAsFixed(1)}★',
+                        label: '${item.rating!.toStringAsFixed(1)}*',
                         backgroundColor: const Color(0xFFFFF1CC),
                         textColor: const Color(0xFFB07800),
                       ),

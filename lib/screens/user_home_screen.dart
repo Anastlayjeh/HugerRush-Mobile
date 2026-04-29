@@ -62,15 +62,42 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
   }
 
   Future<void> _openRestaurantDetails() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => RestaurantDetailsScreen(
-          restaurantName: _feedPost.restaurantName,
-          handle: _feedPost.restaurantHandle,
-          rating: _feedPost.rating,
-          caption: _feedPost.caption,
-        ),
-      ),
+    final uploadedPosts = _repository.getUploadedPosts();
+    final videoPreviews = uploadedPosts
+        .map(
+          (post) => RestaurantProfileVideoPreview(
+            title: post.fileName,
+            meta:
+                '${_formatFileSize(post.fileSizeBytes)} • ${_timeAgo(post.createdAt)}',
+          ),
+        )
+        .toList();
+
+    final customerComments = _repository
+        .getComments(_feedPost.id)
+        .where((comment) => !comment.isRestaurantReply)
+        .toList();
+    final reviewPreviews = customerComments.asMap().entries.map((entry) {
+      final index = entry.key;
+      final comment = entry.value;
+      final simulatedRating = (4.9 - (index * 0.2)).clamp(4.1, 5.0).toDouble();
+      return RestaurantProfileReviewPreview(
+        customerName: comment.authorName,
+        rating: simulatedRating,
+        comment: comment.body,
+        timeLabel: _timeAgo(comment.createdAt),
+        orderLabel: '#47${30 + index}',
+      );
+    }).toList();
+
+    await showRestaurantProfilePopup(
+      context,
+      restaurantName: _feedPost.restaurantName,
+      handle: _feedPost.restaurantHandle,
+      rating: _feedPost.rating,
+      caption: _feedPost.caption,
+      uploadedVideos: videoPreviews,
+      reviews: reviewPreviews,
     );
   }
 
@@ -175,6 +202,32 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
       _selectedTopTab = index;
       _syncFeedPost();
     });
+  }
+
+  static String _formatFileSize(int bytes) {
+    if (bytes < 1024) {
+      return '$bytes B';
+    }
+    final kb = bytes / 1024;
+    if (kb < 1024) {
+      return '${kb.toStringAsFixed(kb >= 100 ? 0 : 1)} KB';
+    }
+    final mb = kb / 1024;
+    return '${mb.toStringAsFixed(mb >= 100 ? 0 : 1)} MB';
+  }
+
+  static String _timeAgo(DateTime dateTime) {
+    final diff = DateTime.now().difference(dateTime);
+    if (diff.inMinutes < 1) {
+      return 'Just now';
+    }
+    if (diff.inHours < 1) {
+      return '${diff.inMinutes}m ago';
+    }
+    if (diff.inDays < 1) {
+      return '${diff.inHours}h ago';
+    }
+    return '${diff.inDays}d ago';
   }
 
   @override
