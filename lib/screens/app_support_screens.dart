@@ -36,6 +36,7 @@ Future<void> showRestaurantProfilePopup(
   String? phoneLabel,
   String? locationLabel,
   String? followersCountLabel,
+  VoidCallback? onOpenFollowers,
   String? profileImageUrl,
   List<RestaurantMenuItem>? menuItems,
   List<RestaurantProfileVideoPreview>? uploadedVideos,
@@ -55,6 +56,7 @@ Future<void> showRestaurantProfilePopup(
         phoneLabel: phoneLabel,
         locationLabel: locationLabel,
         followersCountLabel: followersCountLabel,
+        onOpenFollowers: onOpenFollowers,
         profileImageUrl: profileImageUrl,
         menuItems: menuItems,
         uploadedVideos: uploadedVideos,
@@ -100,6 +102,7 @@ class _RestaurantProfilePopup extends StatelessWidget {
     this.phoneLabel,
     this.locationLabel,
     this.followersCountLabel,
+    this.onOpenFollowers,
     this.profileImageUrl,
     this.menuItems,
     this.uploadedVideos,
@@ -114,6 +117,7 @@ class _RestaurantProfilePopup extends StatelessWidget {
   final String? phoneLabel;
   final String? locationLabel;
   final String? followersCountLabel;
+  final VoidCallback? onOpenFollowers;
   final String? profileImageUrl;
   final List<RestaurantMenuItem>? menuItems;
   final List<RestaurantProfileVideoPreview>? uploadedVideos;
@@ -365,6 +369,7 @@ class _RestaurantProfilePopup extends StatelessWidget {
                   phoneLabel: phoneLabel ?? 'Phone unavailable',
                   locationLabel: locationLabel ?? 'Location unavailable',
                   followersCountLabel: followersCountLabel ?? '0',
+                  onOpenFollowers: onOpenFollowers,
                   coverImageUrl: profileImageUrl ?? _defaultProfileImage,
                   initials: _initials,
                 ),
@@ -475,6 +480,7 @@ class _PopupRestaurantHero extends StatelessWidget {
     required this.phoneLabel,
     required this.locationLabel,
     required this.followersCountLabel,
+    this.onOpenFollowers,
     required this.coverImageUrl,
     required this.initials,
   });
@@ -486,6 +492,7 @@ class _PopupRestaurantHero extends StatelessWidget {
   final String phoneLabel;
   final String locationLabel;
   final String followersCountLabel;
+  final VoidCallback? onOpenFollowers;
   final String coverImageUrl;
   final String initials;
 
@@ -634,6 +641,7 @@ class _PopupRestaurantHero extends StatelessWidget {
                       child: _PopupProfileConnectionMetric(
                         value: followersCountLabel,
                         label: 'Followers',
+                        onTap: onOpenFollowers,
                       ),
                     ),
                   ),
@@ -764,14 +772,16 @@ class _PopupProfileConnectionMetric extends StatelessWidget {
   const _PopupProfileConnectionMetric({
     required this.value,
     required this.label,
+    this.onTap,
   });
 
   final String value;
   final String label;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    final content = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
@@ -794,6 +804,22 @@ class _PopupProfileConnectionMetric extends StatelessWidget {
           ),
         ),
       ],
+    );
+
+    if (onTap == null) {
+      return content;
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          child: content,
+        ),
+      ),
     );
   }
 }

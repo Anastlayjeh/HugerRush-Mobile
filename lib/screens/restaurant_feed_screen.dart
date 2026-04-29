@@ -261,6 +261,9 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       phoneLabel: _profileInfo.phoneLabel,
       locationLabel: _profileInfo.locationLabel,
       followersCountLabel: _profileInfo.followersCountLabel,
+      onOpenFollowers: () => _openFollowersList(
+        restaurantName: _vendorFeedPost.restaurantName,
+      ),
       profileImageUrl: _profileInfo.coverImageUrl,
       menuItems: _menuItemsForDisplay,
       uploadedVideos: videoPreviews,
@@ -425,6 +428,32 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Profile updated successfully.')),
+    );
+  }
+
+  Future<void> _openFollowersList({String? restaurantName}) async {
+    final token = widget.authToken?.trim() ?? '';
+    if (token.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please log in again to load followers.'),
+          backgroundColor: Color(0xFFB7372B),
+        ),
+      );
+      return;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _FollowersListScreen(
+          token: token,
+          restaurantName: (restaurantName?.trim().isNotEmpty ?? false)
+              ? restaurantName!.trim()
+              : _restaurantName,
+          restaurantId: _profileInfo.id,
+          profileApiService: _profileApiService,
+        ),
+      ),
     );
   }
 
@@ -622,6 +651,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                       profileSyncError: _profileSyncError,
                       onRetryProfileSync: _refreshRestaurantProfile,
                       onManageFullMenu: _openMenuSection,
+                      onOpenFollowers: _openFollowersList,
                       onOpenSettings: _openProfileSettingsDrawer,
                       selectedTabIndex: _selectedProfileTabIndex,
                       onTabSelected: _onProfileTabSelected,
@@ -2921,6 +2951,230 @@ class _RestaurantReviewData {
   final String orderLabel;
 }
 
+class _FollowersListScreen extends StatefulWidget {
+  const _FollowersListScreen({
+    required this.token,
+    required this.restaurantName,
+    required this.profileApiService,
+    this.restaurantId,
+  });
+
+  final String token;
+  final String restaurantName;
+  final String? restaurantId;
+  final RestaurantProfileApiService profileApiService;
+
+  @override
+  State<_FollowersListScreen> createState() => _FollowersListScreenState();
+}
+
+class _FollowersListScreenState extends State<_FollowersListScreen> {
+  List<RestaurantFollower> _followers = const <RestaurantFollower>[];
+  bool _isLoading = true;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFollowers();
+  }
+
+  Future<void> _loadFollowers() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final followers = await widget.profileApiService.fetchFollowers(
+        token: widget.token,
+        restaurantId: widget.restaurantId,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _followers = followers;
+        _isLoading = false;
+      });
+    } on RestaurantProfileApiException catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = e.message;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Failed to load followers. Please try again.';
+      });
+    }
+  }
+
+  String _initials(String value) {
+    final words = value
+        .split(RegExp(r'\s+'))
+        .where((segment) => segment.trim().isNotEmpty)
+        .toList();
+    if (words.isEmpty) {
+      return 'U';
+    }
+    if (words.length == 1) {
+      final first = words.first;
+      return first.substring(0, 1).toUpperCase();
+    }
+    return '${words.first[0]}${words[1][0]}'.toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final title = widget.restaurantName.trim().isEmpty
+        ? 'Restaurant'
+        : widget.restaurantName.trim();
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8EFE8),
+      appBar: AppBar(
+        title: Text(title),
+        backgroundColor: const Color(0xFFF8EFE8),
+        elevation: 0,
+      ),
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_errorMessage != null && _errorMessage!.trim().isNotEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.error_outline_rounded,
+                color: Color(0xFFB7372B),
+                size: 38,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                _errorMessage!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Color(0xFF6E3A2E),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: _loadFollowers,
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFFF7E4D),
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_followers.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 24),
+          child: Text(
+            'No followers found for this page yet.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Color(0xFF73685D),
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadFollowers,
+      child: ListView.separated(
+        physics: const BouncingScrollPhysics(
+          parent: AlwaysScrollableScrollPhysics(),
+        ),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 22),
+        itemCount: _followers.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 10),
+        itemBuilder: (context, index) {
+          final follower = _followers[index];
+          final avatarUrl = follower.avatarUrl?.trim() ?? '';
+          final secondary = follower.secondaryLabel;
+          return Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFFF3F0EC),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFE4D8CF)),
+            ),
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 2,
+              ),
+              leading: CircleAvatar(
+                radius: 22,
+                backgroundColor: const Color(0xFFE8D8CA),
+                backgroundImage: avatarUrl.isEmpty ? null : NetworkImage(avatarUrl),
+                child: avatarUrl.isEmpty
+                    ? Text(
+                        _initials(follower.name),
+                        style: const TextStyle(
+                          color: Color(0xFF4A3C31),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      )
+                    : null,
+              ),
+              title: Text(
+                follower.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFF2D241F),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              subtitle: secondary == null
+                  ? null
+                  : Text(
+                      secondary,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF8A7A6E),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
 class _ProfileSection extends StatelessWidget {
   const _ProfileSection({
     required this.metrics,
@@ -2929,6 +3183,7 @@ class _ProfileSection extends StatelessWidget {
     required this.profileSyncError,
     required this.onRetryProfileSync,
     required this.onManageFullMenu,
+    required this.onOpenFollowers,
     required this.onOpenSettings,
     required this.selectedTabIndex,
     required this.onTabSelected,
@@ -2941,6 +3196,7 @@ class _ProfileSection extends StatelessWidget {
   final String? profileSyncError;
   final VoidCallback onRetryProfileSync;
   final VoidCallback onManageFullMenu;
+  final VoidCallback onOpenFollowers;
   final VoidCallback onOpenSettings;
   final int selectedTabIndex;
   final ValueChanged<int> onTabSelected;
@@ -3034,6 +3290,7 @@ class _ProfileSection extends StatelessWidget {
           _OwnerProfileHero(
             metrics: metrics,
             profileInfo: profileInfo,
+            onOpenFollowers: onOpenFollowers,
             onOpenSettings: onOpenSettings,
           ),
           SizedBox(height: sectionGap),
@@ -4295,11 +4552,13 @@ class _OwnerProfileHero extends StatelessWidget {
   const _OwnerProfileHero({
     required this.metrics,
     required this.profileInfo,
+    required this.onOpenFollowers,
     required this.onOpenSettings,
   });
 
   final _ResponsiveMetrics metrics;
   final _RestaurantProfileInfo profileInfo;
+  final VoidCallback onOpenFollowers;
   final VoidCallback onOpenSettings;
 
   static String _initials(String value) {
@@ -4476,6 +4735,7 @@ class _OwnerProfileHero extends StatelessWidget {
                         metrics: metrics,
                         value: profileInfo.followersCountLabel,
                         label: 'Followers',
+                        onTap: onOpenFollowers,
                       ),
                     ),
                   ),
@@ -5109,15 +5369,17 @@ class _ProfileConnectionMetric extends StatelessWidget {
     required this.metrics,
     required this.value,
     required this.label,
+    this.onTap,
   });
 
   final _ResponsiveMetrics metrics;
   final String value;
   final String label;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    final content = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
@@ -5140,6 +5402,25 @@ class _ProfileConnectionMetric extends StatelessWidget {
           ),
         ),
       ],
+    );
+
+    if (onTap == null) {
+      return content;
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: _clampDouble(8 * metrics.scale, 6, 8),
+            vertical: _clampDouble(2 * metrics.scale, 1, 2),
+          ),
+          child: content,
+        ),
+      ),
     );
   }
 }
@@ -5338,6 +5619,7 @@ class _PopularMenuItemData {
 
 class _RestaurantProfileInfo {
   const _RestaurantProfileInfo({
+    this.id,
     required this.name,
     required this.handle,
     required this.cuisineSummary,
@@ -5358,6 +5640,7 @@ class _RestaurantProfileInfo {
   static const String _defaultCoverImage =
       'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=1400&q=80';
 
+  final String? id;
   final String name;
   final String handle;
   final String cuisineSummary;
@@ -5392,6 +5675,13 @@ class _RestaurantProfileInfo {
           'display_name',
         ]) ??
         (sanitizedFallback.isEmpty ? 'Restaurant' : sanitizedFallback);
+    final restaurantId = _firstString(allMaps, const [
+      'restaurant_id',
+      'id',
+      'user_id',
+      'owner_id',
+      'account_id',
+    ]);
 
     final handle = _normalizeHandle(
       _firstString(allMaps, const [
@@ -5470,6 +5760,7 @@ class _RestaurantProfileInfo {
         _defaultCoverImage;
 
     return _RestaurantProfileInfo(
+      id: restaurantId,
       name: name,
       handle: handle,
       cuisineSummary: _buildCuisineSummary(
@@ -5509,6 +5800,7 @@ class _RestaurantProfileInfo {
     final nextPostalCode = _nullable(data.postalCode);
 
     return _RestaurantProfileInfo(
+      id: id,
       name: nextName,
       handle: handle,
       cuisineSummary: _buildCuisineSummary(

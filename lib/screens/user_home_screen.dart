@@ -96,6 +96,7 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
       handle: _feedPost.restaurantHandle,
       rating: _feedPost.rating,
       caption: _feedPost.caption,
+      followersCountLabel: _formatCompactCount(_feedPost.followersCount),
       uploadedVideos: videoPreviews,
       reviews: reviewPreviews,
     );

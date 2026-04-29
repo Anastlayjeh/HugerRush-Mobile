@@ -7,6 +7,7 @@ class DemoFeedPost {
     required this.id,
     required this.restaurantName,
     required this.restaurantHandle,
+    required this.followersCount,
     required this.caption,
     required this.tags,
     required this.audioLabel,
@@ -20,6 +21,7 @@ class DemoFeedPost {
   final String id;
   final String restaurantName;
   final String restaurantHandle;
+  final int followersCount;
   final String caption;
   final String tags;
   final String audioLabel;
@@ -33,6 +35,7 @@ class DemoFeedPost {
     String? id,
     String? restaurantName,
     String? restaurantHandle,
+    int? followersCount,
     String? caption,
     String? tags,
     String? audioLabel,
@@ -46,6 +49,7 @@ class DemoFeedPost {
       id: id ?? this.id,
       restaurantName: restaurantName ?? this.restaurantName,
       restaurantHandle: restaurantHandle ?? this.restaurantHandle,
+      followersCount: followersCount ?? this.followersCount,
       caption: caption ?? this.caption,
       tags: tags ?? this.tags,
       audioLabel: audioLabel ?? this.audioLabel,

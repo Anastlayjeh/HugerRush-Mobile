@@ -10,6 +10,7 @@ class DemoAppRepository {
       id: 'for-you',
       restaurantName: 'Bella Italia',
       restaurantHandle: 'bellaitalia',
+      followersCount: 21430,
       caption:
           'Feeling hungry? Our new Pepperoni Feast is here. Cheesy and absolutely delicious.',
       tags: '#pizza #yum #foodie',
@@ -24,6 +25,7 @@ class DemoAppRepository {
       id: 'following',
       restaurantName: 'Bella Italia',
       restaurantHandle: 'bellaitalia',
+      followersCount: 21430,
       caption:
           'Fresh from the oven: kitchen updates, lunch offers, and a warm batch of garlic knots.',
       tags: '#following #offers #fresh',
@@ -38,6 +40,7 @@ class DemoAppRepository {
       id: 'vendor-feed',
       restaurantName: 'Bella Italia',
       restaurantHandle: 'bellaitalia',
+      followersCount: 21430,
       caption: 'Pizza night is here with our Pepperoni Feast.',
       tags: '#pizza #yum #foodie',
       audioLabel: 'Original Audio - Bella Italia Promo',
