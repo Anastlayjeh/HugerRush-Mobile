@@ -1,10 +1,16 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:flutter_application_1/main.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_application_1/screens/login_screen.dart';
 
 void main() {
   testWidgets('Login screen renders core content', (WidgetTester tester) async {
-    await tester.pumpWidget(const HungerRushApp());
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LoginScreen(),
+      ),
+    );
+    await tester.pump();
 
     expect(find.text('HungerRush'), findsOneWidget);
     expect(find.text('Discover food. Order instantly.'), findsOneWidget);
