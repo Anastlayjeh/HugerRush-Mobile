@@ -14,11 +14,13 @@ class RestaurantFeedScreen extends StatefulWidget {
     required this.restaurantName,
     this.authToken,
     this.initialUserData,
+    this.onLogout,
   });
 
   final String restaurantName;
   final String? authToken;
   final Map<String, dynamic>? initialUserData;
+  final Future<void> Function()? onLogout;
 
   @override
   State<RestaurantFeedScreen> createState() => _RestaurantFeedScreenState();
@@ -36,6 +38,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   final _menuApiService = RestaurantMenuApiService();
   PlatformFile? _selectedPostVideo;
   bool _isPickingPostVideo = false;
+  bool _isLoggingOut = false;
 
   late _RestaurantProfileInfo _profileInfo;
   bool _isRefreshingProfile = false;
@@ -167,6 +170,18 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     }
   }
 
+  Future<void> _handleLogout() async {
+    final logout = widget.onLogout;
+    if (logout == null || _isLoggingOut) {
+      return;
+    }
+    setState(() => _isLoggingOut = true);
+    await logout();
+    if (mounted) {
+      setState(() => _isLoggingOut = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isProfileTabSelected) {
@@ -265,6 +280,24 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   Widget _buildProfileScaffold() {
     return Scaffold(
       backgroundColor: const Color(0xFFF8EFE8),
+      floatingActionButton: widget.onLogout == null
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: _isLoggingOut ? null : _handleLogout,
+              backgroundColor: const Color(0xFF2E2521),
+              foregroundColor: Colors.white,
+              icon: _isLoggingOut
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.logout_rounded),
+              label: Text(_isLoggingOut ? 'Signing out...' : 'Sign out'),
+            ),
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {

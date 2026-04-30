@@ -2,26 +2,54 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../models/auth_session.dart';
 import '../services/auth_api_service.dart';
+import '../services/auth_session_service.dart';
 import '../widgets/auth_social_buttons.dart';
 import 'registration_screen.dart';
 import 'restaurant_feed_screen.dart';
 import 'user_home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  LoginScreen({
+    super.key,
+    AuthApiService? authApiService,
+    AuthSessionService? authSessionService,
+    this.onAuthenticated,
+  }) : authApiService = authApiService ?? AuthApiService(),
+       authSessionService = authSessionService ?? AuthSessionService();
+
+  final AuthApiService authApiService;
+  final AuthSessionService authSessionService;
+  final ValueChanged<AuthSession>? onAuthenticated;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  static const _restaurantRoles = <String>{
+    'restaurant',
+    'restaurant_owner',
+    'restaurant_admin',
+    'vendor',
+    'merchant',
+  };
+
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _authApiService = AuthApiService();
+  late final AuthApiService _authApiService;
+  late final AuthSessionService _authSessionService;
 
   bool _obscurePassword = true;
   bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _authApiService = widget.authApiService;
+    _authSessionService = widget.authSessionService;
+  }
 
   @override
   void dispose() {
@@ -49,45 +77,64 @@ class _LoginScreenState extends State<LoginScreen> {
 
   String? _normalizeRole(dynamic value) {
     if (value is String) {
-      final normalized = value.trim().toLowerCase();
-      return normalized.isEmpty ? null : normalized;
-    }
-
-    if (value is Map) {
-      return _normalizeRole(
-        value['name'] ?? value['slug'] ?? value['role'] ?? value['type'],
+      final normalized = value.trim().toLowerCase().replaceAll(
+        RegExp(r'[\s-]+'),
+        '_',
       );
-    }
-
-    if (value is List) {
-      for (final item in value) {
-        final role = _normalizeRole(item);
-        if (role != null) {
-          return role;
-        }
-      }
+      return normalized.isEmpty ? null : normalized;
     }
 
     return null;
   }
 
-  String? _extractRole(Map<String, dynamic>? user) {
+  List<String> _collectRoles(dynamic value) {
+    final roles = <String>[];
+
+    void collect(dynamic entry) {
+      final normalized = _normalizeRole(entry);
+      if (normalized != null) {
+        roles.add(normalized);
+        return;
+      }
+
+      if (entry is Map) {
+        collect(
+          entry['name'] ?? entry['slug'] ?? entry['role'] ?? entry['type'],
+        );
+      } else if (entry is Iterable) {
+        for (final item in entry) {
+          collect(item);
+        }
+      }
+    }
+
+    collect(value);
+    final seen = <String>{};
+    return [
+      for (final role in roles)
+        if (seen.add(role)) role,
+    ];
+  }
+
+  List<String> _extractRoles(Map<String, dynamic>? user) {
     if (user == null) {
-      return null;
+      return const [];
     }
 
-    final directRole = _normalizeRole(
-      user['role'] ??
-          user['user_role'] ??
-          user['user_type'] ??
-          user['account_type'] ??
-          user['type'],
-    );
-    if (directRole != null) {
-      return directRole;
-    }
+    final merged = <String>[
+      ..._collectRoles(user['role']),
+      ..._collectRoles(user['user_role']),
+      ..._collectRoles(user['user_type']),
+      ..._collectRoles(user['account_type']),
+      ..._collectRoles(user['type']),
+      ..._collectRoles(user['roles']),
+    ];
 
-    return _normalizeRole(user['roles']);
+    final seen = <String>{};
+    return [
+      for (final role in merged)
+        if (seen.add(role)) role,
+    ];
   }
 
   String? _extractRoleFromMessage(String message) {
@@ -107,9 +154,17 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   bool _isRestaurantRole(String role) {
-    return role.contains('restaurant') ||
-        role.contains('vendor') ||
-        role.contains('merchant');
+    return _restaurantRoles.contains(role);
+  }
+
+  String? _findRestaurantRole(Map<String, dynamic>? user) {
+    final roles = _extractRoles(user);
+    for (final role in roles) {
+      if (_isRestaurantRole(role)) {
+        return role;
+      }
+    }
+    return null;
   }
 
   bool _isNormalUserRole(String role) {
@@ -204,28 +259,59 @@ class _LoginScreenState extends State<LoginScreen> {
         email: _emailController.text,
         password: _passwordController.text,
       );
+
+      final token = result.token?.trim();
+      if (token == null || token.isEmpty) {
+        throw const AuthApiException(
+          'Login response did not include an access token.',
+        );
+      }
+
       if (!mounted) {
         return;
       }
 
-      final role =
-          _extractRole(result.user) ??
+      final detectedRole =
+          _findRestaurantRole(result.user) ??
           _normalizeRole(result.role) ??
           _extractRoleFromMessage(result.message);
-      if (role != null && _isRestaurantRole(role)) {
+
+      if (detectedRole != null && _isRestaurantRole(detectedRole)) {
+        final session = AuthSession(
+          token: token,
+          role: detectedRole,
+          restaurantName: _extractRestaurantName(result.user),
+          refreshToken: result.refreshToken?.trim(),
+          user: result.user,
+        );
+        await _authSessionService.saveSession(session);
+        if (!mounted) {
+          return;
+        }
+
+        final onAuthenticated = widget.onAuthenticated;
+        if (onAuthenticated != null) {
+          onAuthenticated(session);
+          return;
+        }
+
         Navigator.of(context).pushReplacement(
           MaterialPageRoute<void>(
             builder: (_) => RestaurantFeedScreen(
-              restaurantName: _extractRestaurantName(result.user),
-              authToken: result.token,
-              initialUserData: result.user,
+              restaurantName: session.restaurantName,
+              authToken: session.token,
+              initialUserData: session.user,
             ),
           ),
         );
         return;
       }
 
-      if (role == null || _isNormalUserRole(role)) {
+      if (detectedRole == null || _isNormalUserRole(detectedRole)) {
+        await _authSessionService.clearSession();
+        if (!mounted) {
+          return;
+        }
         Navigator.of(context).pushReplacement(
           MaterialPageRoute<void>(
             builder: (_) => UserHomeScreen(
@@ -239,7 +325,7 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      final displayRole = role.replaceAll('_', ' ');
+      final displayRole = detectedRole.replaceAll('_', ' ');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -248,6 +334,16 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       );
     } on AuthApiException catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: const Color(0xFFB7372B),
+        ),
+      );
+    } on AuthSessionException catch (e) {
       if (!mounted) {
         return;
       }
