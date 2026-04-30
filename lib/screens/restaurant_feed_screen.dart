@@ -466,7 +466,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
   void _logoutToLogin() {
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
+      MaterialPageRoute<void>(builder: (_) =>  LoginScreen()),
       (route) => false,
     );
   }
