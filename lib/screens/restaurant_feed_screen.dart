@@ -132,7 +132,6 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   final List<_UploadedRestaurantVideo> _uploadedVideos =
       <_UploadedRestaurantVideo>[];
   late DemoFeedPost _vendorFeedPost;
-  bool _isLoggingOut = false;
 
   late _RestaurantProfileInfo _profileInfo;
   bool _isRefreshingProfile = false;
@@ -264,9 +263,8 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       phoneLabel: _profileInfo.phoneLabel,
       locationLabel: _profileInfo.locationLabel,
       followersCountLabel: _profileInfo.followersCountLabel,
-      onOpenFollowers: () => _openFollowersList(
-        restaurantName: _vendorFeedPost.restaurantName,
-      ),
+      onOpenFollowers: () =>
+          _openFollowersList(restaurantName: _vendorFeedPost.restaurantName),
       profileImageUrl: _profileInfo.coverImageUrl,
       menuItems: _menuItemsForDisplay,
       uploadedVideos: videoPreviews,
@@ -466,7 +464,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
   void _logoutToLogin() {
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute<void>(builder: (_) =>  LoginScreen()),
+      MaterialPageRoute<void>(builder: (_) => LoginScreen()),
       (route) => false,
     );
   }
@@ -518,18 +516,6 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         _isRefreshingMenu = false;
         _menuSyncError = e.message;
       });
-    }
-  }
-
-  Future<void> _handleLogout() async {
-    final logout = widget.onLogout;
-    if (logout == null || _isLoggingOut) {
-      return;
-    }
-    setState(() => _isLoggingOut = true);
-    await logout();
-    if (mounted) {
-      setState(() => _isLoggingOut = false);
     }
   }
 
@@ -642,27 +628,14 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       key: _profileScaffoldKey,
       backgroundColor: const Color(0xFFF8EFE8),
       endDrawer: _ProfileSettingsDrawer(
+        restaurantName: _profileInfo.name,
+        restaurantHandle: _profileInfo.handle,
         onEditProfile: _openEditProfile,
+        onManageMenu: _openMenuSection,
+        onOpenFollowers: () =>
+            _openFollowersList(restaurantName: _profileInfo.name),
         onLogout: _logoutToLogin,
       ),
-      floatingActionButton: widget.onLogout == null
-          ? null
-          : FloatingActionButton.extended(
-              onPressed: _isLoggingOut ? null : _handleLogout,
-              backgroundColor: const Color(0xFF2E2521),
-              foregroundColor: Colors.white,
-              icon: _isLoggingOut
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                  : const Icon(Icons.logout_rounded),
-              label: Text(_isLoggingOut ? 'Signing out...' : 'Sign out'),
-            ),
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -3166,7 +3139,9 @@ class _FollowersListScreenState extends State<_FollowersListScreen> {
               leading: CircleAvatar(
                 radius: 22,
                 backgroundColor: const Color(0xFFE8D8CA),
-                backgroundImage: avatarUrl.isEmpty ? null : NetworkImage(avatarUrl),
+                backgroundImage: avatarUrl.isEmpty
+                    ? null
+                    : NetworkImage(avatarUrl),
                 child: avatarUrl.isEmpty
                     ? Text(
                         _initials(follower.name),
@@ -4872,68 +4847,305 @@ class _ProfileTopOverlayButton extends StatelessWidget {
 
 class _ProfileSettingsDrawer extends StatelessWidget {
   const _ProfileSettingsDrawer({
+    required this.restaurantName,
+    required this.restaurantHandle,
     required this.onEditProfile,
+    required this.onManageMenu,
+    required this.onOpenFollowers,
     required this.onLogout,
   });
 
+  final String restaurantName;
+  final String restaurantHandle;
   final VoidCallback onEditProfile;
+  final VoidCallback onManageMenu;
+  final VoidCallback onOpenFollowers;
   final VoidCallback onLogout;
 
   @override
   Widget build(BuildContext context) {
+    final normalizedName = restaurantName.trim();
+    final displayName = normalizedName.isEmpty
+        ? 'Restaurant Owner'
+        : normalizedName;
+    final normalizedHandle = restaurantHandle.trim();
+    final subtitle = normalizedHandle.isEmpty
+        ? 'Business shortcuts and account tools'
+        : '@$normalizedHandle - Business shortcuts and account tools';
+
+    final settingsItems = <_ProfileSettingsItemData>[
+      _ProfileSettingsItemData(
+        title: 'Edit Profile',
+        icon: Icons.edit_rounded,
+        onTap: () {
+          Navigator.of(context).pop();
+          onEditProfile();
+        },
+      ),
+      _ProfileSettingsItemData(
+        title: 'Manage Menu',
+        icon: Icons.restaurant_menu_rounded,
+        onTap: () {
+          Navigator.of(context).pop();
+          onManageMenu();
+        },
+      ),
+      _ProfileSettingsItemData(
+        title: 'Followers',
+        icon: Icons.groups_rounded,
+        onTap: () {
+          Navigator.of(context).pop();
+          onOpenFollowers();
+        },
+      ),
+      _ProfileSettingsItemData(
+        title: 'Help & Support',
+        icon: Icons.help_outline_rounded,
+        onTap: () => Navigator.of(context).pop(),
+      ),
+    ];
+
     return Drawer(
+      backgroundColor: const Color(0xFFF8EFE5),
       child: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final metrics = _ResponsiveMetrics.from(constraints);
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                _clampDouble(20 * metrics.scale, 18, 20),
+                _clampDouble(18 * metrics.scale, 16, 18),
+                _clampDouble(20 * metrics.scale, 18, 20),
+                _clampDouble(18 * metrics.scale, 16, 18),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Navigation',
+                          style: TextStyle(
+                            color: const Color(0xFF231A16),
+                            fontSize: _clampDouble(28 * metrics.scale, 22, 28),
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close_rounded),
+                        color: const Color(0xFF5A4A40),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: _clampDouble(20 * metrics.scale, 16, 20)),
+                  Container(
+                    width: double.infinity,
+                    padding: EdgeInsets.all(
+                      _clampDouble(18 * metrics.scale, 14, 18),
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEFCFA),
+                      borderRadius: BorderRadius.circular(26),
+                      border: Border.all(color: const Color(0xFFF2DCCB)),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: _clampDouble(54 * metrics.scale, 44, 54),
+                          height: _clampDouble(54 * metrics.scale, 44, 54),
+                          decoration: const BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [Color(0xFFFFE4C0), Color(0xFFFFC18E)],
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.storefront_rounded,
+                            color: const Color(0xFF8B5C41),
+                            size: _clampDouble(28 * metrics.scale, 22, 28),
+                          ),
+                        ),
+                        SizedBox(
+                          width: _clampDouble(14 * metrics.scale, 10, 14),
+                        ),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                displayName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: const Color(0xFF231A16),
+                                  fontSize: _clampDouble(
+                                    18 * metrics.scale,
+                                    15,
+                                    18,
+                                  ),
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              SizedBox(
+                                height: _clampDouble(4 * metrics.scale, 2, 4),
+                              ),
+                              Text(
+                                subtitle,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: const Color(0xFF847468),
+                                  fontSize: _clampDouble(
+                                    13 * metrics.scale,
+                                    11,
+                                    13,
+                                  ),
+                                  fontWeight: FontWeight.w600,
+                                  height: 1.25,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: _clampDouble(22 * metrics.scale, 18, 22)),
+                  Text(
+                    'Business Settings',
+                    style: TextStyle(
+                      color: const Color(0xFF231A16),
+                      fontSize: _clampDouble(20 * metrics.scale, 17, 20),
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  SizedBox(height: _clampDouble(12 * metrics.scale, 10, 12)),
+                  _ProfilePanel(
+                    child: Column(
+                      children: List.generate(settingsItems.length, (index) {
+                        final item = settingsItems[index];
+                        return Column(
+                          children: [
+                            _ProfileSettingsTile(
+                              data: item,
+                              metrics: metrics,
+                              onTap: item.onTap,
+                            ),
+                            if (index != settingsItems.length - 1)
+                              const Divider(
+                                height: 1,
+                                color: Color(0xFFF0E2D3),
+                              ),
+                          ],
+                        );
+                      }),
+                    ),
+                  ),
+                  const Spacer(),
+                  SizedBox(
+                    width: double.infinity,
+                    child: TextButton(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        onLogout();
+                      },
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFFFF7E4D),
+                        padding: EdgeInsets.symmetric(
+                          vertical: _clampDouble(14 * metrics.scale, 12, 14),
+                        ),
+                        textStyle: TextStyle(
+                          fontSize: _clampDouble(18 * metrics.scale, 16, 18),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      child: const Text('Sign Out'),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfilePanel extends StatelessWidget {
+  const _ProfilePanel({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEFCFA),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: const Color(0xFFF3DFCF)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x12A7633A),
+            blurRadius: 22,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+}
+
+class _ProfileSettingsTile extends StatelessWidget {
+  const _ProfileSettingsTile({
+    required this.data,
+    required this.metrics,
+    this.onTap,
+  });
+
+  final _ProfileSettingsItemData data;
+  final _ResponsiveMetrics metrics;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          padding: EdgeInsets.symmetric(
+            horizontal: _clampDouble(18 * metrics.scale, 14, 18),
+            vertical: _clampDouble(18 * metrics.scale, 14, 18),
+          ),
+          child: Row(
             children: [
-              const Text(
-                'Navigation',
-                style: TextStyle(
-                  color: Color(0xFF1F1B19),
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                ),
+              Icon(
+                data.icon,
+                color: const Color(0xFF7D6E63),
+                size: _clampDouble(28 * metrics.scale, 22, 28),
               ),
-              const SizedBox(height: 20),
-              ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                leading: const Icon(
-                  Icons.edit_rounded,
-                  color: Color(0xFFFF7E4D),
-                ),
-                title: const Text(
-                  'Edit Profile',
+              SizedBox(width: _clampDouble(16 * metrics.scale, 12, 16)),
+              Expanded(
+                child: Text(
+                  data.title,
                   style: TextStyle(
-                    color: Color(0xFF2E2521),
-                    fontSize: 16,
+                    color: const Color(0xFF231A16),
+                    fontSize: _clampDouble(18 * metrics.scale, 14, 18),
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  onEditProfile();
-                },
               ),
-              ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                leading: const Icon(
-                  Icons.logout_rounded,
-                  color: Color(0xFFB7372B),
-                ),
-                title: const Text(
-                  'Log Out',
-                  style: TextStyle(
-                    color: Color(0xFF2E2521),
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  onLogout();
-                },
+              Icon(
+                Icons.chevron_right_rounded,
+                color: const Color(0xFFAE9B8D),
+                size: _clampDouble(24 * metrics.scale, 20, 24),
               ),
             ],
           ),
@@ -4941,6 +5153,18 @@ class _ProfileSettingsDrawer extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ProfileSettingsItemData {
+  const _ProfileSettingsItemData({
+    required this.title,
+    required this.icon,
+    this.onTap,
+  });
+
+  final String title;
+  final IconData icon;
+  final VoidCallback? onTap;
 }
 
 class _EditableProfileData {
