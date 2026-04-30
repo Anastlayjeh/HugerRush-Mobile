@@ -42,3 +42,8 @@ android {
 flutter {
     source = "../.."
 }
+
+// Work around intermittent Windows/OneDrive file lock failures during debug asset cleanup.
+tasks.matching { it.name == "cleanMergeDebugAssets" }.configureEach {
+    enabled = false
+}
