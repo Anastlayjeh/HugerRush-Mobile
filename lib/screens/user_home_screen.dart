@@ -3613,7 +3613,7 @@ class _UserProfileMenuDrawer extends StatelessWidget {
                       onPressed: () {
                         Navigator.of(context).pushAndRemoveUntil(
                           MaterialPageRoute<void>(
-                            builder: (_) =>  LoginScreen(),
+                            builder: (_) => LoginScreen(),
                           ),
                           (route) => false,
                         );
