@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 
+import '../models/demo_app_models.dart';
+import '../services/demo_app_repository.dart';
+import 'login_screen.dart';
 import '../services/restaurant_menu_api_service.dart';
 import '../services/restaurant_profile_api_service.dart';
+import 'app_support_screens.dart';
 
 double _clampDouble(double value, double min, double max) {
   return value.clamp(min, max).toDouble();
@@ -31,13 +35,103 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   static const int _dashboardTabIndex = 2;
   static const int _messagesTabIndex = 3;
   static const int _profileTabIndex = 4;
+  static const int _profileMenuTabIndex = 1;
+  static const List<RestaurantMenuItem> _fallbackMenuItems = [
+    RestaurantMenuItem(
+      id: 'margherita-special',
+      title: 'Margherita Special',
+      description:
+          'Fresh basil, mozzarella, tomato sauce, and olive oil drizzle.',
+      price: 11.00,
+      imageUrl:
+          'https://images.unsplash.com/photo-1604382354936-07c5d9983bd3?auto=format&fit=crop&w=900&q=80',
+      category: 'Pizza',
+      isAvailable: true,
+      isPopular: true,
+      rating: 4.8,
+      ordersCount: 148,
+    ),
+    RestaurantMenuItem(
+      id: 'crispy-wings',
+      title: 'Crispy Wings (6pcs)',
+      description: 'Golden fried wings served with spicy dipping sauce.',
+      price: 9.50,
+      imageUrl:
+          'https://images.unsplash.com/photo-1562967916-eb82221dfb92?auto=format&fit=crop&w=900&q=80',
+      category: 'Starters',
+      isAvailable: true,
+      isPopular: false,
+      rating: 4.6,
+      ordersCount: 96,
+    ),
+    RestaurantMenuItem(
+      id: 'creamy-carbonara',
+      title: 'Creamy Carbonara',
+      description: 'Spaghetti tossed in creamy parmesan sauce and herbs.',
+      price: 13.25,
+      imageUrl:
+          'https://images.unsplash.com/photo-1621996346565-e3dbc646d9a9?auto=format&fit=crop&w=900&q=80',
+      category: 'Pasta',
+      isAvailable: true,
+      isPopular: true,
+      rating: 4.9,
+      ordersCount: 121,
+    ),
+    RestaurantMenuItem(
+      id: 'smoked-bbq-burger',
+      title: 'Smoked BBQ Burger',
+      description: 'Beef patty, cheddar, caramelized onions, and BBQ sauce.',
+      price: 12.75,
+      imageUrl:
+          'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=900&q=80',
+      category: 'Burgers',
+      isAvailable: true,
+      isPopular: true,
+      rating: 4.7,
+      ordersCount: 134,
+    ),
+    RestaurantMenuItem(
+      id: 'garden-caesar-salad',
+      title: 'Garden Caesar Salad',
+      description:
+          'Romaine lettuce, parmesan flakes, croutons, and Caesar dressing.',
+      price: 8.40,
+      imageUrl:
+          'https://images.unsplash.com/photo-1546793665-c74683f339c1?auto=format&fit=crop&w=900&q=80',
+      category: 'Salads',
+      isAvailable: true,
+      isPopular: false,
+      rating: 4.4,
+      ordersCount: 58,
+    ),
+    RestaurantMenuItem(
+      id: 'double-chocolate-brownie',
+      title: 'Double Chocolate Brownie',
+      description:
+          'Warm brownie served with chocolate sauce and vanilla cream.',
+      price: 6.80,
+      imageUrl:
+          'https://images.unsplash.com/photo-1606313564200-e75d5e30476c?auto=format&fit=crop&w=900&q=80',
+      category: 'Desserts',
+      isAvailable: true,
+      isPopular: false,
+      rating: 4.8,
+      ordersCount: 73,
+    ),
+  ];
 
-  int _selectedTopTab = 1;
+  final _profileScaffoldKey = GlobalKey<ScaffoldState>();
+  final _demoRepository = DemoAppRepository.instance;
   int _selectedBottomIndex = 0;
+  int _selectedProfileTabIndex = _profileMenuTabIndex;
   final _profileApiService = RestaurantProfileApiService();
   final _menuApiService = RestaurantMenuApiService();
   PlatformFile? _selectedPostVideo;
   bool _isPickingPostVideo = false;
+  bool _isCreatingPost = false;
+  final List<_UploadedRestaurantVideo> _uploadedVideos =
+      <_UploadedRestaurantVideo>[];
+  late DemoFeedPost _vendorFeedPost;
   bool _isLoggingOut = false;
 
   late _RestaurantProfileInfo _profileInfo;
@@ -51,6 +145,10 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   @override
   void initState() {
     super.initState();
+    _vendorFeedPost = _demoRepository.getFeedPost(
+      following: true,
+      vendorView: true,
+    );
     _profileInfo = _RestaurantProfileInfo.fromData(
       primary: widget.initialUserData,
       fallbackName: widget.restaurantName,
@@ -102,13 +200,187 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
   String get _restaurantName => _profileInfo.name;
 
-  String get _restaurantHandle => _profileInfo.handle;
-
   bool get _isProfileTabSelected => _selectedBottomIndex == _profileTabIndex;
   bool get _isMenuTabSelected => _selectedBottomIndex == _menuTabIndex;
   bool get _isDashboardTabSelected =>
       _selectedBottomIndex == _dashboardTabIndex;
   bool get _isMessagesTabSelected => _selectedBottomIndex == _messagesTabIndex;
+  List<RestaurantMenuItem> get _menuItemsForDisplay =>
+      _restaurantMenuItems.isEmpty ? _fallbackMenuItems : _restaurantMenuItems;
+
+  void _syncVendorFeedPost() {
+    _vendorFeedPost = _demoRepository.getFeedPost(
+      following: true,
+      vendorView: true,
+    );
+  }
+
+  Future<void> _openSearch() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const SearchScreen()));
+  }
+
+  Future<void> _openNotifications() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
+    );
+  }
+
+  Future<void> _openRestaurantDetails() async {
+    final videoPreviews = _uploadedVideos
+        .map(
+          (video) => RestaurantProfileVideoPreview(
+            title: video.name,
+            meta:
+                '${_formatFileSize(video.sizeBytes)} - ${_timeAgoShort(video.uploadedAt)}',
+          ),
+        )
+        .toList();
+    final customerComments = _demoRepository
+        .getComments(_vendorFeedPost.id)
+        .where((comment) => !comment.isRestaurantReply)
+        .toList();
+    final reviewPreviews = customerComments.asMap().entries.map((entry) {
+      final index = entry.key;
+      final comment = entry.value;
+      final simulatedRating = (4.9 - (index * 0.15)).clamp(4.0, 5.0).toDouble();
+      return RestaurantProfileReviewPreview(
+        customerName: comment.authorName,
+        rating: simulatedRating,
+        comment: comment.body,
+        timeLabel: _timeAgoShort(comment.createdAt),
+        orderLabel: '#47${20 + index}',
+      );
+    }).toList();
+
+    await showRestaurantProfilePopup(
+      context,
+      restaurantName: _vendorFeedPost.restaurantName,
+      handle: _vendorFeedPost.restaurantHandle,
+      rating: _vendorFeedPost.rating,
+      caption: _vendorFeedPost.caption,
+      cuisineSummary: _profileInfo.cuisineSummary,
+      phoneLabel: _profileInfo.phoneLabel,
+      locationLabel: _profileInfo.locationLabel,
+      followersCountLabel: _profileInfo.followersCountLabel,
+      onOpenFollowers: () => _openFollowersList(
+        restaurantName: _vendorFeedPost.restaurantName,
+      ),
+      profileImageUrl: _profileInfo.coverImageUrl,
+      menuItems: _menuItemsForDisplay,
+      uploadedVideos: videoPreviews,
+      reviews: reviewPreviews,
+    );
+  }
+
+  Future<void> _toggleVendorFollow() async {
+    final updated = await _demoRepository.toggleFollow(_vendorFeedPost.id);
+    if (!mounted) {
+      return;
+    }
+    setState(() => _vendorFeedPost = updated);
+  }
+
+  Future<void> _toggleVendorLike() async {
+    final updated = await _demoRepository.toggleLike(_vendorFeedPost.id);
+    if (!mounted) {
+      return;
+    }
+    setState(() => _vendorFeedPost = updated);
+  }
+
+  Future<void> _openVendorComments() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CommentsScreen(
+          postId: _vendorFeedPost.id,
+          postTitle: _vendorFeedPost.restaurantName,
+        ),
+      ),
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(_syncVendorFeedPost);
+  }
+
+  Future<void> _shareVendorPromo() async {
+    await showShareFallbackDialog(
+      context,
+      title: _vendorFeedPost.restaurantName,
+      body: _vendorFeedPost.caption,
+    );
+  }
+
+  Future<void> _openVendorPromoDetails() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PromoDetailsScreen(
+          title: _vendorFeedPost.restaurantName,
+          caption: _vendorFeedPost.caption,
+          audioLabel: _vendorFeedPost.audioLabel,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openCompletedOrders() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => OrderListScreen(
+          title: 'Completed Orders',
+          orders: _demoRepository.getOrders(completed: true),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openRevenueAnalytics() async {
+    final completedOrders = _computeOrdersCompletedToday(_menuItemsForDisplay);
+    final revenueToday = _computeRevenueToday(
+      completedToday: completedOrders,
+      averagePrice: _computeAveragePrice(_menuItemsForDisplay),
+    );
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => RevenueAnalyticsScreen(
+          revenueLabel: _formatUsd(revenueToday),
+          completedOrders: completedOrders,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openActiveOrders() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => OrderListScreen(
+          title: 'Orders In Progress',
+          orders: _demoRepository.getOrders(completed: false),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openOrderManagement() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            OrderManagementScreen(orders: _demoRepository.getOrders()),
+      ),
+    );
+  }
+
+  Future<void> _openOrderDetails(String orderId) async {
+    final order = _demoRepository.findOrder(orderId);
+    if (order == null) {
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => OrderDetailScreen(order: order)),
+    );
+  }
 
   void _onBottomNavSelected(int index) {
     setState(() => _selectedBottomIndex = index);
@@ -122,6 +394,83 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     _refreshRestaurantMenu(force: true);
   }
 
+  void _onProfileTabSelected(int index) {
+    setState(() => _selectedProfileTabIndex = index);
+  }
+
+  static String _timeAgoShort(DateTime dateTime) {
+    final diff = DateTime.now().difference(dateTime);
+    if (diff.inMinutes < 1) {
+      return 'Just now';
+    }
+    if (diff.inHours < 1) {
+      return '${diff.inMinutes}m ago';
+    }
+    if (diff.inDays < 1) {
+      return '${diff.inHours}h ago';
+    }
+    return '${diff.inDays}d ago';
+  }
+
+  Future<void> _openEditProfile() async {
+    final updatedData = await Navigator.of(context).push<_EditableProfileData>(
+      MaterialPageRoute<_EditableProfileData>(
+        builder: (_) => _EditProfileScreen(
+          initialData: _EditableProfileData.fromProfile(_profileInfo),
+        ),
+      ),
+    );
+
+    if (!mounted || updatedData == null) {
+      return;
+    }
+
+    setState(() {
+      _profileInfo = _profileInfo.copyWithEditable(updatedData);
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Profile updated successfully.')),
+    );
+  }
+
+  Future<void> _openFollowersList({String? restaurantName}) async {
+    final token = widget.authToken?.trim() ?? '';
+    if (token.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please log in again to load followers.'),
+          backgroundColor: Color(0xFFB7372B),
+        ),
+      );
+      return;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _FollowersListScreen(
+          token: token,
+          restaurantName: (restaurantName?.trim().isNotEmpty ?? false)
+              ? restaurantName!.trim()
+              : _restaurantName,
+          restaurantId: _profileInfo.id,
+          profileApiService: _profileApiService,
+        ),
+      ),
+    );
+  }
+
+  void _openProfileSettingsDrawer() {
+    _profileScaffoldKey.currentState?.openEndDrawer();
+  }
+
+  void _logoutToLogin() {
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
+  }
+
   Future<void> _refreshRestaurantMenu({bool force = false}) async {
     if (_isRefreshingMenu) {
       return;
@@ -133,7 +482,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     final token = widget.authToken?.trim() ?? '';
     if (token.isEmpty) {
       setState(() {
-        _restaurantMenuItems = const <RestaurantMenuItem>[];
+        _restaurantMenuItems = _fallbackMenuItems;
         _hasLoadedMenu = true;
         _isRefreshingMenu = false;
         _menuSyncError = 'Missing auth token. Please log in again.';
@@ -152,17 +501,19 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         return;
       }
       setState(() {
-        _restaurantMenuItems = items;
+        _restaurantMenuItems = items.isEmpty ? _fallbackMenuItems : items;
         _hasLoadedMenu = true;
         _isRefreshingMenu = false;
-        _menuSyncError = null;
+        _menuSyncError = items.isEmpty
+            ? 'No backend menu items were returned, so sample dishes are shown.'
+            : null;
       });
     } on RestaurantMenuApiException catch (e) {
       if (!mounted) {
         return;
       }
       setState(() {
-        _restaurantMenuItems = const <RestaurantMenuItem>[];
+        _restaurantMenuItems = _fallbackMenuItems;
         _hasLoadedMenu = true;
         _isRefreshingMenu = false;
         _menuSyncError = e.message;
@@ -236,10 +587,9 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                     children: [
                       _TopControls(
                         metrics: metrics,
-                        selectedTab: _selectedTopTab,
-                        onTabSelected: (index) {
-                          setState(() => _selectedTopTab = index);
-                        },
+                        onOpenSearch: _openSearch,
+                        onOpenNotifications: _openNotifications,
+                        onOpenFeedInfo: _openVendorPromoDetails,
                       ),
                       SizedBox(height: metrics.gapAfterTop),
                       Expanded(
@@ -250,12 +600,22 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                             children: [
                               Expanded(
                                 child: _FeedDetails(
-                                  restaurantName: _restaurantHandle,
+                                  post: _vendorFeedPost,
                                   metrics: metrics,
+                                  onOpenRestaurant: _openRestaurantDetails,
+                                  onOpenAudio: _openVendorPromoDetails,
                                 ),
                               ),
                               SizedBox(width: metrics.railGap),
-                              _ActionRail(metrics: metrics),
+                              _ActionRail(
+                                metrics: metrics,
+                                post: _vendorFeedPost,
+                                onOpenRestaurant: _openRestaurantDetails,
+                                onToggleFollow: _toggleVendorFollow,
+                                onToggleLike: _toggleVendorLike,
+                                onOpenComments: _openVendorComments,
+                                onShare: _shareVendorPromo,
+                              ),
                             ],
                           ),
                         ),
@@ -279,7 +639,12 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
   Widget _buildProfileScaffold() {
     return Scaffold(
+      key: _profileScaffoldKey,
       backgroundColor: const Color(0xFFF8EFE8),
+      endDrawer: _ProfileSettingsDrawer(
+        onEditProfile: _openEditProfile,
+        onLogout: _logoutToLogin,
+      ),
       floatingActionButton: widget.onLogout == null
           ? null
           : FloatingActionButton.extended(
@@ -292,9 +657,9 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                       height: 16,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
+                      color: Colors.white,
+                    ),
+                  )
                   : const Icon(Icons.logout_rounded),
               label: Text(_isLoggingOut ? 'Signing out...' : 'Sign out'),
             ),
@@ -319,6 +684,11 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                       profileSyncError: _profileSyncError,
                       onRetryProfileSync: _refreshRestaurantProfile,
                       onManageFullMenu: _openMenuSection,
+                      onOpenFollowers: _openFollowersList,
+                      onOpenSettings: _openProfileSettingsDrawer,
+                      selectedTabIndex: _selectedProfileTabIndex,
+                      onTabSelected: _onProfileTabSelected,
+                      uploadedVideos: _uploadedVideos,
                     ),
                   ),
                   SizedBox(height: metrics.sectionGapSmall),
@@ -343,13 +713,14 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         child: LayoutBuilder(
           builder: (context, constraints) {
             final metrics = _ResponsiveMetrics.from(constraints);
-            final availableCount = _restaurantMenuItems
+            final menuItems = _menuItemsForDisplay;
+            final availableCount = menuItems
                 .where((item) => item.isAvailable)
                 .length;
-            final popularCount = _restaurantMenuItems
+            final popularCount = menuItems
                 .where((item) => item.isPopular)
                 .length;
-            final averagePrice = _computeAveragePrice(_restaurantMenuItems);
+            final averagePrice = _computeAveragePrice(menuItems);
 
             return Padding(
               padding: EdgeInsets.fromLTRB(
@@ -370,7 +741,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                   SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
                   _MenuStatsRow(
                     metrics: metrics,
-                    totalItems: _restaurantMenuItems.length,
+                    totalItems: menuItems.length,
                     availableItems: availableCount,
                     popularItems: popularCount,
                     averagePrice: averagePrice,
@@ -379,7 +750,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                   Expanded(
                     child: _MenuSection(
                       metrics: metrics,
-                      items: _restaurantMenuItems,
+                      items: menuItems,
                       isLoading: _isRefreshingMenu,
                       errorMessage: _menuSyncError,
                       onRetry: () => _refreshRestaurantMenu(force: true),
@@ -436,10 +807,16 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                       selectedVideoName: _selectedPostVideo?.name,
                       selectedVideoSizeBytes: _selectedPostVideo?.size,
                       isPickingVideo: _isPickingPostVideo,
+                      isCreatingPost: _isCreatingPost,
                       onSelectVideo: _pickPostVideo,
                       onClearVideo: _clearSelectedPostVideo,
                       onRefresh: () => _refreshRestaurantMenu(force: true),
                       onCreatePost: _createVideoPost,
+                      onOpenCompletedOrders: _openCompletedOrders,
+                      onOpenRevenueAnalytics: _openRevenueAnalytics,
+                      onOpenActiveOrders: _openActiveOrders,
+                      onOpenOrderManagement: _openOrderManagement,
+                      onOpenOrderDetails: _openOrderDetails,
                     ),
                   ),
                   SizedBox(height: metrics.sectionGapSmall),
@@ -532,7 +909,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     setState(() => _selectedPostVideo = null);
   }
 
-  void _createVideoPost() {
+  Future<void> _createVideoPost() async {
     if (_selectedPostVideo == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -543,14 +920,50 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       return;
     }
 
+    final selectedVideo = _selectedPostVideo!;
     FocusScope.of(context).unfocus();
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Video post published to your feed.'),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-    _clearSelectedPostVideo();
+    setState(() => _isCreatingPost = true);
+    try {
+      final created = await _demoRepository.createPost(
+        fileName: selectedVideo.name,
+        fileSizeBytes: selectedVideo.size,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _uploadedVideos.insert(
+          0,
+          _UploadedRestaurantVideo(
+            name: created.fileName,
+            sizeBytes: created.fileSizeBytes,
+            uploadedAt: created.createdAt,
+          ),
+        );
+        _selectedPostVideo = null;
+        _selectedProfileTabIndex = 0;
+        _isCreatingPost = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Video post published. It is now visible in your profile videos.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _isCreatingPost = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to create the post right now.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   double? _computeAveragePrice(List<RestaurantMenuItem> items) {
@@ -665,10 +1078,16 @@ class _DashboardSection extends StatelessWidget {
     required this.selectedVideoName,
     required this.selectedVideoSizeBytes,
     required this.isPickingVideo,
+    required this.isCreatingPost,
     required this.onSelectVideo,
     required this.onClearVideo,
     required this.onRefresh,
     required this.onCreatePost,
+    required this.onOpenCompletedOrders,
+    required this.onOpenRevenueAnalytics,
+    required this.onOpenActiveOrders,
+    required this.onOpenOrderManagement,
+    required this.onOpenOrderDetails,
   });
 
   final _ResponsiveMetrics metrics;
@@ -680,10 +1099,16 @@ class _DashboardSection extends StatelessWidget {
   final String? selectedVideoName;
   final int? selectedVideoSizeBytes;
   final bool isPickingVideo;
+  final bool isCreatingPost;
   final Future<void> Function() onSelectVideo;
   final VoidCallback onClearVideo;
   final Future<void> Function() onRefresh;
-  final VoidCallback onCreatePost;
+  final Future<void> Function() onCreatePost;
+  final Future<void> Function() onOpenCompletedOrders;
+  final Future<void> Function() onOpenRevenueAnalytics;
+  final Future<void> Function() onOpenActiveOrders;
+  final Future<void> Function() onOpenOrderManagement;
+  final Future<void> Function(String orderId) onOpenOrderDetails;
 
   @override
   Widget build(BuildContext context) {
@@ -709,6 +1134,9 @@ class _DashboardSection extends StatelessWidget {
             ordersCompletedToday: ordersCompletedToday,
             revenueToday: revenueToday,
             ordersInProgress: ordersInProgress,
+            onOpenCompletedOrders: onOpenCompletedOrders,
+            onOpenRevenueAnalytics: onOpenRevenueAnalytics,
+            onOpenActiveOrders: onOpenActiveOrders,
           ),
           SizedBox(height: sectionGap),
           _CreatePostPanel(
@@ -716,6 +1144,7 @@ class _DashboardSection extends StatelessWidget {
             selectedVideoName: selectedVideoName,
             selectedVideoSizeBytes: selectedVideoSizeBytes,
             isPickingVideo: isPickingVideo,
+            isCreatingPost: isCreatingPost,
             onSelectVideo: onSelectVideo,
             onClearVideo: onClearVideo,
             onCreatePost: onCreatePost,
@@ -724,6 +1153,8 @@ class _DashboardSection extends StatelessWidget {
           _DashboardLiveOrdersPanel(
             metrics: metrics,
             ordersInProgress: ordersInProgress,
+            onOpenOrderManagement: onOpenOrderManagement,
+            onOpenOrderDetails: onOpenOrderDetails,
           ),
           SizedBox(height: _clampDouble(8 * metrics.scale, 6, 8)),
         ],
@@ -862,12 +1293,18 @@ class _DashboardStatsPanel extends StatelessWidget {
     required this.ordersCompletedToday,
     required this.revenueToday,
     required this.ordersInProgress,
+    required this.onOpenCompletedOrders,
+    required this.onOpenRevenueAnalytics,
+    required this.onOpenActiveOrders,
   });
 
   final _ResponsiveMetrics metrics;
   final int ordersCompletedToday;
   final double revenueToday;
   final int ordersInProgress;
+  final Future<void> Function() onOpenCompletedOrders;
+  final Future<void> Function() onOpenRevenueAnalytics;
+  final Future<void> Function() onOpenActiveOrders;
 
   @override
   Widget build(BuildContext context) {
@@ -885,6 +1322,7 @@ class _DashboardStatsPanel extends StatelessWidget {
                 value: '$ordersCompletedToday',
                 iconColor: const Color(0xFF2E9B57),
                 iconBackgroundColor: const Color(0xFFE1F5E8),
+                onTap: onOpenCompletedOrders,
               ),
             ),
             SizedBox(width: itemGap),
@@ -896,6 +1334,7 @@ class _DashboardStatsPanel extends StatelessWidget {
                 value: _formatUsd(revenueToday),
                 iconColor: const Color(0xFFFF7E4D),
                 iconBackgroundColor: const Color(0xFFFFEFE8),
+                onTap: onOpenRevenueAnalytics,
               ),
             ),
           ],
@@ -908,6 +1347,7 @@ class _DashboardStatsPanel extends StatelessWidget {
           value: '$ordersInProgress',
           iconColor: const Color(0xFF43739C),
           iconBackgroundColor: const Color(0xFFE8EFF7),
+          onTap: onOpenActiveOrders,
         ),
       ],
     );
@@ -922,6 +1362,7 @@ class _DashboardStatCard extends StatelessWidget {
     required this.value,
     required this.iconColor,
     required this.iconBackgroundColor,
+    required this.onTap,
   });
 
   final _ResponsiveMetrics metrics;
@@ -930,66 +1371,73 @@ class _DashboardStatCard extends StatelessWidget {
   final String value;
   final Color iconColor;
   final Color iconBackgroundColor;
+  final Future<void> Function() onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: _clampDouble(12 * metrics.scale, 10, 12),
-        vertical: _clampDouble(10 * metrics.scale, 8, 10),
+    return InkWell(
+      onTap: () => onTap(),
+      borderRadius: BorderRadius.circular(
+        _clampDouble(18 * metrics.scale, 14, 18),
       ),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF3F0EC),
-        borderRadius: BorderRadius.circular(
-          _clampDouble(18 * metrics.scale, 14, 18),
+      child: Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: _clampDouble(12 * metrics.scale, 10, 12),
+          vertical: _clampDouble(10 * metrics.scale, 8, 10),
         ),
-        border: Border.all(color: const Color(0xFFE5DACF)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: _clampDouble(34 * metrics.scale, 28, 34),
-            height: _clampDouble(34 * metrics.scale, 28, 34),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: iconBackgroundColor,
-            ),
-            child: Icon(
-              icon,
-              color: iconColor,
-              size: _clampDouble(18 * metrics.scale, 14, 18),
-            ),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF3F0EC),
+          borderRadius: BorderRadius.circular(
+            _clampDouble(18 * metrics.scale, 14, 18),
           ),
-          SizedBox(width: _clampDouble(8 * metrics.scale, 6, 8)),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: const Color(0xFF1F1B19),
-                    fontSize: _clampDouble(18 * metrics.scale, 13, 18),
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                Text(
-                  label,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: const Color(0xFF8D7E73),
-                    fontSize: _clampDouble(12 * metrics.scale, 9, 12),
-                    fontWeight: FontWeight.w600,
-                    height: 1.2,
-                  ),
-                ),
-              ],
+          border: Border.all(color: const Color(0xFFE5DACF)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: _clampDouble(34 * metrics.scale, 28, 34),
+              height: _clampDouble(34 * metrics.scale, 28, 34),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: iconBackgroundColor,
+              ),
+              child: Icon(
+                icon,
+                color: iconColor,
+                size: _clampDouble(18 * metrics.scale, 14, 18),
+              ),
             ),
-          ),
-        ],
+            SizedBox(width: _clampDouble(8 * metrics.scale, 6, 8)),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: const Color(0xFF1F1B19),
+                      fontSize: _clampDouble(18 * metrics.scale, 13, 18),
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  Text(
+                    label,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: const Color(0xFF8D7E73),
+                      fontSize: _clampDouble(12 * metrics.scale, 9, 12),
+                      fontWeight: FontWeight.w600,
+                      height: 1.2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1001,6 +1449,7 @@ class _CreatePostPanel extends StatelessWidget {
     required this.selectedVideoName,
     required this.selectedVideoSizeBytes,
     required this.isPickingVideo,
+    required this.isCreatingPost,
     required this.onSelectVideo,
     required this.onClearVideo,
     required this.onCreatePost,
@@ -1010,9 +1459,10 @@ class _CreatePostPanel extends StatelessWidget {
   final String? selectedVideoName;
   final int? selectedVideoSizeBytes;
   final bool isPickingVideo;
+  final bool isCreatingPost;
   final Future<void> Function() onSelectVideo;
   final VoidCallback onClearVideo;
-  final VoidCallback onCreatePost;
+  final Future<void> Function() onCreatePost;
 
   @override
   Widget build(BuildContext context) {
@@ -1182,7 +1632,8 @@ class _CreatePostPanel extends StatelessWidget {
               SizedBox(width: _clampDouble(8 * metrics.scale, 6, 8)),
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: hasSelectedVideo && !isPickingVideo
+                  onPressed:
+                      hasSelectedVideo && !isPickingVideo && !isCreatingPost
                       ? onCreatePost
                       : null,
                   style: ElevatedButton.styleFrom(
@@ -1198,12 +1649,21 @@ class _CreatePostPanel extends StatelessWidget {
                       borderRadius: BorderRadius.circular(14),
                     ),
                   ),
-                  icon: Icon(
-                    Icons.cloud_upload_rounded,
-                    size: _clampDouble(18 * metrics.scale, 14, 18),
-                  ),
+                  icon: isCreatingPost
+                      ? SizedBox(
+                          width: _clampDouble(16 * metrics.scale, 13, 16),
+                          height: _clampDouble(16 * metrics.scale, 13, 16),
+                          child: const CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : Icon(
+                          Icons.cloud_upload_rounded,
+                          size: _clampDouble(18 * metrics.scale, 14, 18),
+                        ),
                   label: Text(
-                    'Create Post',
+                    isCreatingPost ? 'Creating...' : 'Create Post',
                     style: TextStyle(
                       fontSize: _clampDouble(14 * metrics.scale, 11, 14),
                       fontWeight: FontWeight.w800,
@@ -1223,10 +1683,14 @@ class _DashboardLiveOrdersPanel extends StatelessWidget {
   const _DashboardLiveOrdersPanel({
     required this.metrics,
     required this.ordersInProgress,
+    required this.onOpenOrderManagement,
+    required this.onOpenOrderDetails,
   });
 
   final _ResponsiveMetrics metrics;
   final int ordersInProgress;
+  final Future<void> Function() onOpenOrderManagement;
+  final Future<void> Function(String orderId) onOpenOrderDetails;
 
   static const List<_DashboardLiveOrderData> _sampleOrders = [
     _DashboardLiveOrderData(
@@ -1346,6 +1810,7 @@ class _DashboardLiveOrdersPanel extends StatelessWidget {
               child: _DashboardLiveOrderRow(
                 metrics: metrics,
                 data: displayCount[index],
+                onTap: () => onOpenOrderDetails(displayCount[index].orderId),
               ),
             );
           }),
@@ -1353,7 +1818,7 @@ class _DashboardLiveOrdersPanel extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: TextButton.icon(
-              onPressed: () {},
+              onPressed: () => onOpenOrderManagement(),
               style: TextButton.styleFrom(
                 foregroundColor: const Color(0xFFFF7E4D),
                 backgroundColor: const Color(0xFFFFEFE8),
@@ -1384,10 +1849,15 @@ class _DashboardLiveOrdersPanel extends StatelessWidget {
 }
 
 class _DashboardLiveOrderRow extends StatelessWidget {
-  const _DashboardLiveOrderRow({required this.metrics, required this.data});
+  const _DashboardLiveOrderRow({
+    required this.metrics,
+    required this.data,
+    required this.onTap,
+  });
 
   final _ResponsiveMetrics metrics;
   final _DashboardLiveOrderData data;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -1398,100 +1868,104 @@ class _DashboardLiveOrderRow extends StatelessWidget {
         ? const Color(0xFFFFE8DE)
         : const Color(0xFFEDE5DE);
 
-    return Container(
-      width: double.infinity,
-      padding: EdgeInsets.symmetric(
-        horizontal: _clampDouble(10 * metrics.scale, 8, 10),
-        vertical: _clampDouble(9 * metrics.scale, 7, 9),
-      ),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8EFE8),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: data.highlighted
-              ? const Color(0xFFFFD8C9)
-              : const Color(0xFFE2D6CB),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        width: double.infinity,
+        padding: EdgeInsets.symmetric(
+          horizontal: _clampDouble(10 * metrics.scale, 8, 10),
+          vertical: _clampDouble(9 * metrics.scale, 7, 9),
         ),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      data.orderId,
-                      style: TextStyle(
-                        color: const Color(0xFF1F1B19),
-                        fontSize: _clampDouble(13 * metrics.scale, 10, 13),
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    SizedBox(width: _clampDouble(6 * metrics.scale, 4, 6)),
-                    Flexible(
-                      child: Text(
-                        data.customerName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8EFE8),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: data.highlighted
+                ? const Color(0xFFFFD8C9)
+                : const Color(0xFFE2D6CB),
+          ),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        data.orderId,
                         style: TextStyle(
-                          color: const Color(0xFF7E7064),
+                          color: const Color(0xFF1F1B19),
                           fontSize: _clampDouble(12 * metrics.scale, 9, 12),
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
+                      SizedBox(width: _clampDouble(6 * metrics.scale, 4, 6)),
+                      Flexible(
+                        child: Text(
+                          data.customerName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: const Color(0xFF7E7064),
+                            fontSize: _clampDouble(12 * metrics.scale, 9, 12),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: _clampDouble(3 * metrics.scale, 2, 3)),
+                  Text(
+                    data.itemSummary,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: const Color(0xFF8D7E73),
+                      fontSize: _clampDouble(12 * metrics.scale, 9, 12),
+                      fontWeight: FontWeight.w600,
                     ),
-                  ],
-                ),
-                SizedBox(height: _clampDouble(3 * metrics.scale, 2, 3)),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(width: _clampDouble(8 * metrics.scale, 6, 8)),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
                 Text(
-                  data.itemSummary,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  data.etaLabel,
                   style: TextStyle(
-                    color: const Color(0xFF8D7E73),
+                    color: const Color(0xFF2A231E),
                     fontSize: _clampDouble(12 * metrics.scale, 9, 12),
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                SizedBox(height: _clampDouble(4 * metrics.scale, 3, 4)),
+                Container(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: _clampDouble(8 * metrics.scale, 6, 8),
+                    vertical: _clampDouble(3 * metrics.scale, 2, 3),
+                  ),
+                  decoration: BoxDecoration(
+                    color: statusBackground,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    data.statusLabel,
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: _clampDouble(10 * metrics.scale, 8, 10),
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
               ],
             ),
-          ),
-          SizedBox(width: _clampDouble(8 * metrics.scale, 6, 8)),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                data.etaLabel,
-                style: TextStyle(
-                  color: const Color(0xFF2A231E),
-                  fontSize: _clampDouble(12 * metrics.scale, 9, 12),
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              SizedBox(height: _clampDouble(4 * metrics.scale, 3, 4)),
-              Container(
-                padding: EdgeInsets.symmetric(
-                  horizontal: _clampDouble(8 * metrics.scale, 6, 8),
-                  vertical: _clampDouble(3 * metrics.scale, 2, 3),
-                ),
-                decoration: BoxDecoration(
-                  color: statusBackground,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  data.statusLabel,
-                  style: TextStyle(
-                    color: statusColor,
-                    fontSize: _clampDouble(10 * metrics.scale, 8, 10),
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1515,84 +1989,101 @@ class _DashboardLiveOrderData {
   final bool highlighted;
 }
 
-class _MessagesSection extends StatelessWidget {
+class _MessagesSection extends StatefulWidget {
   const _MessagesSection({required this.metrics, required this.restaurantName});
 
   final _ResponsiveMetrics metrics;
   final String restaurantName;
 
-  static const List<_MessageThreadData> _threads = [
-    _MessageThreadData(
-      customerName: 'Sara N.',
-      lastMessage:
-          'Can I switch my side from fries to grilled veggies before pickup?',
-      timeLabel: '2m',
-      orderLabel: '#4731',
-      channelLabel: 'Pickup',
-      unreadCount: 2,
-      priority: true,
-      needsReply: true,
-      online: true,
-    ),
-    _MessageThreadData(
-      customerName: 'Youssef A.',
-      lastMessage: 'Thanks! The order arrived, but I am missing the drink.',
-      timeLabel: '7m',
-      orderLabel: '#4728',
-      channelLabel: 'Delivery',
-      unreadCount: 1,
-      priority: true,
-      needsReply: true,
-      online: false,
-    ),
-    _MessageThreadData(
-      customerName: 'Maya K.',
-      lastMessage: 'Perfect as always. Please keep extra napkins next time.',
-      timeLabel: '25m',
-      orderLabel: '#4722',
-      channelLabel: 'Delivery',
-      unreadCount: 0,
-      priority: false,
-      needsReply: false,
-      online: false,
-    ),
-    _MessageThreadData(
-      customerName: 'Elie H.',
-      lastMessage: 'Do you still have the family-size combo available tonight?',
-      timeLabel: '41m',
-      orderLabel: '#4719',
-      channelLabel: 'Delivery',
-      unreadCount: 3,
-      priority: false,
-      needsReply: true,
-      online: true,
-    ),
-    _MessageThreadData(
-      customerName: 'Nour R.',
-      lastMessage: 'Please ring the bell at the main entrance when you arrive.',
-      timeLabel: '1h',
-      orderLabel: '#4714',
-      channelLabel: 'Delivery',
-      unreadCount: 0,
-      priority: false,
-      needsReply: false,
-      online: true,
-    ),
-    _MessageThreadData(
-      customerName: 'Karim D.',
-      lastMessage: 'Can I add one garlic dip to this order?',
-      timeLabel: '1h',
-      orderLabel: '#4713',
-      channelLabel: 'Pickup',
-      unreadCount: 1,
-      priority: false,
-      needsReply: true,
-      online: false,
-    ),
-  ];
+  @override
+  State<_MessagesSection> createState() => _MessagesSectionState();
+}
 
-  Future<void> _onRefresh() async {
-    await Future<void>.delayed(const Duration(milliseconds: 420));
+class _MessagesSectionState extends State<_MessagesSection> {
+  final _repository = DemoAppRepository.instance;
+
+  List<DemoConversationThread> _threads = const <DemoConversationThread>[];
+  MessageFilterType _selectedFilter = MessageFilterType.all;
+  String? _selectedCustomerName;
+  bool _needsReplyOnly = false;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadThreads();
+  }
+
+  Future<void> _loadThreads() async {
+    final threads = await _repository.getThreads();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _threads = threads;
+      _isLoading = false;
+    });
+  }
+
+  List<DemoConversationThread> get _visibleThreads {
+    Iterable<DemoConversationThread> items = _threads;
+    switch (_selectedFilter) {
+      case MessageFilterType.all:
+        break;
+      case MessageFilterType.unread:
+        items = items.where((thread) => thread.unreadCount > 0);
+        break;
+      case MessageFilterType.orders:
+        items = items.where((thread) => thread.type == MessageThreadType.order);
+        break;
+      case MessageFilterType.offers:
+        items = items.where((thread) => thread.type == MessageThreadType.offer);
+        break;
+    }
+    if (_needsReplyOnly) {
+      items = items.where((thread) => thread.needsReply);
+    }
+    if (_selectedCustomerName != null) {
+      items = items.where(
+        (thread) => thread.customerName == _selectedCustomerName,
+      );
+    }
+    return items.toList();
+  }
+
+  void _selectFilter(MessageFilterType filter) {
+    setState(() => _selectedFilter = filter);
+  }
+
+  void _toggleNeedsReplyOnly() {
+    setState(() => _needsReplyOnly = !_needsReplyOnly);
+  }
+
+  void _selectCustomer(String? customerName) {
+    setState(() {
+      _selectedCustomerName = _selectedCustomerName == customerName
+          ? null
+          : customerName;
+    });
+  }
+
+  Future<void> _openConversation(
+    DemoConversationThread thread, {
+    bool openComposer = false,
+  }) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ConversationScreen(
+          threadId: thread.id,
+          restaurantName: widget.restaurantName,
+          openComposerOnStart: openComposer,
+        ),
+      ),
+    );
+    if (!mounted) {
+      return;
+    }
+    await _loadThreads();
   }
 
   @override
@@ -1600,43 +2091,90 @@ class _MessagesSection extends StatelessWidget {
     final unreadThreads = _threads.where((item) => item.unreadCount > 0).length;
     final needsReplyThreads = _threads.where((item) => item.needsReply).length;
     final priorityThreads = _threads.where((item) => item.priority).toList();
+    final visibleThreads = _visibleThreads;
 
     return RefreshIndicator(
       color: const Color(0xFFFF7E4D),
-      onRefresh: _onRefresh,
-      child: ListView(
-        physics: const BouncingScrollPhysics(
-          parent: AlwaysScrollableScrollPhysics(),
-        ),
-        children: [
-          _MessagesHeaderCard(
-            metrics: metrics,
-            restaurantName: restaurantName,
-            unreadThreads: unreadThreads,
-            needsReplyThreads: needsReplyThreads,
-          ),
-          SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
-          _MessagesFilterRow(metrics: metrics),
-          if (priorityThreads.isNotEmpty) ...[
-            SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
-            _PriorityInboxRow(metrics: metrics, items: priorityThreads),
-          ],
-          SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
-          ...List.generate(_threads.length, (index) {
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: index == _threads.length - 1
-                    ? _clampDouble(6 * metrics.scale, 4, 6)
-                    : _clampDouble(10 * metrics.scale, 8, 10),
+      onRefresh: _loadThreads,
+      child: _isLoading
+          ? ListView(
+              physics: AlwaysScrollableScrollPhysics(),
+              children: [
+                SizedBox(height: 200),
+                Center(child: CircularProgressIndicator()),
+              ],
+            )
+          : ListView(
+              physics: const BouncingScrollPhysics(
+                parent: AlwaysScrollableScrollPhysics(),
               ),
-              child: _MessageThreadCard(
-                metrics: metrics,
-                thread: _threads[index],
-              ),
-            );
-          }),
-        ],
-      ),
+              children: [
+                _MessagesHeaderCard(
+                  metrics: widget.metrics,
+                  restaurantName: widget.restaurantName,
+                  unreadThreads: unreadThreads,
+                  needsReplyThreads: needsReplyThreads,
+                  needsReplySelected: _needsReplyOnly,
+                  onSelectUnread: () => _selectFilter(MessageFilterType.unread),
+                  onToggleNeedsReply: _toggleNeedsReplyOnly,
+                ),
+                SizedBox(
+                  height: _clampDouble(12 * widget.metrics.scale, 8, 12),
+                ),
+                _MessagesFilterRow(
+                  metrics: widget.metrics,
+                  selectedFilter: _selectedFilter,
+                  onSelected: _selectFilter,
+                ),
+                if (priorityThreads.isNotEmpty) ...[
+                  SizedBox(
+                    height: _clampDouble(12 * widget.metrics.scale, 8, 12),
+                  ),
+                  _PriorityInboxRow(
+                    metrics: widget.metrics,
+                    items: priorityThreads,
+                    selectedCustomerName: _selectedCustomerName,
+                    onSelectedCustomer: _selectCustomer,
+                  ),
+                ],
+                SizedBox(
+                  height: _clampDouble(12 * widget.metrics.scale, 8, 12),
+                ),
+                if (visibleThreads.isEmpty)
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF4F1ED),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: const Color(0xFFE4D8CD)),
+                    ),
+                    child: const Text(
+                      'No conversations match the current filters.',
+                      textAlign: TextAlign.center,
+                    ),
+                  )
+                else
+                  ...List.generate(visibleThreads.length, (index) {
+                    return Padding(
+                      padding: EdgeInsets.only(
+                        bottom: index == visibleThreads.length - 1
+                            ? _clampDouble(6 * widget.metrics.scale, 4, 6)
+                            : _clampDouble(10 * widget.metrics.scale, 8, 10),
+                      ),
+                      child: _MessageThreadCard(
+                        metrics: widget.metrics,
+                        thread: visibleThreads[index],
+                        onOpenThread: () =>
+                            _openConversation(visibleThreads[index]),
+                        onReply: () => _openConversation(
+                          visibleThreads[index],
+                          openComposer: true,
+                        ),
+                      ),
+                    );
+                  }),
+              ],
+            ),
     );
   }
 }
@@ -1647,12 +2185,18 @@ class _MessagesHeaderCard extends StatelessWidget {
     required this.restaurantName,
     required this.unreadThreads,
     required this.needsReplyThreads,
+    required this.needsReplySelected,
+    required this.onSelectUnread,
+    required this.onToggleNeedsReply,
   });
 
   final _ResponsiveMetrics metrics;
   final String restaurantName;
   final int unreadThreads;
   final int needsReplyThreads;
+  final bool needsReplySelected;
+  final VoidCallback onSelectUnread;
+  final VoidCallback onToggleNeedsReply;
 
   @override
   Widget build(BuildContext context) {
@@ -1731,6 +2275,7 @@ class _MessagesHeaderCard extends StatelessWidget {
                   value: '$unreadThreads threads',
                   labelSize: labelSize,
                   valueSize: valueSize,
+                  onTap: onSelectUnread,
                 ),
               ),
               SizedBox(width: _clampDouble(8 * metrics.scale, 6, 8)),
@@ -1744,6 +2289,8 @@ class _MessagesHeaderCard extends StatelessWidget {
                   value: '$needsReplyThreads now',
                   labelSize: labelSize,
                   valueSize: valueSize,
+                  onTap: onToggleNeedsReply,
+                  selected: needsReplySelected,
                 ),
               ),
             ],
@@ -1764,6 +2311,8 @@ class _MessageHeaderStat extends StatelessWidget {
     required this.value,
     required this.labelSize,
     required this.valueSize,
+    required this.onTap,
+    this.selected = false,
   });
 
   final _ResponsiveMetrics metrics;
@@ -1774,78 +2323,105 @@ class _MessageHeaderStat extends StatelessWidget {
   final String value;
   final double labelSize;
   final double valueSize;
+  final VoidCallback onTap;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: _clampDouble(10 * metrics.scale, 8, 10),
-        vertical: _clampDouble(9 * metrics.scale, 7, 9),
-      ),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8EFE8),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: _clampDouble(32 * metrics.scale, 26, 32),
-            height: _clampDouble(32 * metrics.scale, 26, 32),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: iconBackground,
-            ),
-            child: Icon(
-              icon,
-              color: iconColor,
-              size: _clampDouble(17 * metrics.scale, 13, 17),
-            ),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: _clampDouble(10 * metrics.scale, 8, 10),
+          vertical: _clampDouble(9 * metrics.scale, 7, 9),
+        ),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFFFFEFE8) : const Color(0xFFF8EFE8),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected ? const Color(0xFFFFD7C8) : Colors.transparent,
           ),
-          SizedBox(width: _clampDouble(8 * metrics.scale, 6, 8)),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: const Color(0xFF8D7E73),
-                    fontSize: labelSize,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                SizedBox(height: _clampDouble(2 * metrics.scale, 1, 2)),
-                Text(
-                  value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: const Color(0xFF2A231E),
-                    fontSize: valueSize * 0.72,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: _clampDouble(32 * metrics.scale, 26, 32),
+              height: _clampDouble(32 * metrics.scale, 26, 32),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: iconBackground,
+              ),
+              child: Icon(
+                icon,
+                color: iconColor,
+                size: _clampDouble(17 * metrics.scale, 13, 17),
+              ),
             ),
-          ),
-        ],
+            SizedBox(width: _clampDouble(8 * metrics.scale, 6, 8)),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: const Color(0xFF8D7E73),
+                      fontSize: labelSize,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  SizedBox(height: _clampDouble(2 * metrics.scale, 1, 2)),
+                  Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: const Color(0xFF2A231E),
+                      fontSize: valueSize * 0.72,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
 class _MessagesFilterRow extends StatelessWidget {
-  const _MessagesFilterRow({required this.metrics});
+  const _MessagesFilterRow({
+    required this.metrics,
+    required this.selectedFilter,
+    required this.onSelected,
+  });
 
   final _ResponsiveMetrics metrics;
+  final MessageFilterType selectedFilter;
+  final ValueChanged<MessageFilterType> onSelected;
 
   static const _filters = [
-    (icon: Icons.all_inbox_rounded, label: 'All', selected: false),
-    (icon: Icons.mark_chat_unread_rounded, label: 'Unread', selected: true),
-    (icon: Icons.receipt_long_rounded, label: 'Orders', selected: false),
-    (icon: Icons.local_offer_outlined, label: 'Offers', selected: false),
+    (icon: Icons.all_inbox_rounded, label: 'All', type: MessageFilterType.all),
+    (
+      icon: Icons.mark_chat_unread_rounded,
+      label: 'Unread',
+      type: MessageFilterType.unread,
+    ),
+    (
+      icon: Icons.receipt_long_rounded,
+      label: 'Orders',
+      type: MessageFilterType.orders,
+    ),
+    (
+      icon: Icons.local_offer_outlined,
+      label: 'Offers',
+      type: MessageFilterType.offers,
+    ),
   ];
 
   @override
@@ -1866,7 +2442,8 @@ class _MessagesFilterRow extends StatelessWidget {
               metrics: metrics,
               icon: item.icon,
               label: item.label,
-              selected: item.selected,
+              selected: selectedFilter == item.type,
+              onTap: () => onSelected(item.type),
             ),
           );
         }),
@@ -1881,56 +2458,69 @@ class _MessageFilterChip extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.selected,
+    required this.onTap,
   });
 
   final _ResponsiveMetrics metrics;
   final IconData icon;
   final String label;
   final bool selected;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final color = selected ? const Color(0xFFFF7E4D) : const Color(0xFF89786D);
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: _clampDouble(12 * metrics.scale, 10, 12),
-        vertical: _clampDouble(8 * metrics.scale, 6, 8),
-      ),
-      decoration: BoxDecoration(
-        color: selected ? const Color(0xFFFFEFE8) : const Color(0xFFF3ECE5),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: selected ? const Color(0xFFFFD7C8) : const Color(0xFFE2D5CA),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: _clampDouble(12 * metrics.scale, 10, 12),
+          vertical: _clampDouble(8 * metrics.scale, 6, 8),
         ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            icon,
-            color: color,
-            size: _clampDouble(17 * metrics.scale, 14, 17),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFFFFEFE8) : const Color(0xFFF3ECE5),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selected ? const Color(0xFFFFD7C8) : const Color(0xFFE2D5CA),
           ),
-          SizedBox(width: _clampDouble(6 * metrics.scale, 4, 6)),
-          Text(
-            label,
-            style: TextStyle(
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
               color: color,
-              fontSize: _clampDouble(12 * metrics.scale, 10, 12),
-              fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
+              size: _clampDouble(17 * metrics.scale, 14, 17),
             ),
-          ),
-        ],
+            SizedBox(width: _clampDouble(6 * metrics.scale, 4, 6)),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: _clampDouble(12 * metrics.scale, 10, 12),
+                fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
 class _PriorityInboxRow extends StatelessWidget {
-  const _PriorityInboxRow({required this.metrics, required this.items});
+  const _PriorityInboxRow({
+    required this.metrics,
+    required this.items,
+    required this.selectedCustomerName,
+    required this.onSelectedCustomer,
+  });
 
   final _ResponsiveMetrics metrics;
-  final List<_MessageThreadData> items;
+  final List<DemoConversationThread> items;
+  final String? selectedCustomerName;
+  final ValueChanged<String?> onSelectedCustomer;
 
   @override
   Widget build(BuildContext context) {
@@ -1958,7 +2548,12 @@ class _PriorityInboxRow extends StatelessWidget {
                       ? 0
                       : _clampDouble(8 * metrics.scale, 6, 8),
                 ),
-                child: _PriorityThreadChip(metrics: metrics, item: item),
+                child: _PriorityThreadChip(
+                  metrics: metrics,
+                  item: item,
+                  selected: selectedCustomerName == item.customerName,
+                  onTap: () => onSelectedCustomer(item.customerName),
+                ),
               );
             }),
           ),
@@ -1969,10 +2564,17 @@ class _PriorityInboxRow extends StatelessWidget {
 }
 
 class _PriorityThreadChip extends StatelessWidget {
-  const _PriorityThreadChip({required this.metrics, required this.item});
+  const _PriorityThreadChip({
+    required this.metrics,
+    required this.item,
+    required this.selected,
+    required this.onTap,
+  });
 
   final _ResponsiveMetrics metrics;
-  final _MessageThreadData item;
+  final DemoConversationThread item;
+  final bool selected;
+  final VoidCallback onTap;
 
   static String _initials(String name) {
     final words = name
@@ -1990,80 +2592,93 @@ class _PriorityThreadChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: _clampDouble(10 * metrics.scale, 8, 10),
-        vertical: _clampDouble(8 * metrics.scale, 6, 8),
-      ),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF3F0EC),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE3D7CC)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Container(
-                width: _clampDouble(30 * metrics.scale, 24, 30),
-                height: _clampDouble(30 * metrics.scale, 24, 30),
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Color(0xFFFFE2D6),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  _initials(item.customerName),
-                  style: TextStyle(
-                    color: const Color(0xFF9A3F1F),
-                    fontSize: _clampDouble(11 * metrics.scale, 9, 11),
-                    fontWeight: FontWeight.w800,
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: _clampDouble(10 * metrics.scale, 8, 10),
+          vertical: _clampDouble(8 * metrics.scale, 6, 8),
+        ),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFFFFEFE8) : const Color(0xFFF3F0EC),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected ? const Color(0xFFFFD7C8) : const Color(0xFFE3D7CC),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  width: _clampDouble(30 * metrics.scale, 24, 30),
+                  height: _clampDouble(30 * metrics.scale, 24, 30),
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Color(0xFFFFE2D6),
                   ),
-                ),
-              ),
-              if (item.online)
-                Positioned(
-                  right: -1,
-                  bottom: -1,
-                  child: Container(
-                    width: _clampDouble(10 * metrics.scale, 8, 10),
-                    height: _clampDouble(10 * metrics.scale, 8, 10),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: const Color(0xFF24A75A),
-                      border: Border.all(
-                        color: const Color(0xFFF3F0EC),
-                        width: 1.5,
-                      ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    _initials(item.customerName),
+                    style: TextStyle(
+                      color: const Color(0xFF9A3F1F),
+                      fontSize: _clampDouble(11 * metrics.scale, 9, 11),
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
                 ),
-            ],
-          ),
-          SizedBox(width: _clampDouble(7 * metrics.scale, 5, 7)),
-          Text(
-            item.customerName,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: const Color(0xFF2A231E),
-              fontSize: _clampDouble(12 * metrics.scale, 10, 12),
-              fontWeight: FontWeight.w700,
+                if (item.online)
+                  Positioned(
+                    right: -1,
+                    bottom: -1,
+                    child: Container(
+                      width: _clampDouble(10 * metrics.scale, 8, 10),
+                      height: _clampDouble(10 * metrics.scale, 8, 10),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: const Color(0xFF24A75A),
+                        border: Border.all(
+                          color: const Color(0xFFF3F0EC),
+                          width: 1.5,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
-          ),
-        ],
+            SizedBox(width: _clampDouble(7 * metrics.scale, 5, 7)),
+            Text(
+              item.customerName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: const Color(0xFF2A231E),
+                fontSize: _clampDouble(12 * metrics.scale, 10, 12),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
 class _MessageThreadCard extends StatelessWidget {
-  const _MessageThreadCard({required this.metrics, required this.thread});
+  const _MessageThreadCard({
+    required this.metrics,
+    required this.thread,
+    required this.onOpenThread,
+    required this.onReply,
+  });
 
   final _ResponsiveMetrics metrics;
-  final _MessageThreadData thread;
+  final DemoConversationThread thread;
+  final VoidCallback onOpenThread;
+  final VoidCallback onReply;
 
   static String _initials(String name) {
     final words = name
@@ -2086,194 +2701,206 @@ class _MessageThreadCard extends StatelessWidget {
         ? const Color(0xFFFFE1D4)
         : const Color(0xFFE4D8CD);
 
-    return Container(
-      padding: EdgeInsets.all(_clampDouble(12 * metrics.scale, 10, 12)),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF4F1ED),
-        borderRadius: BorderRadius.circular(
-          _clampDouble(20 * metrics.scale, 16, 20),
-        ),
-        border: Border.all(color: highlightColor),
+    return InkWell(
+      onTap: onOpenThread,
+      borderRadius: BorderRadius.circular(
+        _clampDouble(20 * metrics.scale, 16, 20),
       ),
-      child: Column(
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Container(
-                    width: _clampDouble(44 * metrics.scale, 36, 44),
-                    height: _clampDouble(44 * metrics.scale, 36, 44),
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Color(0xFFFFE2D6),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      _initials(thread.customerName),
-                      style: TextStyle(
-                        color: const Color(0xFF9A3F1F),
-                        fontSize: _clampDouble(16 * metrics.scale, 13, 16),
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  if (thread.online)
-                    Positioned(
-                      right: -1,
-                      bottom: -1,
-                      child: Container(
-                        width: _clampDouble(12 * metrics.scale, 10, 12),
-                        height: _clampDouble(12 * metrics.scale, 10, 12),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: const Color(0xFF24A75A),
-                          border: Border.all(
-                            color: const Color(0xFFF4F1ED),
-                            width: 2,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              SizedBox(width: _clampDouble(10 * metrics.scale, 8, 10)),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+      child: Container(
+        padding: EdgeInsets.all(_clampDouble(12 * metrics.scale, 10, 12)),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF4F1ED),
+          borderRadius: BorderRadius.circular(
+            _clampDouble(20 * metrics.scale, 16, 20),
+          ),
+          border: Border.all(color: highlightColor),
+        ),
+        child: Column(
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Stack(
+                  clipBehavior: Clip.none,
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            thread.customerName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: const Color(0xFF1F1B19),
-                              fontSize: _clampDouble(
-                                18 * metrics.scale,
-                                14,
-                                18,
-                              ),
-                              fontWeight: FontWeight.w800,
+                    Container(
+                      width: _clampDouble(44 * metrics.scale, 36, 44),
+                      height: _clampDouble(44 * metrics.scale, 36, 44),
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Color(0xFFFFE2D6),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        _initials(thread.customerName),
+                        style: TextStyle(
+                          color: const Color(0xFF9A3F1F),
+                          fontSize: _clampDouble(16 * metrics.scale, 13, 16),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    if (thread.online)
+                      Positioned(
+                        right: -1,
+                        bottom: -1,
+                        child: Container(
+                          width: _clampDouble(12 * metrics.scale, 10, 12),
+                          height: _clampDouble(12 * metrics.scale, 10, 12),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: const Color(0xFF24A75A),
+                            border: Border.all(
+                              color: const Color(0xFFF4F1ED),
+                              width: 2,
                             ),
                           ),
                         ),
-                        SizedBox(width: _clampDouble(6 * metrics.scale, 4, 6)),
-                        Text(
-                          thread.timeLabel,
-                          style: TextStyle(
-                            color: const Color(0xFF8C7D71),
-                            fontSize: _clampDouble(12 * metrics.scale, 9, 12),
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        if (hasUnread) ...[
-                          SizedBox(
-                            width: _clampDouble(6 * metrics.scale, 4, 6),
-                          ),
-                          Container(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: _clampDouble(7 * metrics.scale, 5, 7),
-                              vertical: _clampDouble(3 * metrics.scale, 2, 3),
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFFF7E4D),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
+                      ),
+                  ],
+                ),
+                SizedBox(width: _clampDouble(10 * metrics.scale, 8, 10)),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
                             child: Text(
-                              '${thread.unreadCount}',
+                              thread.customerName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                color: Colors.white,
+                                color: const Color(0xFF1F1B19),
                                 fontSize: _clampDouble(
-                                  10 * metrics.scale,
-                                  8,
-                                  10,
+                                  18 * metrics.scale,
+                                  14,
+                                  18,
                                 ),
                                 fontWeight: FontWeight.w800,
                               ),
                             ),
                           ),
+                          SizedBox(
+                            width: _clampDouble(6 * metrics.scale, 4, 6),
+                          ),
+                          Text(
+                            thread.timeLabel,
+                            style: TextStyle(
+                              color: const Color(0xFF8C7D71),
+                              fontSize: _clampDouble(12 * metrics.scale, 9, 12),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          if (hasUnread) ...[
+                            SizedBox(
+                              width: _clampDouble(6 * metrics.scale, 4, 6),
+                            ),
+                            Container(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: _clampDouble(
+                                  7 * metrics.scale,
+                                  5,
+                                  7,
+                                ),
+                                vertical: _clampDouble(3 * metrics.scale, 2, 3),
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFF7E4D),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                '${thread.unreadCount}',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: _clampDouble(
+                                    10 * metrics.scale,
+                                    8,
+                                    10,
+                                  ),
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
-                      ],
-                    ),
-                    SizedBox(height: _clampDouble(4 * metrics.scale, 3, 4)),
-                    Text(
-                      thread.lastMessage,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: const Color(0xFF8A7B6F),
-                        fontSize: _clampDouble(13 * metrics.scale, 10, 13),
-                        fontWeight: hasUnread
-                            ? FontWeight.w700
-                            : FontWeight.w600,
-                        height: 1.2,
                       ),
-                    ),
-                  ],
+                      SizedBox(height: _clampDouble(4 * metrics.scale, 3, 4)),
+                      Text(
+                        thread.lastMessage,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: const Color(0xFF8A7B6F),
+                          fontSize: _clampDouble(13 * metrics.scale, 10, 13),
+                          fontWeight: hasUnread
+                              ? FontWeight.w700
+                              : FontWeight.w600,
+                          height: 1.2,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
-          ),
-          SizedBox(height: _clampDouble(9 * metrics.scale, 7, 9)),
-          Row(
-            children: [
-              _MessageMetaPill(
-                metrics: metrics,
-                icon: Icons.receipt_long_rounded,
-                label: thread.orderLabel,
-              ),
-              SizedBox(width: _clampDouble(6 * metrics.scale, 4, 6)),
-              _MessageMetaPill(
-                metrics: metrics,
-                icon: Icons.local_shipping_outlined,
-                label: thread.channelLabel,
-              ),
-              if (thread.priority) ...[
+              ],
+            ),
+            SizedBox(height: _clampDouble(9 * metrics.scale, 7, 9)),
+            Row(
+              children: [
+                _MessageMetaPill(
+                  metrics: metrics,
+                  icon: Icons.receipt_long_rounded,
+                  label: thread.orderLabel,
+                ),
                 SizedBox(width: _clampDouble(6 * metrics.scale, 4, 6)),
                 _MessageMetaPill(
                   metrics: metrics,
-                  icon: Icons.priority_high_rounded,
-                  label: 'Priority',
-                  highlighted: true,
+                  icon: Icons.local_shipping_outlined,
+                  label: thread.channelLabel,
+                ),
+                if (thread.priority) ...[
+                  SizedBox(width: _clampDouble(6 * metrics.scale, 4, 6)),
+                  _MessageMetaPill(
+                    metrics: metrics,
+                    icon: Icons.priority_high_rounded,
+                    label: 'Priority',
+                    highlighted: true,
+                  ),
+                ],
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: onReply,
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFFFF7E4D),
+                    minimumSize: Size(
+                      _clampDouble(84 * metrics.scale, 70, 84),
+                      _clampDouble(34 * metrics.scale, 30, 34),
+                    ),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: _clampDouble(10 * metrics.scale, 8, 10),
+                    ),
+                    backgroundColor: const Color(0xFFFFEFE8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  icon: Icon(
+                    Icons.reply_rounded,
+                    size: _clampDouble(16 * metrics.scale, 13, 16),
+                  ),
+                  label: Text(
+                    'Reply',
+                    style: TextStyle(
+                      fontSize: _clampDouble(12 * metrics.scale, 10, 12),
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                 ),
               ],
-              const Spacer(),
-              TextButton.icon(
-                onPressed: () {},
-                style: TextButton.styleFrom(
-                  foregroundColor: const Color(0xFFFF7E4D),
-                  minimumSize: Size(
-                    _clampDouble(84 * metrics.scale, 70, 84),
-                    _clampDouble(34 * metrics.scale, 30, 34),
-                  ),
-                  padding: EdgeInsets.symmetric(
-                    horizontal: _clampDouble(10 * metrics.scale, 8, 10),
-                  ),
-                  backgroundColor: const Color(0xFFFFEFE8),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                icon: Icon(
-                  Icons.reply_rounded,
-                  size: _clampDouble(16 * metrics.scale, 13, 16),
-                ),
-                label: Text(
-                  'Reply',
-                  style: TextStyle(
-                    fontSize: _clampDouble(12 * metrics.scale, 10, 12),
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2329,28 +2956,256 @@ class _MessageMetaPill extends StatelessWidget {
   }
 }
 
-class _MessageThreadData {
-  const _MessageThreadData({
+class _UploadedRestaurantVideo {
+  const _UploadedRestaurantVideo({
+    required this.name,
+    required this.sizeBytes,
+    required this.uploadedAt,
+  });
+
+  final String name;
+  final int sizeBytes;
+  final DateTime uploadedAt;
+}
+
+class _RestaurantReviewData {
+  const _RestaurantReviewData({
     required this.customerName,
-    required this.lastMessage,
+    required this.rating,
+    required this.comment,
     required this.timeLabel,
     required this.orderLabel,
-    required this.channelLabel,
-    required this.unreadCount,
-    required this.priority,
-    required this.needsReply,
-    required this.online,
   });
 
   final String customerName;
-  final String lastMessage;
+  final double rating;
+  final String comment;
   final String timeLabel;
   final String orderLabel;
-  final String channelLabel;
-  final int unreadCount;
-  final bool priority;
-  final bool needsReply;
-  final bool online;
+}
+
+class _FollowersListScreen extends StatefulWidget {
+  const _FollowersListScreen({
+    required this.token,
+    required this.restaurantName,
+    required this.profileApiService,
+    this.restaurantId,
+  });
+
+  final String token;
+  final String restaurantName;
+  final String? restaurantId;
+  final RestaurantProfileApiService profileApiService;
+
+  @override
+  State<_FollowersListScreen> createState() => _FollowersListScreenState();
+}
+
+class _FollowersListScreenState extends State<_FollowersListScreen> {
+  List<RestaurantFollower> _followers = const <RestaurantFollower>[];
+  bool _isLoading = true;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFollowers();
+  }
+
+  Future<void> _loadFollowers() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final followers = await widget.profileApiService.fetchFollowers(
+        token: widget.token,
+        restaurantId: widget.restaurantId,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _followers = followers;
+        _isLoading = false;
+      });
+    } on RestaurantProfileApiException catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = e.message;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Failed to load followers. Please try again.';
+      });
+    }
+  }
+
+  String _initials(String value) {
+    final words = value
+        .split(RegExp(r'\s+'))
+        .where((segment) => segment.trim().isNotEmpty)
+        .toList();
+    if (words.isEmpty) {
+      return 'U';
+    }
+    if (words.length == 1) {
+      final first = words.first;
+      return first.substring(0, 1).toUpperCase();
+    }
+    return '${words.first[0]}${words[1][0]}'.toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final title = widget.restaurantName.trim().isEmpty
+        ? 'Restaurant'
+        : widget.restaurantName.trim();
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8EFE8),
+      appBar: AppBar(
+        title: Text(title),
+        backgroundColor: const Color(0xFFF8EFE8),
+        elevation: 0,
+      ),
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_errorMessage != null && _errorMessage!.trim().isNotEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.error_outline_rounded,
+                color: Color(0xFFB7372B),
+                size: 38,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                _errorMessage!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Color(0xFF6E3A2E),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: _loadFollowers,
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFFF7E4D),
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_followers.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 24),
+          child: Text(
+            'No followers found for this page yet.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Color(0xFF73685D),
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadFollowers,
+      child: ListView.separated(
+        physics: const BouncingScrollPhysics(
+          parent: AlwaysScrollableScrollPhysics(),
+        ),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 22),
+        itemCount: _followers.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 10),
+        itemBuilder: (context, index) {
+          final follower = _followers[index];
+          final avatarUrl = follower.avatarUrl?.trim() ?? '';
+          final secondary = follower.secondaryLabel;
+          return Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFFF3F0EC),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFE4D8CF)),
+            ),
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 2,
+              ),
+              leading: CircleAvatar(
+                radius: 22,
+                backgroundColor: const Color(0xFFE8D8CA),
+                backgroundImage: avatarUrl.isEmpty ? null : NetworkImage(avatarUrl),
+                child: avatarUrl.isEmpty
+                    ? Text(
+                        _initials(follower.name),
+                        style: const TextStyle(
+                          color: Color(0xFF4A3C31),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      )
+                    : null,
+              ),
+              title: Text(
+                follower.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFF2D241F),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              subtitle: secondary == null
+                  ? null
+                  : Text(
+                      secondary,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF8A7A6E),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+            ),
+          );
+        },
+      ),
+    );
+  }
 }
 
 class _ProfileSection extends StatelessWidget {
@@ -2361,6 +3216,11 @@ class _ProfileSection extends StatelessWidget {
     required this.profileSyncError,
     required this.onRetryProfileSync,
     required this.onManageFullMenu,
+    required this.onOpenFollowers,
+    required this.onOpenSettings,
+    required this.selectedTabIndex,
+    required this.onTabSelected,
+    required this.uploadedVideos,
   });
 
   final _ResponsiveMetrics metrics;
@@ -2369,6 +3229,14 @@ class _ProfileSection extends StatelessWidget {
   final String? profileSyncError;
   final VoidCallback onRetryProfileSync;
   final VoidCallback onManageFullMenu;
+  final VoidCallback onOpenFollowers;
+  final VoidCallback onOpenSettings;
+  final int selectedTabIndex;
+  final ValueChanged<int> onTabSelected;
+  final List<_UploadedRestaurantVideo> uploadedVideos;
+
+  static const int _videosTabIndex = 0;
+  static const int _reviewsTabIndex = 2;
 
   static const List<_PopularMenuItemData> _popularItems = [
     _PopularMenuItemData(
@@ -2394,53 +3262,37 @@ class _ProfileSection extends StatelessWidget {
     ),
   ];
 
-  static const List<_OwnerMenuItemData> _menuItems = [
-    _OwnerMenuItemData(
-      title: 'Margherita Special',
-      description: 'Fresh basil, mozzarella, tomato sauce, olive oil drizzle.',
-      price: '\$11.00',
-      imageUrl:
-          'https://images.unsplash.com/photo-1604382354936-07c5d9983bd3?auto=format&fit=crop&w=800&q=80',
-      tags: [
-        _OwnerMenuTagData(
-          label: 'VEG',
-          backgroundColor: Color(0xFFE1F5E8),
-          textColor: Color(0xFF2E9B57),
-        ),
-        _OwnerMenuTagData(
-          label: 'Best Seller',
-          backgroundColor: Color(0xFFEFEDEB),
-          textColor: Color(0xFF7A6C61),
-        ),
-      ],
+  static const List<_RestaurantReviewData> _sampleReviews = [
+    _RestaurantReviewData(
+      customerName: 'Lina M.',
+      rating: 4.8,
+      comment:
+          'Pizza arrived hot and fresh. Crust was perfect and delivery was very quick.',
+      timeLabel: '2h ago',
+      orderLabel: '#4731',
     ),
-    _OwnerMenuItemData(
-      title: 'Crispy Wings (6pcs)',
-      description: 'Golden fried wings served with spicy dipping sauce.',
-      price: '\$9.50',
-      imageUrl:
-          'https://images.unsplash.com/photo-1562967916-eb82221dfb92?auto=format&fit=crop&w=800&q=80',
-      tags: [
-        _OwnerMenuTagData(
-          label: 'SPICY',
-          backgroundColor: Color(0xFFFDE4E2),
-          textColor: Color(0xFFC6463E),
-        ),
-      ],
+    _RestaurantReviewData(
+      customerName: 'Rami A.',
+      rating: 4.6,
+      comment:
+          'Great flavor and portion size. Please keep the same quality for the fries.',
+      timeLabel: '5h ago',
+      orderLabel: '#4728',
     ),
-    _OwnerMenuItemData(
-      title: 'Creamy Carbonara',
-      description: 'Spaghetti tossed in creamy parmesan sauce and herbs.',
-      price: '\$13.25',
-      imageUrl:
-          'https://images.unsplash.com/photo-1621996346565-e3dbc646d9a9?auto=format&fit=crop&w=800&q=80',
-      tags: [
-        _OwnerMenuTagData(
-          label: 'Popular',
-          backgroundColor: Color(0xFFE8EFF7),
-          textColor: Color(0xFF43739C),
-        ),
-      ],
+    _RestaurantReviewData(
+      customerName: 'Maya K.',
+      rating: 5.0,
+      comment:
+          'Excellent as always. Packaging was clean and food arrived on time.',
+      timeLabel: 'Yesterday',
+      orderLabel: '#4722',
+    ),
+    _RestaurantReviewData(
+      customerName: 'Karim D.',
+      rating: 4.4,
+      comment: 'Burger was tasty and juicy. I would love a bit more sauce.',
+      timeLabel: 'Yesterday',
+      orderLabel: '#4713',
     ),
   ];
 
@@ -2449,7 +3301,9 @@ class _ProfileSection extends StatelessWidget {
     final sectionGap = _clampDouble(24 * metrics.scale, 16, 24);
     final sectionTitleSize = _clampDouble(36 * metrics.scale, 24, 36);
     final subtitleSize = _clampDouble(15 * metrics.scale, 11, 15);
-    final popularCardHeight = _clampDouble(246 * metrics.scale, 200, 246);
+    // Keep extra vertical room so the Popular Choices cards do not overflow
+    // on smaller devices or when text scale is slightly increased.
+    final popularCardHeight = _clampDouble(260 * metrics.scale, 214, 260);
     final itemGap = _clampDouble(12 * metrics.scale, 8, 12);
 
     return SingleChildScrollView(
@@ -2466,95 +3320,517 @@ class _ProfileSection extends StatelessWidget {
             ),
             SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
           ],
-          _OwnerProfileHero(metrics: metrics, profileInfo: profileInfo),
+          _OwnerProfileHero(
+            metrics: metrics,
+            profileInfo: profileInfo,
+            onOpenFollowers: onOpenFollowers,
+            onOpenSettings: onOpenSettings,
+          ),
           SizedBox(height: sectionGap),
-          _ProfileSectionTabs(metrics: metrics, selectedIndex: 1),
+          _ProfileSectionTabs(
+            metrics: metrics,
+            selectedIndex: selectedTabIndex,
+            onSelected: onTabSelected,
+          ),
           SizedBox(height: sectionGap),
-          Text(
-            'Popular Choices',
+          if (selectedTabIndex == _videosTabIndex)
+            ..._buildVideosTab(
+              sectionGap: sectionGap,
+              sectionTitleSize: sectionTitleSize,
+            )
+          else if (selectedTabIndex == _reviewsTabIndex)
+            ..._buildReviewsTab(
+              sectionGap: sectionGap,
+              sectionTitleSize: sectionTitleSize,
+            )
+          else
+            ..._buildMenuTab(
+              sectionGap: sectionGap,
+              sectionTitleSize: sectionTitleSize,
+              subtitleSize: subtitleSize,
+              popularCardHeight: popularCardHeight,
+              itemGap: itemGap,
+            ),
+          SizedBox(height: _clampDouble(8 * metrics.scale, 6, 8)),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _buildMenuTab({
+    required double sectionGap,
+    required double sectionTitleSize,
+    required double subtitleSize,
+    required double popularCardHeight,
+    required double itemGap,
+  }) {
+    return [
+      Text(
+        'Popular Choices',
+        style: TextStyle(
+          color: const Color(0xFF1F1B19),
+          fontSize: sectionTitleSize * 0.53,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      SizedBox(height: _clampDouble(10 * metrics.scale, 7, 10)),
+      Text(
+        'Best performing dishes this week',
+        style: TextStyle(
+          color: const Color(0xFF8E7E72),
+          fontSize: subtitleSize,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
+      SizedBox(
+        height: popularCardHeight,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          itemCount: _popularItems.length,
+          separatorBuilder: (_, index) => SizedBox(width: itemGap),
+          itemBuilder: (context, index) {
+            return _PopularMenuCard(
+              metrics: metrics,
+              item: _popularItems[index],
+            );
+          },
+        ),
+      ),
+      SizedBox(height: sectionGap),
+      SizedBox(
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: onManageFullMenu,
+          style: ElevatedButton.styleFrom(
+            elevation: 0,
+            backgroundColor: const Color(0xFFFF6D47),
+            foregroundColor: Colors.white,
+            minimumSize: Size(
+              double.infinity,
+              _clampDouble(58 * metrics.scale, 48, 58),
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+          icon: Icon(
+            Icons.restaurant_menu_rounded,
+            size: _clampDouble(23 * metrics.scale, 18, 23),
+          ),
+          label: Text(
+            'View Full Menu',
             style: TextStyle(
-              color: const Color(0xFF1F1B19),
-              fontSize: sectionTitleSize * 0.53,
+              fontSize: _clampDouble(22 * metrics.scale, 16, 22) * 0.7,
               fontWeight: FontWeight.w800,
             ),
           ),
-          SizedBox(height: _clampDouble(10 * metrics.scale, 7, 10)),
+        ),
+      ),
+    ];
+  }
+
+  List<Widget> _buildVideosTab({
+    required double sectionGap,
+    required double sectionTitleSize,
+  }) {
+    final titleFont = sectionTitleSize * 0.53;
+    if (uploadedVideos.isEmpty) {
+      return [
+        _ProfileTabEmptyState(
+          metrics: metrics,
+          icon: Icons.video_library_rounded,
+          title: 'No Videos Yet',
+          message:
+              'Upload videos from Dashboard > Create Post and they will appear here.',
+        ),
+      ];
+    }
+
+    return [
+      Text(
+        'Uploaded Videos',
+        style: TextStyle(
+          color: const Color(0xFF1F1B19),
+          fontSize: titleFont,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      SizedBox(height: _clampDouble(10 * metrics.scale, 7, 10)),
+      Text(
+        '${uploadedVideos.length} video post${uploadedVideos.length == 1 ? '' : 's'} on your profile',
+        style: TextStyle(
+          color: const Color(0xFF8E7E72),
+          fontSize: _clampDouble(15 * metrics.scale, 11, 15),
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
+      Container(
+        width: double.infinity,
+        padding: EdgeInsets.all(_clampDouble(10 * metrics.scale, 8, 10)),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF3ECE4),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE4D8CA)),
+        ),
+        child: GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: uploadedVideos.length,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            crossAxisSpacing: _clampDouble(8 * metrics.scale, 6, 8),
+            mainAxisSpacing: _clampDouble(8 * metrics.scale, 6, 8),
+            childAspectRatio: metrics.tiny ? 0.68 : 0.74,
+          ),
+          itemBuilder: (context, index) {
+            return _UploadedVideoGridTile(
+              metrics: metrics,
+              video: uploadedVideos[index],
+              index: index,
+            );
+          },
+        ),
+      ),
+      SizedBox(height: sectionGap * 0.4),
+    ];
+  }
+
+  List<Widget> _buildReviewsTab({
+    required double sectionGap,
+    required double sectionTitleSize,
+  }) {
+    final titleFont = sectionTitleSize * 0.53;
+    final avgRating =
+        _sampleReviews.fold<double>(
+          0,
+          (total, review) => total + review.rating,
+        ) /
+        _sampleReviews.length;
+
+    return [
+      Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Customer Reviews',
+              style: TextStyle(
+                color: const Color(0xFF1F1B19),
+                fontSize: titleFont,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          Container(
+            padding: EdgeInsets.symmetric(
+              horizontal: _clampDouble(10 * metrics.scale, 7, 10),
+              vertical: _clampDouble(5 * metrics.scale, 4, 5),
+            ),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF1CC),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.star_rounded,
+                  color: const Color(0xFFB07800),
+                  size: _clampDouble(14 * metrics.scale, 11, 14),
+                ),
+                SizedBox(width: _clampDouble(4 * metrics.scale, 3, 4)),
+                Text(
+                  avgRating.toStringAsFixed(1),
+                  style: TextStyle(
+                    color: const Color(0xFFB07800),
+                    fontSize: _clampDouble(12 * metrics.scale, 10, 12),
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
+      ...List.generate(_sampleReviews.length, (index) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: index == _sampleReviews.length - 1
+                ? 0
+                : _clampDouble(10 * metrics.scale, 8, 10),
+          ),
+          child: _ReviewCard(metrics: metrics, review: _sampleReviews[index]),
+        );
+      }),
+      SizedBox(height: sectionGap * 0.4),
+    ];
+  }
+}
+
+class _ProfileTabEmptyState extends StatelessWidget {
+  const _ProfileTabEmptyState({
+    required this.metrics,
+    required this.icon,
+    required this.title,
+    required this.message,
+  });
+
+  final _ResponsiveMetrics metrics;
+  final IconData icon;
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(
+        horizontal: _clampDouble(16 * metrics.scale, 12, 16),
+        vertical: _clampDouble(18 * metrics.scale, 14, 18),
+      ),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F0EC),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE5DACF)),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: _clampDouble(52 * metrics.scale, 42, 52),
+            height: _clampDouble(52 * metrics.scale, 42, 52),
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Color(0xFFFFEFE8),
+            ),
+            child: Icon(
+              icon,
+              color: const Color(0xFFFF7E4D),
+              size: _clampDouble(26 * metrics.scale, 20, 26),
+            ),
+          ),
+          SizedBox(height: _clampDouble(10 * metrics.scale, 8, 10)),
           Text(
-            'Best performing dishes this week',
+            title,
             style: TextStyle(
-              color: const Color(0xFF8E7E72),
-              fontSize: subtitleSize,
+              color: const Color(0xFF2A231E),
+              fontSize: _clampDouble(18 * metrics.scale, 14, 18),
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          SizedBox(height: _clampDouble(6 * metrics.scale, 4, 6)),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: const Color(0xFF8D7E73),
+              fontSize: _clampDouble(13 * metrics.scale, 10, 13),
+              fontWeight: FontWeight.w600,
+              height: 1.3,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _UploadedVideoGridTile extends StatelessWidget {
+  const _UploadedVideoGridTile({
+    required this.metrics,
+    required this.video,
+    required this.index,
+  });
+
+  final _ResponsiveMetrics metrics;
+  final _UploadedRestaurantVideo video;
+  final int index;
+
+  static String _timeAgo(DateTime dateTime) {
+    final diff = DateTime.now().difference(dateTime);
+    if (diff.inMinutes < 1) {
+      return 'Just now';
+    }
+    if (diff.inHours < 1) {
+      return '${diff.inMinutes}m ago';
+    }
+    if (diff.inDays < 1) {
+      return '${diff.inHours}h ago';
+    }
+    return '${diff.inDays}d ago';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(_clampDouble(7 * metrics.scale, 6, 7)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE6DCCF)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Stack(
+              children: [
+                Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFEFE8),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    Icons.play_circle_fill_rounded,
+                    color: const Color(0xFFFF7E4D),
+                    size: _clampDouble(30 * metrics.scale, 22, 30),
+                  ),
+                ),
+                Positioned(
+                  top: 4,
+                  left: 4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xD9000000),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '#${index + 1}',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: _clampDouble(9 * metrics.scale, 8, 9),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(height: _clampDouble(6 * metrics.scale, 4, 6)),
+          Text(
+            video.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: const Color(0xFF1F1B19),
+              fontSize: _clampDouble(11 * metrics.scale, 9, 11),
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          SizedBox(height: _clampDouble(2 * metrics.scale, 1, 2)),
+          Text(
+            '${_formatFileSize(video.sizeBytes)} • ${_timeAgo(video.uploadedAt)}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: const Color(0xFF8D7E73),
+              fontSize: _clampDouble(9.5 * metrics.scale, 8, 9.5),
               fontWeight: FontWeight.w600,
             ),
           ),
-          SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
-          SizedBox(
-            height: popularCardHeight,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              itemCount: _popularItems.length,
-              separatorBuilder: (_, index) => SizedBox(width: itemGap),
-              itemBuilder: (context, index) {
-                return _PopularMenuCard(
-                  metrics: metrics,
-                  item: _popularItems[index],
-                );
-              },
-            ),
-          ),
-          SizedBox(height: sectionGap),
-          Text(
-            'Full Menu',
-            style: TextStyle(
-              color: const Color(0xFF1F1B19),
-              fontSize: sectionTitleSize * 0.53,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          SizedBox(height: _clampDouble(10 * metrics.scale, 7, 10)),
-          ...List.generate(_menuItems.length, (index) {
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: index == _menuItems.length - 1 ? 0 : itemGap,
-              ),
-              child: _OwnerMenuItemCard(
-                metrics: metrics,
-                item: _menuItems[index],
-              ),
-            );
-          }),
-          SizedBox(height: _clampDouble(18 * metrics.scale, 12, 18)),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: onManageFullMenu,
-              style: ElevatedButton.styleFrom(
-                elevation: 0,
-                backgroundColor: const Color(0xFFFF6D47),
-                foregroundColor: Colors.white,
-                minimumSize: Size(
-                  double.infinity,
-                  _clampDouble(58 * metrics.scale, 48, 58),
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(999),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReviewCard extends StatelessWidget {
+  const _ReviewCard({required this.metrics, required this.review});
+
+  final _ResponsiveMetrics metrics;
+  final _RestaurantReviewData review;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(_clampDouble(12 * metrics.scale, 10, 12)),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F1ED),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE4D9CF)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  review.customerName,
+                  style: TextStyle(
+                    color: const Color(0xFF1F1B19),
+                    fontSize: _clampDouble(15 * metrics.scale, 12, 15),
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
-              icon: Icon(
-                Icons.restaurant_menu_rounded,
-                size: _clampDouble(23 * metrics.scale, 18, 23),
-              ),
-              label: Text(
-                'Manage Full Menu',
+              Text(
+                review.timeLabel,
                 style: TextStyle(
-                  fontSize: _clampDouble(22 * metrics.scale, 16, 22) * 0.7,
+                  color: const Color(0xFF8D7E73),
+                  fontSize: _clampDouble(11 * metrics.scale, 9, 11),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: _clampDouble(6 * metrics.scale, 4, 6)),
+          Row(
+            children: [
+              Icon(
+                Icons.star_rounded,
+                color: const Color(0xFFF5B826),
+                size: _clampDouble(16 * metrics.scale, 13, 16),
+              ),
+              SizedBox(width: _clampDouble(4 * metrics.scale, 3, 4)),
+              Text(
+                review.rating.toStringAsFixed(1),
+                style: TextStyle(
+                  color: const Color(0xFF7A5A00),
+                  fontSize: _clampDouble(12 * metrics.scale, 10, 12),
                   fontWeight: FontWeight.w800,
                 ),
               ),
-            ),
+              SizedBox(width: _clampDouble(8 * metrics.scale, 6, 8)),
+              Container(
+                padding: EdgeInsets.symmetric(
+                  horizontal: _clampDouble(7 * metrics.scale, 5, 7),
+                  vertical: _clampDouble(3 * metrics.scale, 2, 3),
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFE8E1),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  review.orderLabel,
+                  style: TextStyle(
+                    color: const Color(0xFF786658),
+                    fontSize: _clampDouble(11 * metrics.scale, 9, 11),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
           ),
           SizedBox(height: _clampDouble(8 * metrics.scale, 6, 8)),
+          Text(
+            review.comment,
+            style: TextStyle(
+              color: const Color(0xFF5D4E43),
+              fontSize: _clampDouble(13 * metrics.scale, 10, 13),
+              fontWeight: FontWeight.w600,
+              height: 1.3,
+            ),
+          ),
         ],
       ),
     );
@@ -3120,7 +4396,7 @@ class _ManagedMenuItemCard extends StatelessWidget {
                     if (item.rating != null)
                       _MenuBadge(
                         metrics: metrics,
-                        label: '${item.rating!.toStringAsFixed(1)}★',
+                        label: '${item.rating!.toStringAsFixed(1)}*',
                         backgroundColor: const Color(0xFFFFF1CC),
                         textColor: const Color(0xFFB07800),
                       ),
@@ -3306,10 +4582,17 @@ class _ProfileSyncBanner extends StatelessWidget {
 }
 
 class _OwnerProfileHero extends StatelessWidget {
-  const _OwnerProfileHero({required this.metrics, required this.profileInfo});
+  const _OwnerProfileHero({
+    required this.metrics,
+    required this.profileInfo,
+    required this.onOpenFollowers,
+    required this.onOpenSettings,
+  });
 
   final _ResponsiveMetrics metrics;
   final _RestaurantProfileInfo profileInfo;
+  final VoidCallback onOpenFollowers;
+  final VoidCallback onOpenSettings;
 
   static String _initials(String value) {
     final words = value
@@ -3389,19 +4672,11 @@ class _OwnerProfileHero extends StatelessWidget {
                     ),
                     child: Row(
                       children: [
-                        _ProfileTopOverlayButton(
-                          metrics: metrics,
-                          icon: Icons.arrow_back_rounded,
-                        ),
                         const Spacer(),
                         _ProfileTopOverlayButton(
                           metrics: metrics,
-                          icon: Icons.search_rounded,
-                        ),
-                        SizedBox(width: _clampDouble(8 * metrics.scale, 6, 8)),
-                        _ProfileTopOverlayButton(
-                          metrics: metrics,
-                          icon: Icons.more_horiz_rounded,
+                          icon: Icons.menu_rounded,
+                          onTap: onOpenSettings,
                         ),
                       ],
                     ),
@@ -3479,24 +4754,23 @@ class _OwnerProfileHero extends StatelessWidget {
                     ],
                   ),
                   SizedBox(height: _clampDouble(16 * metrics.scale, 10, 16)),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _OwnerActionButton(
-                          metrics: metrics,
-                          label: 'Edit Profile',
-                          outlined: true,
-                        ),
+                  Container(
+                    padding: EdgeInsets.symmetric(
+                      vertical: _clampDouble(7 * metrics.scale, 5, 7),
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8F4EF),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE5D9CE)),
+                    ),
+                    child: Center(
+                      child: _ProfileConnectionMetric(
+                        metrics: metrics,
+                        value: profileInfo.followersCountLabel,
+                        label: 'Followers',
+                        onTap: onOpenFollowers,
                       ),
-                      SizedBox(width: _clampDouble(10 * metrics.scale, 8, 10)),
-                      Expanded(
-                        child: _OwnerActionButton(
-                          metrics: metrics,
-                          label: 'Manage Menu',
-                          outlined: false,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ],
               ),
@@ -3559,27 +4833,522 @@ class _OwnerProfileHero extends StatelessWidget {
 }
 
 class _ProfileTopOverlayButton extends StatelessWidget {
-  const _ProfileTopOverlayButton({required this.metrics, required this.icon});
+  const _ProfileTopOverlayButton({
+    required this.metrics,
+    required this.icon,
+    this.onTap,
+  });
 
   final _ResponsiveMetrics metrics;
   final IconData icon;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final size = _clampDouble(44 * metrics.scale, 36, 44);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: const Color(0xFFFFFFFF),
+            border: Border.all(color: const Color(0xFF121212)),
+          ),
+          child: Icon(
+            icon,
+            color: const Color(0xFF121212),
+            size: _clampDouble(24 * metrics.scale, 18, 24),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfileSettingsDrawer extends StatelessWidget {
+  const _ProfileSettingsDrawer({
+    required this.onEditProfile,
+    required this.onLogout,
+  });
+
+  final VoidCallback onEditProfile;
+  final VoidCallback onLogout;
+
+  @override
+  Widget build(BuildContext context) {
+    return Drawer(
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Navigation',
+                style: TextStyle(
+                  color: Color(0xFF1F1B19),
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 20),
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                leading: const Icon(
+                  Icons.edit_rounded,
+                  color: Color(0xFFFF7E4D),
+                ),
+                title: const Text(
+                  'Edit Profile',
+                  style: TextStyle(
+                    color: Color(0xFF2E2521),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  onEditProfile();
+                },
+              ),
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                leading: const Icon(
+                  Icons.logout_rounded,
+                  color: Color(0xFFB7372B),
+                ),
+                title: const Text(
+                  'Log Out',
+                  style: TextStyle(
+                    color: Color(0xFF2E2521),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  onLogout();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EditableProfileData {
+  const _EditableProfileData({
+    required this.restaurantName,
+    required this.cuisineType,
+    required this.email,
+    required this.phone,
+    required this.country,
+    required this.city,
+    required this.street,
+    required this.postalCode,
+  });
+
+  final String restaurantName;
+  final String cuisineType;
+  final String email;
+  final String phone;
+  final String country;
+  final String city;
+  final String street;
+  final String postalCode;
+
+  factory _EditableProfileData.fromProfile(_RestaurantProfileInfo profile) {
+    return _EditableProfileData(
+      restaurantName: profile.name,
+      cuisineType: profile.cuisine ?? '',
+      email: profile.email ?? '',
+      phone: profile.phone ?? '',
+      country: profile.country ?? '',
+      city: profile.city ?? '',
+      street: profile.street ?? '',
+      postalCode: profile.postalCode ?? '',
+    );
+  }
+
+  bool matches(_EditableProfileData other) {
+    return _normalized(restaurantName) == _normalized(other.restaurantName) &&
+        _normalized(cuisineType) == _normalized(other.cuisineType) &&
+        _normalized(email) == _normalized(other.email) &&
+        _normalized(phone) == _normalized(other.phone) &&
+        _normalized(country) == _normalized(other.country) &&
+        _normalized(city) == _normalized(other.city) &&
+        _normalized(street) == _normalized(other.street) &&
+        _normalized(postalCode) == _normalized(other.postalCode);
+  }
+
+  String _normalized(String value) => value.trim();
+}
+
+class _EditProfileScreen extends StatefulWidget {
+  const _EditProfileScreen({required this.initialData});
+
+  final _EditableProfileData initialData;
+
+  @override
+  State<_EditProfileScreen> createState() => _EditProfileScreenState();
+}
+
+class _EditProfileScreenState extends State<_EditProfileScreen> {
+  late final TextEditingController _restaurantNameController;
+  late final TextEditingController _cuisineTypeController;
+  late final TextEditingController _emailController;
+  late final TextEditingController _phoneController;
+  late final TextEditingController _countryController;
+  late final TextEditingController _cityController;
+  late final TextEditingController _streetController;
+  late final TextEditingController _postalCodeController;
+  bool _hasChanges = false;
+
+  List<TextEditingController> get _controllers => [
+    _restaurantNameController,
+    _cuisineTypeController,
+    _emailController,
+    _phoneController,
+    _countryController,
+    _cityController,
+    _streetController,
+    _postalCodeController,
+  ];
+
+  _EditableProfileData get _currentData => _EditableProfileData(
+    restaurantName: _restaurantNameController.text.trim(),
+    cuisineType: _cuisineTypeController.text.trim(),
+    email: _emailController.text.trim(),
+    phone: _phoneController.text.trim(),
+    country: _countryController.text.trim(),
+    city: _cityController.text.trim(),
+    street: _streetController.text.trim(),
+    postalCode: _postalCodeController.text.trim(),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _restaurantNameController = TextEditingController(
+      text: widget.initialData.restaurantName,
+    );
+    _cuisineTypeController = TextEditingController(
+      text: widget.initialData.cuisineType,
+    );
+    _emailController = TextEditingController(text: widget.initialData.email);
+    _phoneController = TextEditingController(text: widget.initialData.phone);
+    _countryController = TextEditingController(
+      text: widget.initialData.country,
+    );
+    _cityController = TextEditingController(text: widget.initialData.city);
+    _streetController = TextEditingController(text: widget.initialData.street);
+    _postalCodeController = TextEditingController(
+      text: widget.initialData.postalCode,
+    );
+
+    for (final controller in _controllers) {
+      controller.addListener(_handleFormChanged);
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _controllers) {
+      controller.removeListener(_handleFormChanged);
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  bool _isValidEmail(String value) {
+    return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value.trim());
+  }
+
+  void _handleFormChanged() {
+    final hasChanges = !_currentData.matches(widget.initialData);
+    if (hasChanges == _hasChanges) {
+      return;
+    }
+
+    setState(() {
+      _hasChanges = hasChanges;
+    });
+  }
+
+  void _saveChanges() {
+    final data = _currentData;
+
+    if (data.restaurantName.isEmpty ||
+        data.cuisineType.isEmpty ||
+        data.email.isEmpty ||
+        data.phone.isEmpty ||
+        data.country.isEmpty ||
+        data.city.isEmpty ||
+        data.street.isEmpty ||
+        data.postalCode.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please complete all required fields.'),
+          backgroundColor: Color(0xFFB7372B),
+        ),
+      );
+      return;
+    }
+
+    if (!_isValidEmail(data.email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a valid email address.'),
+          backgroundColor: Color(0xFFB7372B),
+        ),
+      );
+      return;
+    }
+
+    Navigator.of(context).pop(data);
+  }
+
+  Widget _buildSaveActionBar() {
     return Container(
-      width: size,
-      height: size,
+      key: const ValueKey('save-action-bar'),
+      padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: const Color(0x34FFFFFF),
-        border: Border.all(color: const Color(0x43FFFFFF)),
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFFE2D2), Color(0xFFFFF7F1)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFFFC8AF)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x33FF7E4D),
+            blurRadius: 22,
+            offset: Offset(0, 12),
+          ),
+        ],
       ),
-      child: Icon(
-        icon,
-        color: Colors.white,
-        size: _clampDouble(24 * metrics.scale, 18, 24),
+      child: SizedBox(
+        width: double.infinity,
+        height: 46,
+        child: FilledButton(
+          onPressed: _saveChanges,
+          style: FilledButton.styleFrom(
+            elevation: 0,
+            backgroundColor: const Color(0xFFFF7E4D),
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+          ),
+          child: const Text(
+            'Save Changes',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+          ),
+        ),
       ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8EFE8),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFF8EFE8),
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        title: const Text(
+          'Edit Profile',
+          style: TextStyle(
+            color: Color(0xFF2E2521),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(18, 12, 18, 24),
+          child: Column(
+            children: [
+              _EditProfileField(
+                label: 'Restaurant Name',
+                hint: 'The Pizza Hub',
+                controller: _restaurantNameController,
+              ),
+              const SizedBox(height: 12),
+              _EditProfileField(
+                label: 'Cuisine Type',
+                hint: 'Italian',
+                controller: _cuisineTypeController,
+              ),
+              const SizedBox(height: 12),
+              _EditProfileField(
+                label: 'Email',
+                hint: 'contact@restaurant.com',
+                keyboardType: TextInputType.emailAddress,
+                controller: _emailController,
+              ),
+              const SizedBox(height: 12),
+              _EditProfileField(
+                label: 'Phone Number',
+                hint: '+961 03 123 456',
+                keyboardType: TextInputType.phone,
+                controller: _phoneController,
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: _EditProfileField(
+                      label: 'Country',
+                      hint: 'Lebanon',
+                      controller: _countryController,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _EditProfileField(
+                      label: 'City',
+                      hint: 'Beirut',
+                      controller: _cityController,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _EditProfileField(
+                label: 'Street',
+                hint: 'Hamra St, Bldg 42',
+                controller: _streetController,
+              ),
+              const SizedBox(height: 12),
+              _EditProfileField(
+                label: 'Postal Code',
+                hint: '1103',
+                keyboardType: TextInputType.number,
+                controller: _postalCodeController,
+              ),
+            ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        bottom: _hasChanges,
+        child: AnimatedSize(
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(18, _hasChanges ? 8 : 0, 18, 18),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 420),
+              switchInCurve: Curves.easeOutBack,
+              switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (child, animation) {
+                final slideAnimation =
+                    Tween<Offset>(
+                      begin: const Offset(0, 0.28),
+                      end: Offset.zero,
+                    ).animate(
+                      CurvedAnimation(
+                        parent: animation,
+                        curve: Curves.easeOutBack,
+                        reverseCurve: Curves.easeInCubic,
+                      ),
+                    );
+                final scaleAnimation = Tween<double>(begin: 0.94, end: 1)
+                    .animate(
+                      CurvedAnimation(
+                        parent: animation,
+                        curve: Curves.easeOutBack,
+                        reverseCurve: Curves.easeInCubic,
+                      ),
+                    );
+                return FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: slideAnimation,
+                    child: ScaleTransition(scale: scaleAnimation, child: child),
+                  ),
+                );
+              },
+              child: _hasChanges
+                  ? _buildSaveActionBar()
+                  : const SizedBox.shrink(key: ValueKey('save-action-empty')),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EditProfileField extends StatelessWidget {
+  const _EditProfileField({
+    required this.label,
+    required this.hint,
+    required this.controller,
+    this.keyboardType,
+  });
+
+  final String label;
+  final String hint;
+  final TextEditingController controller;
+  final TextInputType? keyboardType;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: Color(0xFF46372D),
+            fontSize: 13,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          height: 48,
+          decoration: BoxDecoration(
+            color: const Color(0xFFF2EEEA),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFE2D5C8)),
+          ),
+          child: TextField(
+            controller: controller,
+            keyboardType: keyboardType,
+            decoration: InputDecoration(
+              border: InputBorder.none,
+              hintText: hint,
+              hintStyle: const TextStyle(
+                color: Color(0xFFC0B1A4),
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 15,
+                vertical: 12,
+              ),
+            ),
+            style: const TextStyle(
+              color: Color(0xFF2D201A),
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -3628,43 +5397,61 @@ class _HeroMetaItem extends StatelessWidget {
   }
 }
 
-class _OwnerActionButton extends StatelessWidget {
-  const _OwnerActionButton({
+class _ProfileConnectionMetric extends StatelessWidget {
+  const _ProfileConnectionMetric({
     required this.metrics,
+    required this.value,
     required this.label,
-    required this.outlined,
+    this.onTap,
   });
 
   final _ResponsiveMetrics metrics;
+  final String value;
   final String label;
-  final bool outlined;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: _clampDouble(50 * metrics.scale, 42, 50),
-      child: TextButton(
-        onPressed: () {},
-        style: TextButton.styleFrom(
-          foregroundColor: outlined
-              ? const Color(0xFFFF7E4D)
-              : const Color(0xFFFFFFFF),
-          backgroundColor: outlined
-              ? const Color(0xFFF7F3EE)
-              : const Color(0xFFFF7E4D),
-          side: BorderSide(
-            color: outlined ? const Color(0xFFFF7E4D) : const Color(0xFFFF7E4D),
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+    final content = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: const Color(0xFF201A16),
+            fontSize: _clampDouble(18 * metrics.scale, 13, 18),
+            fontWeight: FontWeight.w900,
           ),
         ),
-        child: Text(
+        SizedBox(height: _clampDouble(3 * metrics.scale, 1, 3)),
+        Text(
           label,
           style: TextStyle(
-            fontSize: _clampDouble(16 * metrics.scale, 12, 16),
+            color: const Color(0xFF7C6E61),
+            fontSize: _clampDouble(12 * metrics.scale, 9, 12),
             fontWeight: FontWeight.w700,
           ),
+        ),
+      ],
+    );
+
+    if (onTap == null) {
+      return content;
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: _clampDouble(8 * metrics.scale, 6, 8),
+            vertical: _clampDouble(2 * metrics.scale, 1, 2),
+          ),
+          child: content,
         ),
       ),
     );
@@ -3675,10 +5462,12 @@ class _ProfileSectionTabs extends StatelessWidget {
   const _ProfileSectionTabs({
     required this.metrics,
     required this.selectedIndex,
+    required this.onSelected,
   });
 
   final _ResponsiveMetrics metrics;
   final int selectedIndex;
+  final ValueChanged<int> onSelected;
 
   static const _tabs = ['Videos', 'Menu', 'Reviews'];
 
@@ -3691,38 +5480,45 @@ class _ProfileSectionTabs extends StatelessWidget {
           children: List.generate(_tabs.length, (index) {
             final selected = index == selectedIndex;
             return Expanded(
-              child: Padding(
-                padding: EdgeInsets.symmetric(
-                  vertical: _clampDouble(6 * metrics.scale, 4, 6),
-                ),
-                child: Column(
-                  children: [
-                    Text(
-                      _tabs[index],
-                      style: TextStyle(
-                        color: selected
-                            ? const Color(0xFFFF7E4D)
-                            : const Color(0xFF6D7485),
-                        fontSize: textSize,
-                        fontWeight: selected
-                            ? FontWeight.w800
-                            : FontWeight.w600,
-                      ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => onSelected(index),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      vertical: _clampDouble(6 * metrics.scale, 4, 6),
                     ),
-                    SizedBox(height: _clampDouble(8 * metrics.scale, 5, 8)),
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      curve: Curves.easeOut,
-                      width: _clampDouble(66 * metrics.scale, 48, 66),
-                      height: _clampDouble(3.6 * metrics.scale, 2.4, 3.6),
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? const Color(0xFFFF7E4D)
-                            : Colors.transparent,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
+                    child: Column(
+                      children: [
+                        Text(
+                          _tabs[index],
+                          style: TextStyle(
+                            color: selected
+                                ? const Color(0xFFFF7E4D)
+                                : const Color(0xFF6D7485),
+                            fontSize: textSize,
+                            fontWeight: selected
+                                ? FontWeight.w800
+                                : FontWeight.w600,
+                          ),
+                        ),
+                        SizedBox(height: _clampDouble(8 * metrics.scale, 5, 8)),
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 150),
+                          curve: Curves.easeOut,
+                          width: _clampDouble(66 * metrics.scale, 48, 66),
+                          height: _clampDouble(3.6 * metrics.scale, 2.4, 3.6),
+                          decoration: BoxDecoration(
+                            color: selected
+                                ? const Color(0xFFFF7E4D)
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             );
@@ -3761,7 +5557,7 @@ class _PopularMenuCard extends StatelessWidget {
                 children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(18),
-                    child: Positioned.fill(
+                    child: SizedBox.expand(
                       child: Image.network(
                         item.imageUrl,
                         fit: BoxFit.cover,
@@ -3833,180 +5629,7 @@ class _PopularMenuCard extends StatelessWidget {
                 height: 1.2,
               ),
             ),
-            const Spacer(),
-            SizedBox(
-              width: double.infinity,
-              child: TextButton(
-                onPressed: () {},
-                style: TextButton.styleFrom(
-                  foregroundColor: const Color(0xFFFF7E4D),
-                  backgroundColor: const Color(0xFFF0E8DF),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                child: Text(
-                  'Edit +',
-                  style: TextStyle(
-                    fontSize: _clampDouble(14 * metrics.scale, 10, 14),
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _OwnerMenuItemCard extends StatelessWidget {
-  const _OwnerMenuItemCard({required this.metrics, required this.item});
-
-  final _ResponsiveMetrics metrics;
-  final _OwnerMenuItemData item;
-
-  @override
-  Widget build(BuildContext context) {
-    final thumbnailSize = _clampDouble(92 * metrics.scale, 74, 92);
-    return Container(
-      padding: EdgeInsets.all(_clampDouble(12 * metrics.scale, 10, 12)),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF4F1ED),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFFE4D9CF)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: SizedBox(
-              width: thumbnailSize,
-              height: thumbnailSize,
-              child: Image.network(
-                item.imageUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) {
-                  return const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [Color(0xFFE5D8CA), Color(0xFFD8C7B5)],
-                      ),
-                    ),
-                    child: Center(
-                      child: Icon(
-                        Icons.restaurant_menu_rounded,
-                        color: Color(0xFF7A6556),
-                        size: 30,
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-          SizedBox(width: _clampDouble(12 * metrics.scale, 9, 12)),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        item.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: const Color(0xFF1F1B19),
-                          fontSize:
-                              _clampDouble(31 * metrics.scale, 22, 31) * 0.56,
-                          fontWeight: FontWeight.w800,
-                          height: 1.18,
-                        ),
-                      ),
-                    ),
-                    SizedBox(width: _clampDouble(10 * metrics.scale, 7, 10)),
-                    Text(
-                      item.price,
-                      style: TextStyle(
-                        color: const Color(0xFFFF7E4D),
-                        fontSize:
-                            _clampDouble(30 * metrics.scale, 22, 30) * 0.56,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
-                SizedBox(height: _clampDouble(6 * metrics.scale, 4, 6)),
-                Text(
-                  item.description,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: const Color(0xFF8C7D71),
-                    fontSize: _clampDouble(14 * metrics.scale, 10, 14),
-                    fontWeight: FontWeight.w600,
-                    height: 1.25,
-                  ),
-                ),
-                SizedBox(height: _clampDouble(10 * metrics.scale, 7, 10)),
-                Wrap(
-                  spacing: _clampDouble(7 * metrics.scale, 5, 7),
-                  runSpacing: _clampDouble(6 * metrics.scale, 4, 6),
-                  children: item.tags
-                      .map((tag) => _MenuTagPill(metrics: metrics, tag: tag))
-                      .toList(),
-                ),
-              ],
-            ),
-          ),
-          SizedBox(width: _clampDouble(10 * metrics.scale, 8, 10)),
-          Container(
-            width: _clampDouble(38 * metrics.scale, 30, 38),
-            height: _clampDouble(38 * metrics.scale, 30, 38),
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              color: Color(0xFFE9E5E1),
-            ),
-            child: Icon(
-              Icons.edit_outlined,
-              color: const Color(0xFFFF7E4D),
-              size: _clampDouble(20 * metrics.scale, 14, 20),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MenuTagPill extends StatelessWidget {
-  const _MenuTagPill({required this.metrics, required this.tag});
-
-  final _ResponsiveMetrics metrics;
-  final _OwnerMenuTagData tag;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: _clampDouble(10 * metrics.scale, 7, 10),
-        vertical: _clampDouble(4 * metrics.scale, 3, 4),
-      ),
-      decoration: BoxDecoration(
-        color: tag.backgroundColor,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Text(
-        tag.label,
-        style: TextStyle(
-          color: tag.textColor,
-          fontSize: _clampDouble(12 * metrics.scale, 8, 12),
-          fontWeight: FontWeight.w700,
         ),
       ),
     );
@@ -4027,55 +5650,45 @@ class _PopularMenuItemData {
   final String imageUrl;
 }
 
-class _OwnerMenuItemData {
-  const _OwnerMenuItemData({
-    required this.title,
-    required this.description,
-    required this.price,
-    required this.imageUrl,
-    required this.tags,
-  });
-
-  final String title;
-  final String description;
-  final String price;
-  final String imageUrl;
-  final List<_OwnerMenuTagData> tags;
-}
-
-class _OwnerMenuTagData {
-  const _OwnerMenuTagData({
-    required this.label,
-    required this.backgroundColor,
-    required this.textColor,
-  });
-
-  final String label;
-  final Color backgroundColor;
-  final Color textColor;
-}
-
 class _RestaurantProfileInfo {
   const _RestaurantProfileInfo({
+    this.id,
     required this.name,
     required this.handle,
     required this.cuisineSummary,
     required this.ratingLabel,
     required this.phoneLabel,
     required this.locationLabel,
+    required this.followersCountLabel,
     required this.coverImageUrl,
+    this.cuisine,
+    this.email,
+    this.phone,
+    this.country,
+    this.city,
+    this.street,
+    this.postalCode,
   });
 
   static const String _defaultCoverImage =
       'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=1400&q=80';
 
+  final String? id;
   final String name;
   final String handle;
   final String cuisineSummary;
   final String ratingLabel;
   final String phoneLabel;
   final String locationLabel;
+  final String followersCountLabel;
   final String coverImageUrl;
+  final String? cuisine;
+  final String? email;
+  final String? phone;
+  final String? country;
+  final String? city;
+  final String? street;
+  final String? postalCode;
 
   factory _RestaurantProfileInfo.fromData({
     required String fallbackName,
@@ -4095,6 +5708,13 @@ class _RestaurantProfileInfo {
           'display_name',
         ]) ??
         (sanitizedFallback.isEmpty ? 'Restaurant' : sanitizedFallback);
+    final restaurantId = _firstString(allMaps, const [
+      'restaurant_id',
+      'id',
+      'user_id',
+      'owner_id',
+      'account_id',
+    ]);
 
     final handle = _normalizeHandle(
       _firstString(allMaps, const [
@@ -4120,6 +5740,16 @@ class _RestaurantProfileInfo {
       'address',
       'location',
     ]);
+    final email = _firstString(allMaps, const [
+      'email',
+      'business_email',
+      'contact_email',
+    ]);
+    final postalCode = _firstString(allMaps, const [
+      'postal_code',
+      'zip',
+      'zip_code',
+    ]);
 
     final phone = _firstString(allMaps, const [
       'phone',
@@ -4142,6 +5772,12 @@ class _RestaurantProfileInfo {
       'total_reviews',
       'reviews',
     ]);
+    final followersCount = _firstInt(allMaps, const [
+      'followers_count',
+      'follower_count',
+      'followers_total',
+      'followers',
+    ]);
 
     final coverImageUrl =
         _firstString(allMaps, const [
@@ -4157,6 +5793,7 @@ class _RestaurantProfileInfo {
         _defaultCoverImage;
 
     return _RestaurantProfileInfo(
+      id: restaurantId,
       name: name,
       handle: handle,
       cuisineSummary: _buildCuisineSummary(
@@ -4171,8 +5808,61 @@ class _RestaurantProfileInfo {
         city: city,
         country: country,
       ),
+      followersCountLabel: _buildConnectionCountLabel(followersCount),
       coverImageUrl: coverImageUrl,
+      cuisine: cuisine,
+      email: email,
+      phone: phone,
+      country: country,
+      city: city,
+      street: street,
+      postalCode: postalCode,
     );
+  }
+
+  _RestaurantProfileInfo copyWithEditable(_EditableProfileData data) {
+    final nextName = data.restaurantName.trim().isEmpty
+        ? name
+        : data.restaurantName.trim();
+    final nextCuisine = _nullable(data.cuisineType);
+    final nextEmail = _nullable(data.email);
+    final nextPhone = _nullable(data.phone);
+    final nextCountry = _nullable(data.country);
+    final nextCity = _nullable(data.city);
+    final nextStreet = _nullable(data.street);
+    final nextPostalCode = _nullable(data.postalCode);
+
+    return _RestaurantProfileInfo(
+      id: id,
+      name: nextName,
+      handle: handle,
+      cuisineSummary: _buildCuisineSummary(
+        cuisine: nextCuisine,
+        city: nextCity,
+        country: nextCountry,
+      ),
+      ratingLabel: ratingLabel,
+      phoneLabel: nextPhone ?? 'Phone unavailable',
+      locationLabel: _buildLocationLabel(
+        street: nextStreet,
+        city: nextCity,
+        country: nextCountry,
+      ),
+      followersCountLabel: followersCountLabel,
+      coverImageUrl: coverImageUrl,
+      cuisine: nextCuisine,
+      email: nextEmail,
+      phone: nextPhone,
+      country: nextCountry,
+      city: nextCity,
+      street: nextStreet,
+      postalCode: nextPostalCode,
+    );
+  }
+
+  static String? _nullable(String value) {
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? null : trimmed;
   }
 
   static List<Map<String, dynamic>> _collectMaps(
@@ -4361,6 +6051,13 @@ class _RestaurantProfileInfo {
     return ratingText;
   }
 
+  static String _buildConnectionCountLabel(int? count) {
+    if (count == null || count < 0) {
+      return '0';
+    }
+    return _formatCompactCount(count);
+  }
+
   static String _formatCompactCount(int value) {
     if (value >= 1000000) {
       return '${_trimTrailingZero((value / 1000000).toStringAsFixed(1))}M';
@@ -4412,10 +6109,21 @@ class _ResponsiveMetrics {
 
   double get horizontalPadding => _clampDouble(width * 0.043, 12, 18);
   double get topPadding => _clampDouble(height * 0.012, 8, 14);
-  double get bottomPadding => _clampDouble(height * 0.009, 8, 12);
+  double get bottomPadding => compact
+      ? _clampDouble(height * 0.007, 6, 10)
+      : _clampDouble(height * 0.009, 8, 12);
   double get sideGap => _clampDouble(16 * scale, 8, 16);
   double get gapAfterTop => _clampDouble(12 * scale, 6, 12);
-  double get sectionGapSmall => _clampDouble(20 * scale, 10, 18);
+  double get sectionGapSmall {
+    if (tiny) {
+      return _clampDouble(10 * scale, 4, 10);
+    }
+    if (compact) {
+      return _clampDouble(16 * scale, 8, 14);
+    }
+    return _clampDouble(20 * scale, 10, 18);
+  }
+
   double get railGap => _clampDouble(10 * scale, 6, 10);
   double get railWidth => _clampDouble(70 * scale, 54, 70);
   double get railItemGap => _clampDouble(12 * scale, 7, 12);
@@ -4449,39 +6157,34 @@ class _ResponsiveMetrics {
 class _TopControls extends StatelessWidget {
   const _TopControls({
     required this.metrics,
-    required this.selectedTab,
-    required this.onTabSelected,
+    required this.onOpenSearch,
+    required this.onOpenNotifications,
+    required this.onOpenFeedInfo,
   });
 
   final _ResponsiveMetrics metrics;
-  final int selectedTab;
-  final ValueChanged<int> onTabSelected;
+  final VoidCallback onOpenSearch;
+  final VoidCallback onOpenNotifications;
+  final VoidCallback onOpenFeedInfo;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        _RoundIconButton(icon: Icons.search_rounded, metrics: metrics),
+        _RoundIconButton(
+          icon: Icons.search_rounded,
+          metrics: metrics,
+          onTap: onOpenSearch,
+          tooltip: 'Search',
+        ),
         SizedBox(width: metrics.sideGap),
         Expanded(
           child: Center(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _TopTab(
-                  label: 'Following',
-                  selected: selectedTab == 0,
-                  metrics: metrics,
-                  onTap: () => onTabSelected(0),
-                ),
-                SizedBox(width: _clampDouble(18 * metrics.scale, 8, 18)),
-                _TopTab(
-                  label: 'For You',
-                  selected: selectedTab == 1,
-                  metrics: metrics,
-                  onTap: () => onTabSelected(1),
-                ),
-              ],
+            child: _TopTab(
+              label: 'For You',
+              selected: true,
+              metrics: metrics,
+              onTap: onOpenFeedInfo,
             ),
           ),
         ),
@@ -4489,6 +6192,8 @@ class _TopControls extends StatelessWidget {
         _RoundIconButton(
           icon: Icons.notifications_none_rounded,
           metrics: metrics,
+          onTap: onOpenNotifications,
+          tooltip: 'Notifications',
         ),
       ],
     );
@@ -4549,31 +6254,59 @@ class _TopTab extends StatelessWidget {
 }
 
 class _RoundIconButton extends StatelessWidget {
-  const _RoundIconButton({required this.icon, required this.metrics});
+  const _RoundIconButton({
+    required this.icon,
+    required this.metrics,
+    required this.onTap,
+    required this.tooltip,
+  });
 
   final IconData icon;
   final _ResponsiveMetrics metrics;
+  final VoidCallback onTap;
+  final String tooltip;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: metrics.topControlButtonSize,
-      height: metrics.topControlButtonSize,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: const Color(0x38FFFFFF),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Tooltip(
+          message: tooltip,
+          child: Container(
+            width: metrics.topControlButtonSize,
+            height: metrics.topControlButtonSize,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0x38FFFFFF),
+              border: Border.all(color: const Color(0x26FFFFFF)),
+            ),
+            child: Icon(
+              icon,
+              color: Colors.white,
+              size: metrics.topControlIconSize,
+            ),
+          ),
+        ),
       ),
-      child: Icon(icon, color: Colors.white, size: metrics.topControlIconSize),
     );
   }
 }
 
 class _FeedDetails extends StatelessWidget {
-  const _FeedDetails({required this.restaurantName, required this.metrics});
+  const _FeedDetails({
+    required this.post,
+    required this.metrics,
+    required this.onOpenRestaurant,
+    required this.onOpenAudio,
+  });
 
-  final String restaurantName;
+  final DemoFeedPost post;
   final _ResponsiveMetrics metrics;
+  final VoidCallback onOpenRestaurant;
+  final VoidCallback onOpenAudio;
 
   @override
   Widget build(BuildContext context) {
@@ -4581,72 +6314,76 @@ class _FeedDetails extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Flexible(
-              child: RichText(
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                text: TextSpan(
-                  children: [
-                    TextSpan(
-                      text: '@',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: metrics.handleAtFontSize,
-                        height: 1.1,
-                        fontWeight: FontWeight.w800,
+        InkWell(
+          onTap: onOpenRestaurant,
+          borderRadius: BorderRadius.circular(20),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Flexible(
+                child: RichText(
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  text: TextSpan(
+                    children: [
+                      TextSpan(
+                        text: '@',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: metrics.handleAtFontSize,
+                          height: 1.1,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
+                      TextSpan(
+                        text: post.restaurantHandle,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: metrics.handleFontSize,
+                          height: 1,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              SizedBox(width: _clampDouble(8 * metrics.scale, 4, 8)),
+              Container(
+                padding: EdgeInsets.symmetric(
+                  horizontal: _clampDouble(10 * metrics.scale, 7, 10),
+                  vertical: _clampDouble(6 * metrics.scale, 4, 6),
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xBF2E2521),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.star_rounded,
+                      color: const Color(0xFFF9C949),
+                      size: metrics.ratingStarSize,
                     ),
-                    TextSpan(
-                      text: restaurantName,
+                    SizedBox(width: _clampDouble(4 * metrics.scale, 2, 4)),
+                    Text(
+                      post.rating.toStringAsFixed(1),
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: metrics.handleFontSize,
-                        height: 1,
-                        fontWeight: FontWeight.w900,
+                        fontSize: metrics.ratingFontSize,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                   ],
                 ),
               ),
-            ),
-            SizedBox(width: _clampDouble(8 * metrics.scale, 4, 8)),
-            Container(
-              padding: EdgeInsets.symmetric(
-                horizontal: _clampDouble(10 * metrics.scale, 7, 10),
-                vertical: _clampDouble(6 * metrics.scale, 4, 6),
-              ),
-              decoration: BoxDecoration(
-                color: const Color(0xBF2E2521),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.star_rounded,
-                    color: const Color(0xFFF9C949),
-                    size: metrics.ratingStarSize,
-                  ),
-                  SizedBox(width: _clampDouble(4 * metrics.scale, 2, 4)),
-                  Text(
-                    '4.8',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: metrics.ratingFontSize,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
         SizedBox(height: _clampDouble(8 * metrics.scale, 4, 8)),
         Text(
-          'Feeling hungry? Pizza night is here with our Pepperoni Feast!',
+          post.caption,
           maxLines: metrics.tiny ? 2 : 3,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
@@ -4658,7 +6395,7 @@ class _FeedDetails extends StatelessWidget {
         ),
         SizedBox(height: _clampDouble(4 * metrics.scale, 2, 4)),
         Text(
-          '#pizza #yum #foodie',
+          post.tags,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
@@ -4668,27 +6405,31 @@ class _FeedDetails extends StatelessWidget {
           ),
         ),
         SizedBox(height: _clampDouble(12 * metrics.scale, 6, 14)),
-        Row(
-          children: [
-            Icon(
-              Icons.music_note_rounded,
-              color: Colors.white,
-              size: _clampDouble(metrics.audioFontSize + 4, 14, 20),
-            ),
-            SizedBox(width: _clampDouble(6 * metrics.scale, 4, 6)),
-            Flexible(
-              child: Text(
-                'Original Audio - Bella Italia Promo',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: const Color(0xD9FFFFFF),
-                  fontSize: metrics.audioFontSize,
-                  fontWeight: FontWeight.w600,
+        InkWell(
+          onTap: onOpenAudio,
+          borderRadius: BorderRadius.circular(16),
+          child: Row(
+            children: [
+              Icon(
+                Icons.music_note_rounded,
+                color: Colors.white,
+                size: _clampDouble(metrics.audioFontSize + 4, 14, 20),
+              ),
+              SizedBox(width: _clampDouble(6 * metrics.scale, 4, 6)),
+              Flexible(
+                child: Text(
+                  post.audioLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: const Color(0xD9FFFFFF),
+                    fontSize: metrics.audioFontSize,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ],
     );
@@ -4696,9 +6437,23 @@ class _FeedDetails extends StatelessWidget {
 }
 
 class _ActionRail extends StatelessWidget {
-  const _ActionRail({required this.metrics});
+  const _ActionRail({
+    required this.metrics,
+    required this.post,
+    required this.onOpenRestaurant,
+    required this.onToggleFollow,
+    required this.onToggleLike,
+    required this.onOpenComments,
+    required this.onShare,
+  });
 
   final _ResponsiveMetrics metrics;
+  final DemoFeedPost post;
+  final VoidCallback onOpenRestaurant;
+  final VoidCallback onToggleFollow;
+  final VoidCallback onToggleLike;
+  final VoidCallback onOpenComments;
+  final VoidCallback onShare;
 
   @override
   Widget build(BuildContext context) {
@@ -4707,25 +6462,35 @@ class _ActionRail extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _CreatorAvatar(metrics: metrics),
+          _CreatorAvatar(
+            metrics: metrics,
+            isFollowing: post.isFollowing,
+            onOpenRestaurant: onOpenRestaurant,
+            onToggleFollow: onToggleFollow,
+          ),
           SizedBox(height: metrics.railItemGap),
           _ActionButton(
             icon: Icons.favorite_rounded,
-            value: '4.2k',
-            iconColor: const Color(0xFFFF7E4D),
+            value: _RestaurantProfileInfo._formatCompactCount(post.likeCount),
+            iconColor: post.isLiked ? const Color(0xFFFF7E4D) : Colors.white,
             metrics: metrics,
+            onTap: onToggleLike,
           ),
           SizedBox(height: metrics.railItemGap),
           _ActionButton(
             icon: Icons.mode_comment_outlined,
-            value: '156',
+            value: _RestaurantProfileInfo._formatCompactCount(
+              post.commentCount,
+            ),
             metrics: metrics,
+            onTap: onOpenComments,
           ),
           SizedBox(height: metrics.railItemGap),
           _ActionButton(
             icon: Icons.share_outlined,
             value: 'Share',
             metrics: metrics,
+            onTap: onShare,
           ),
         ],
       ),
@@ -4734,55 +6499,71 @@ class _ActionRail extends StatelessWidget {
 }
 
 class _CreatorAvatar extends StatelessWidget {
-  const _CreatorAvatar({required this.metrics});
+  const _CreatorAvatar({
+    required this.metrics,
+    required this.isFollowing,
+    required this.onOpenRestaurant,
+    required this.onToggleFollow,
+  });
 
   final _ResponsiveMetrics metrics;
+  final bool isFollowing;
+  final VoidCallback onOpenRestaurant;
+  final VoidCallback onToggleFollow;
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        Container(
-          width: metrics.creatorSize,
-          height: metrics.creatorSize,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 2),
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF135D42), Color(0xFF0E3D2D)],
+        InkWell(
+          onTap: onOpenRestaurant,
+          customBorder: const CircleBorder(),
+          child: Container(
+            width: metrics.creatorSize,
+            height: metrics.creatorSize,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2),
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF135D42), Color(0xFF0E3D2D)],
+              ),
             ),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            'BELLA ITALIA',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: _clampDouble(8 * metrics.scale, 6, 8),
-              height: 1.2,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.3,
+            alignment: Alignment.center,
+            child: Text(
+              'BELLA ITALIA',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: _clampDouble(8 * metrics.scale, 6, 8),
+                height: 1.2,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.3,
+              ),
             ),
           ),
         ),
         Positioned(
           bottom: -4,
           right: -4,
-          child: Container(
-            width: metrics.creatorPlusSize,
-            height: metrics.creatorPlusSize,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xFFFF7E4D),
-              border: Border.all(color: Colors.white, width: 2),
-            ),
-            child: Icon(
-              Icons.add_rounded,
-              color: Colors.white,
-              size: metrics.creatorPlusSize * 0.62,
+          child: InkWell(
+            onTap: onToggleFollow,
+            customBorder: const CircleBorder(),
+            child: Container(
+              width: metrics.creatorPlusSize,
+              height: metrics.creatorPlusSize,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0xFFFF7E4D),
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+              child: Icon(
+                isFollowing ? Icons.check_rounded : Icons.add_rounded,
+                color: Colors.white,
+                size: metrics.creatorPlusSize * 0.62,
+              ),
             ),
           ),
         ),
@@ -4796,6 +6577,7 @@ class _ActionButton extends StatelessWidget {
     required this.icon,
     required this.value,
     required this.metrics,
+    required this.onTap,
     this.iconColor = Colors.white,
   });
 
@@ -4803,20 +6585,28 @@ class _ActionButton extends StatelessWidget {
   final String value;
   final _ResponsiveMetrics metrics;
   final Color iconColor;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Container(
-          width: metrics.actionBubbleSize,
-          height: metrics.actionBubbleSize,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: const Color(0x36FFFFFF),
-            border: Border.all(color: const Color(0x2BFFFFFF)),
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            customBorder: const CircleBorder(),
+            child: Container(
+              width: metrics.actionBubbleSize,
+              height: metrics.actionBubbleSize,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0x36FFFFFF),
+                border: Border.all(color: const Color(0x2BFFFFFF)),
+              ),
+              child: Icon(icon, color: iconColor, size: metrics.actionIconSize),
+            ),
           ),
-          child: Icon(icon, color: iconColor, size: metrics.actionIconSize),
         ),
         SizedBox(height: _clampDouble(6 * metrics.scale, 3, 6)),
         Text(
