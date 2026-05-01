@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:video_player/video_player.dart';
 
 import 'login_screen.dart';
 
@@ -277,7 +278,7 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
   }
 }
 
-class _FeedTabBody extends StatelessWidget {
+class _FeedTabBody extends StatefulWidget {
   const _FeedTabBody({
     required this.userHandle,
     required this.selectedTopTab,
@@ -292,81 +293,287 @@ class _FeedTabBody extends StatelessWidget {
   final ValueChanged<int> onTopTabSelected;
   final ValueChanged<int> onBottomNavSelected;
 
+  static const List<_FeedVideoPostData> _feedVideos = [
+    _FeedVideoPostData(
+      videoAssetPath: 'assets/videos/home_video_1.mp4',
+      ratingLabel: '4.8',
+      caption:
+          'Feeling hungry? Our new Pepperoni Feast is here. Cheesy and absolutely delicious.',
+      tags: '#pizza #yum #foodie',
+      audioLabel: 'Original Audio - Bella Italia Promo',
+      creatorLabel: 'BELLA ITALIA',
+      likesLabel: '4.2k',
+      commentsLabel: '156',
+      shareLabel: 'Share',
+      priceLabel: '\$14.99',
+    ),
+    _FeedVideoPostData(
+      videoAssetPath: 'assets/videos/home_video_2.mp4',
+      ratingLabel: '4.7',
+      caption:
+          'Smoky smashed burgers are sizzling tonight. Fresh brioche, crisp pickles, and melted cheddar.',
+      tags: '#burger #fresh #hungerrush',
+      audioLabel: 'Original Audio - Smash House Kitchen',
+      creatorLabel: 'SMASH HOUSE',
+      likesLabel: '3.6k',
+      commentsLabel: '94',
+      shareLabel: 'Share',
+      priceLabel: '\$12.40',
+    ),
+  ];
+
+  @override
+  State<_FeedTabBody> createState() => _FeedTabBodyState();
+}
+
+class _FeedTabBodyState extends State<_FeedTabBody> {
+  late final List<VideoPlayerController> _videoControllers;
+  late final List<bool> _videoErrorLogged;
+  int _currentVideoIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _videoControllers = List<VideoPlayerController>.generate(
+      _FeedTabBody._feedVideos.length,
+      (index) => VideoPlayerController.asset(
+        _FeedTabBody._feedVideos[index].videoAssetPath,
+      ),
+    );
+    _videoErrorLogged = List<bool>.filled(_videoControllers.length, false);
+    for (var i = 0; i < _videoControllers.length; i++) {
+      final controller = _videoControllers[i];
+      controller.addListener(() {
+        if (_videoErrorLogged[i]) {
+          return;
+        }
+        if (controller.value.hasError) {
+          _videoErrorLogged[i] = true;
+          debugPrint(
+            'Home feed video playback error for index $i: ${controller.value.errorDescription}',
+          );
+        }
+      });
+      controller.setLooping(true);
+      controller.setVolume(0);
+      controller
+          .initialize()
+          .then((_) {
+            if (!mounted) {
+              return;
+            }
+            setState(() {});
+            _syncVideoPlayback();
+          })
+          .catchError((error) {
+            debugPrint('Home feed video init failed for index $i: $error');
+          });
+    }
+  }
+
+  void _handleVideoPageChanged(int index) {
+    _currentVideoIndex = index;
+    _syncVideoPlayback();
+  }
+
+  void _syncVideoPlayback() {
+    for (var i = 0; i < _videoControllers.length; i++) {
+      final controller = _videoControllers[i];
+      if (!controller.value.isInitialized) {
+        continue;
+      }
+      if (i == _currentVideoIndex) {
+        controller.play();
+      } else {
+        controller.pause();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _videoControllers) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        const Positioned.fill(child: _FeedBackground()),
-        Positioned.fill(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  const Color(0x08000000),
-                  const Color(0x6B000000),
-                  const Color(0xD100131A),
-                ],
-                stops: const [0.0, 0.6, 1.0],
-              ),
-            ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final safeAreaPadding = MediaQuery.paddingOf(context);
+        final safeHeight =
+            constraints.maxHeight -
+            safeAreaPadding.top -
+            safeAreaPadding.bottom;
+        final metrics = _ResponsiveMetrics.from(
+          BoxConstraints(
+            maxWidth: constraints.maxWidth,
+            maxHeight: safeHeight > 0 ? safeHeight : constraints.maxHeight,
           ),
-        ),
-        SafeArea(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final metrics = _ResponsiveMetrics.from(constraints);
-              return Padding(
-                padding: EdgeInsets.fromLTRB(
-                  metrics.horizontalPadding,
-                  metrics.topPadding,
-                  metrics.horizontalPadding,
-                  metrics.bottomPadding,
-                ),
-                child: Column(
-                  children: [
-                    _TopControls(
-                      metrics: metrics,
-                      selectedTab: selectedTopTab,
-                      onTabSelected: onTopTabSelected,
-                    ),
-                    SizedBox(height: metrics.gapAfterTop),
-                    Expanded(
-                      child: Align(
-                        alignment: Alignment.bottomCenter,
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Expanded(
-                              child: _FeedDetails(
-                                userHandle: userHandle,
-                                metrics: metrics,
-                              ),
-                            ),
-                            SizedBox(width: metrics.railGap),
-                            _ActionRail(metrics: metrics),
-                          ],
+        );
+        final topOverlayReservedHeight =
+            metrics.topControlButtonSize + metrics.gapAfterTop;
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: PageView.builder(
+                scrollDirection: Axis.vertical,
+                physics: const BouncingScrollPhysics(),
+                onPageChanged: _handleVideoPageChanged,
+                itemCount: _FeedTabBody._feedVideos.length,
+                itemBuilder: (context, index) {
+                  final video = _FeedTabBody._feedVideos[index];
+                  return Stack(
+                    children: [
+                      Positioned.fill(
+                        child: _FeedBackground(
+                          controller: _videoControllers[index],
                         ),
                       ),
-                    ),
-                    SizedBox(height: metrics.sectionGapSmall),
-                    _OrderNowBar(metrics: metrics),
-                    SizedBox(height: metrics.sectionGapSmall),
-                    _BottomNavBar(
-                      metrics: metrics,
-                      selectedIndex: selectedBottomIndex,
-                      onSelected: onBottomNavSelected,
-                    ),
-                  ],
+                      Positioned.fill(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                const Color(0x08000000),
+                                const Color(0x6B000000),
+                                const Color(0xD100131A),
+                              ],
+                              stops: const [0.0, 0.6, 1.0],
+                            ),
+                          ),
+                        ),
+                      ),
+                      SafeArea(
+                        bottom: false,
+                        child: Padding(
+                          padding: EdgeInsets.fromLTRB(
+                            metrics.horizontalPadding,
+                            metrics.topPadding,
+                            metrics.horizontalPadding,
+                            0,
+                          ),
+                          child: Column(
+                            children: [
+                              SizedBox(height: topOverlayReservedHeight),
+                              Expanded(
+                                child: Align(
+                                  alignment: Alignment.bottomCenter,
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Expanded(
+                                        child: _FeedDetails(
+                                          userHandle: widget.userHandle,
+                                          metrics: metrics,
+                                          video: video,
+                                        ),
+                                      ),
+                                      SizedBox(width: metrics.railGap),
+                                      _ActionRail(
+                                        metrics: metrics,
+                                        video: video,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              SizedBox(height: metrics.sectionGapSmall),
+                              _OrderNowBar(
+                                metrics: metrics,
+                                priceLabel: video.priceLabel,
+                              ),
+                              SizedBox(
+                                height:
+                                    metrics.sectionGapSmall +
+                                    metrics.navHeight +
+                                    metrics.bottomPadding,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: SafeArea(
+                top: false,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    metrics.horizontalPadding,
+                    0,
+                    metrics.horizontalPadding,
+                    metrics.bottomPadding,
+                  ),
+                  child: _BottomNavBar(
+                    metrics: metrics,
+                    selectedIndex: widget.selectedBottomIndex,
+                    onSelected: widget.onBottomNavSelected,
+                  ),
                 ),
-              );
-            },
-          ),
-        ),
-      ],
+              ),
+            ),
+            Align(
+              alignment: Alignment.topCenter,
+              child: SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    metrics.horizontalPadding,
+                    metrics.topPadding,
+                    metrics.horizontalPadding,
+                    0,
+                  ),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: _TopControls(
+                      metrics: metrics,
+                      selectedTab: widget.selectedTopTab,
+                      onTabSelected: widget.onTopTabSelected,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
+}
+
+class _FeedVideoPostData {
+  const _FeedVideoPostData({
+    required this.videoAssetPath,
+    required this.ratingLabel,
+    required this.caption,
+    required this.tags,
+    required this.audioLabel,
+    required this.creatorLabel,
+    required this.likesLabel,
+    required this.commentsLabel,
+    required this.shareLabel,
+    required this.priceLabel,
+  });
+
+  final String videoAssetPath;
+  final String ratingLabel;
+  final String caption;
+  final String tags;
+  final String audioLabel;
+  final String creatorLabel;
+  final String likesLabel;
+  final String commentsLabel;
+  final String shareLabel;
+  final String priceLabel;
 }
 
 class _DiscoverTabBody extends StatelessWidget {
@@ -2711,70 +2918,36 @@ class _DiscoverDealTile extends StatelessWidget {
 }
 
 class _FeedBackground extends StatelessWidget {
-  const _FeedBackground();
+  const _FeedBackground({required this.controller});
 
-  static const _pizzaImage =
-      'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=1400&q=80';
+  final VideoPlayerController controller;
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        final height = constraints.maxHeight;
-        final pizzaDiameter = _clampDouble(width * 1.74, width * 1.35, 780);
-        final verticalShift = _clampDouble(height * 0.2, 108, 190);
+    if (!controller.value.isInitialized) {
+      return const DecoratedBox(decoration: BoxDecoration(color: Colors.black));
+    }
 
-        return Stack(
-          children: [
-            const Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Color(0xFF58CAD8),
-                      Color(0xFF2199AA),
-                      Color(0xFF0E4E68),
-                    ],
-                  ),
-                ),
-              ),
+    final aspectRatio = controller.value.aspectRatio > 0
+        ? controller.value.aspectRatio
+        : (9 / 16);
+
+    return ColoredBox(
+      color: Colors.black,
+      child: SizedBox.expand(
+        child: FittedBox(
+          fit: BoxFit.cover,
+          alignment: Alignment.center,
+          child: SizedBox(
+            width: 1080,
+            height: 1080 / aspectRatio,
+            child: AspectRatio(
+              aspectRatio: aspectRatio,
+              child: VideoPlayer(controller),
             ),
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: Transform.translate(
-                offset: Offset(0, verticalShift),
-                child: ClipOval(
-                  child: SizedBox(
-                    width: pizzaDiameter,
-                    height: pizzaDiameter,
-                    child: Image.network(
-                      _pizzaImage,
-                      fit: BoxFit.cover,
-                      alignment: Alignment.center,
-                      errorBuilder: (context, error, stackTrace) {
-                        return const DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: RadialGradient(
-                              colors: [
-                                Color(0xFFF1C76A),
-                                Color(0xFFD1642E),
-                                Color(0xFF863A1E),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
+          ),
+        ),
+      ),
     );
   }
 }
@@ -2867,35 +3040,52 @@ class _TopControls extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        _RoundIconButton(icon: Icons.search_rounded, metrics: metrics),
-        SizedBox(width: metrics.sideGap),
-        Expanded(
+        SizedBox(
+          height: metrics.topControlButtonSize,
           child: Center(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _TopTab(
-                  label: 'Following',
-                  selected: selectedTab == 0,
-                  metrics: metrics,
-                  onTap: () => onTabSelected(0),
-                ),
-                SizedBox(width: _clampDouble(18 * metrics.scale, 8, 18)),
-                _TopTab(
-                  label: 'For You',
-                  selected: selectedTab == 1,
-                  metrics: metrics,
-                  onTap: () => onTabSelected(1),
-                ),
-              ],
+            child: _RoundIconButton(
+              icon: Icons.search_rounded,
+              metrics: metrics,
             ),
           ),
         ),
         SizedBox(width: metrics.sideGap),
-        _RoundIconButton(
-          icon: Icons.notifications_none_rounded,
-          metrics: metrics,
+        Expanded(
+          child: SizedBox(
+            height: metrics.topControlButtonSize,
+            child: Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _TopTab(
+                    label: 'Following',
+                    selected: selectedTab == 0,
+                    metrics: metrics,
+                    onTap: () => onTabSelected(0),
+                  ),
+                  SizedBox(width: _clampDouble(18 * metrics.scale, 8, 18)),
+                  _TopTab(
+                    label: 'For You',
+                    selected: selectedTab == 1,
+                    metrics: metrics,
+                    onTap: () => onTabSelected(1),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        SizedBox(width: metrics.sideGap),
+        SizedBox(
+          height: metrics.topControlButtonSize,
+          child: Center(
+            child: _RoundIconButton(
+              icon: Icons.notifications_none_rounded,
+              metrics: metrics,
+            ),
+          ),
         ),
       ],
     );
@@ -2977,10 +3167,15 @@ class _RoundIconButton extends StatelessWidget {
 }
 
 class _FeedDetails extends StatelessWidget {
-  const _FeedDetails({required this.userHandle, required this.metrics});
+  const _FeedDetails({
+    required this.userHandle,
+    required this.metrics,
+    required this.video,
+  });
 
   final String userHandle;
   final _ResponsiveMetrics metrics;
+  final _FeedVideoPostData video;
 
   @override
   Widget build(BuildContext context) {
@@ -3039,7 +3234,7 @@ class _FeedDetails extends StatelessWidget {
                   ),
                   SizedBox(width: _clampDouble(4 * metrics.scale, 2, 4)),
                   Text(
-                    '4.8',
+                    video.ratingLabel,
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: metrics.ratingFontSize,
@@ -3053,7 +3248,7 @@ class _FeedDetails extends StatelessWidget {
         ),
         SizedBox(height: _clampDouble(8 * metrics.scale, 4, 8)),
         Text(
-          'Feeling hungry? Our new Pepperoni Feast is here. Cheesy and absolutely delicious.',
+          video.caption,
           maxLines: metrics.tiny ? 2 : 3,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
@@ -3065,7 +3260,7 @@ class _FeedDetails extends StatelessWidget {
         ),
         SizedBox(height: _clampDouble(4 * metrics.scale, 2, 4)),
         Text(
-          '#pizza #yum #foodie',
+          video.tags,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
@@ -3085,7 +3280,7 @@ class _FeedDetails extends StatelessWidget {
             SizedBox(width: _clampDouble(6 * metrics.scale, 4, 6)),
             Flexible(
               child: Text(
-                'Original Audio - Bella Italia Promo',
+                video.audioLabel,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -3103,9 +3298,10 @@ class _FeedDetails extends StatelessWidget {
 }
 
 class _ActionRail extends StatelessWidget {
-  const _ActionRail({required this.metrics});
+  const _ActionRail({required this.metrics, required this.video});
 
   final _ResponsiveMetrics metrics;
+  final _FeedVideoPostData video;
 
   @override
   Widget build(BuildContext context) {
@@ -3114,24 +3310,24 @@ class _ActionRail extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _CreatorAvatar(metrics: metrics),
+          _CreatorAvatar(metrics: metrics, video: video),
           SizedBox(height: metrics.railItemGap),
           _ActionButton(
             icon: Icons.favorite_rounded,
-            value: '4.2k',
+            value: video.likesLabel,
             iconColor: const Color(0xFFFF7E4D),
             metrics: metrics,
           ),
           SizedBox(height: metrics.railItemGap),
           _ActionButton(
             icon: Icons.mode_comment_outlined,
-            value: '156',
+            value: video.commentsLabel,
             metrics: metrics,
           ),
           SizedBox(height: metrics.railItemGap),
           _ActionButton(
             icon: Icons.share_outlined,
-            value: 'Share',
+            value: video.shareLabel,
             metrics: metrics,
           ),
         ],
@@ -3141,9 +3337,10 @@ class _ActionRail extends StatelessWidget {
 }
 
 class _CreatorAvatar extends StatelessWidget {
-  const _CreatorAvatar({required this.metrics});
+  const _CreatorAvatar({required this.metrics, required this.video});
 
   final _ResponsiveMetrics metrics;
+  final _FeedVideoPostData video;
 
   @override
   Widget build(BuildContext context) {
@@ -3164,7 +3361,7 @@ class _CreatorAvatar extends StatelessWidget {
           ),
           alignment: Alignment.center,
           child: Text(
-            'BELLA ITALIA',
+            video.creatorLabel,
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.white,
@@ -3242,9 +3439,10 @@ class _ActionButton extends StatelessWidget {
 }
 
 class _OrderNowBar extends StatelessWidget {
-  const _OrderNowBar({required this.metrics});
+  const _OrderNowBar({required this.metrics, required this.priceLabel});
 
   final _ResponsiveMetrics metrics;
+  final String priceLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -3347,7 +3545,7 @@ class _OrderNowBar extends StatelessWidget {
                             border: Border.all(color: const Color(0x49FFFFFF)),
                           ),
                           child: Text(
-                            '\$14.99',
+                            priceLabel,
                             style: TextStyle(
                               color: Colors.white,
                               fontSize: compact
