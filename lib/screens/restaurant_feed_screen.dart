@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:video_player/video_player.dart';
 
 import '../models/demo_app_models.dart';
 import '../services/demo_app_repository.dart';
@@ -10,6 +11,30 @@ import 'app_support_screens.dart';
 
 double _clampDouble(double value, double min, double max) {
   return value.clamp(min, max).toDouble();
+}
+
+String _formatRelativeTime(DateTime dateTime) {
+  final difference = DateTime.now().difference(dateTime);
+  if (difference.inMinutes < 1) {
+    return 'Now';
+  }
+  if (difference.inHours < 1) {
+    return '${difference.inMinutes}m';
+  }
+  if (difference.inDays < 1) {
+    return '${difference.inHours}h';
+  }
+  return '${difference.inDays}d';
+}
+
+String _feedCreatorLabel(String restaurantName) {
+  final label = restaurantName
+      .trim()
+      .split(RegExp(r'\s+'))
+      .where((word) => word.isNotEmpty)
+      .take(2)
+      .join(' ');
+  return (label.isEmpty ? 'HR' : label).toUpperCase();
 }
 
 class RestaurantFeedScreen extends StatefulWidget {
@@ -119,10 +144,25 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       ordersCount: 73,
     ),
   ];
+  static const List<_FeedVideoPostData> _feedVideos = [
+    _FeedVideoPostData(
+      videoAssetPath: 'assets/videos/home_video_1.mp4',
+      postId: 'for-you',
+    ),
+    _FeedVideoPostData(
+      videoAssetPath: 'assets/videos/home_video_2.mp4',
+      postId: 'following',
+    ),
+  ];
 
   final _profileScaffoldKey = GlobalKey<ScaffoldState>();
   final _demoRepository = DemoAppRepository.instance;
+  final Map<String, DemoFeedPost> _feedPostsById = <String, DemoFeedPost>{};
+  final Map<String, Offset> _lastDoubleTapOffsetsByPostId = <String, Offset>{};
+  final List<_FeedLikeBurstData> _activeLikeBursts = <_FeedLikeBurstData>[];
+  final Set<String> _pendingDoubleTapLikePostIds = <String>{};
   int _selectedBottomIndex = 0;
+  int _selectedTopTab = 1;
   int _selectedProfileTabIndex = _profileMenuTabIndex;
   final _profileApiService = RestaurantProfileApiService();
   final _menuApiService = RestaurantMenuApiService();
@@ -131,7 +171,10 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   bool _isCreatingPost = false;
   final List<_UploadedRestaurantVideo> _uploadedVideos =
       <_UploadedRestaurantVideo>[];
-  late DemoFeedPost _vendorFeedPost;
+  late final List<VideoPlayerController> _videoControllers;
+  late final List<bool> _videoErrorLogged;
+  int _currentVideoIndex = 0;
+  int _nextLikeBurstId = 0;
 
   late _RestaurantProfileInfo _profileInfo;
   bool _isRefreshingProfile = false;
@@ -144,10 +187,42 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   @override
   void initState() {
     super.initState();
-    _vendorFeedPost = _demoRepository.getFeedPost(
-      following: true,
-      vendorView: true,
+    _syncFeedPosts();
+    _videoControllers = List<VideoPlayerController>.generate(
+      _feedVideos.length,
+      (index) => VideoPlayerController.asset(_feedVideos[index].videoAssetPath),
     );
+    _videoErrorLogged = List<bool>.filled(_videoControllers.length, false);
+    for (var i = 0; i < _videoControllers.length; i++) {
+      final controller = _videoControllers[i];
+      controller.addListener(() {
+        if (_videoErrorLogged[i]) {
+          return;
+        }
+        if (controller.value.hasError) {
+          _videoErrorLogged[i] = true;
+          debugPrint(
+            'Restaurant feed video playback error for index $i: ${controller.value.errorDescription}',
+          );
+        }
+      });
+      controller.setLooping(true);
+      controller.setVolume(0);
+      controller
+          .initialize()
+          .then((_) {
+            if (!mounted) {
+              return;
+            }
+            setState(() {});
+            _syncVideoPlayback();
+          })
+          .catchError((error) {
+            debugPrint(
+              'Restaurant feed video init failed for index $i: $error',
+            );
+          });
+    }
     _profileInfo = _RestaurantProfileInfo.fromData(
       primary: widget.initialUserData,
       fallbackName: widget.restaurantName,
@@ -157,6 +232,9 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
   @override
   void dispose() {
+    for (final controller in _videoControllers) {
+      controller.dispose();
+    }
     _profileApiService.dispose();
     _menuApiService.dispose();
     super.dispose();
@@ -207,11 +285,96 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   List<RestaurantMenuItem> get _menuItemsForDisplay =>
       _restaurantMenuItems.isEmpty ? _fallbackMenuItems : _restaurantMenuItems;
 
-  void _syncVendorFeedPost() {
-    _vendorFeedPost = _demoRepository.getFeedPost(
-      following: true,
-      vendorView: true,
+  DemoFeedPost get _activeFeedPost {
+    final index = _currentVideoIndex.clamp(0, _feedVideos.length - 1);
+    final video = _feedVideos[index];
+    return _postForVideo(video);
+  }
+
+  DemoFeedPost _loadPostForId(String postId) {
+    final post = postId == 'vendor-feed'
+        ? _demoRepository.getFeedPost(following: true, vendorView: true)
+        : _demoRepository.getFeedPost(following: postId == 'following');
+    if (postId == 'following' && post.isLiked) {
+      return post.copyWith(isLiked: false);
+    }
+    return post;
+  }
+
+  void _syncFeedPosts() {
+    for (final video in _feedVideos) {
+      _feedPostsById[video.postId] = _loadPostForId(video.postId);
+    }
+  }
+
+  DemoFeedPost _postForVideo(_FeedVideoPostData video) {
+    return _feedPostsById[video.postId] ?? _loadPostForId(video.postId);
+  }
+
+  void _rememberDoubleTapPosition(String postId, TapDownDetails details) {
+    _lastDoubleTapOffsetsByPostId[postId] = details.localPosition;
+  }
+
+  List<_FeedLikeBurstData> _likeBurstsForPost(String postId) {
+    return _activeLikeBursts
+        .where((item) => item.postId == postId)
+        .toList(growable: false);
+  }
+
+  void _spawnTastyLikeBurst({
+    required String postId,
+    required Offset tapPosition,
+    required Size surfaceSize,
+  }) {
+    final maxWidth = surfaceSize.width <= 0 ? 390.0 : surfaceSize.width;
+    final maxHeight = surfaceSize.height <= 0 ? 700.0 : surfaceSize.height;
+    final clampedX = maxWidth <= 96
+        ? maxWidth / 2
+        : tapPosition.dx.clamp(48.0, maxWidth - 48.0).toDouble();
+    final clampedY = maxHeight <= 180
+        ? maxHeight / 2
+        : tapPosition.dy.clamp(90.0, maxHeight - 90.0).toDouble();
+    final burst = _FeedLikeBurstData(
+      id: _nextLikeBurstId++,
+      postId: postId,
+      tapPosition: Offset(clampedX, clampedY),
     );
+    setState(() => _activeLikeBursts.add(burst));
+    Future<void>.delayed(const Duration(milliseconds: 900), () {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _activeLikeBursts.removeWhere((item) => item.id == burst.id);
+      });
+    });
+  }
+
+  Future<void> _handleFeedDoubleTapLike(
+    DemoFeedPost post,
+    Size surfaceSize,
+  ) async {
+    final tapPosition =
+        _lastDoubleTapOffsetsByPostId[post.id] ??
+        Offset(surfaceSize.width / 2, surfaceSize.height * 0.55);
+    _spawnTastyLikeBurst(
+      postId: post.id,
+      tapPosition: tapPosition,
+      surfaceSize: surfaceSize,
+    );
+    if (post.isLiked || _pendingDoubleTapLikePostIds.contains(post.id)) {
+      return;
+    }
+    _pendingDoubleTapLikePostIds.add(post.id);
+    try {
+      final updated = await _demoRepository.toggleLike(post.id);
+      if (!mounted) {
+        return;
+      }
+      setState(() => _feedPostsById[post.id] = updated);
+    } finally {
+      _pendingDoubleTapLikePostIds.remove(post.id);
+    }
   }
 
   Future<void> _openSearch() async {
@@ -226,7 +389,8 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     );
   }
 
-  Future<void> _openRestaurantDetails() async {
+  Future<void> _openRestaurantDetails([DemoFeedPost? post]) async {
+    final targetPost = post ?? _activeFeedPost;
     final videoPreviews = _uploadedVideos
         .map(
           (video) => RestaurantProfileVideoPreview(
@@ -237,7 +401,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         )
         .toList();
     final customerComments = _demoRepository
-        .getComments(_vendorFeedPost.id)
+        .getComments(targetPost.id)
         .where((comment) => !comment.isRestaurantReply)
         .toList();
     final reviewPreviews = customerComments.asMap().entries.map((entry) {
@@ -255,16 +419,16 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
     await showRestaurantProfilePopup(
       context,
-      restaurantName: _vendorFeedPost.restaurantName,
-      handle: _vendorFeedPost.restaurantHandle,
-      rating: _vendorFeedPost.rating,
-      caption: _vendorFeedPost.caption,
+      restaurantName: targetPost.restaurantName,
+      handle: targetPost.restaurantHandle,
+      rating: targetPost.rating,
+      caption: targetPost.caption,
       cuisineSummary: _profileInfo.cuisineSummary,
       phoneLabel: _profileInfo.phoneLabel,
       locationLabel: _profileInfo.locationLabel,
       followersCountLabel: _profileInfo.followersCountLabel,
       onOpenFollowers: () =>
-          _openFollowersList(restaurantName: _vendorFeedPost.restaurantName),
+          _openFollowersList(restaurantName: targetPost.restaurantName),
       profileImageUrl: _profileInfo.coverImageUrl,
       menuItems: _menuItemsForDisplay,
       uploadedVideos: videoPreviews,
@@ -272,52 +436,64 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     );
   }
 
-  Future<void> _toggleVendorFollow() async {
-    final updated = await _demoRepository.toggleFollow(_vendorFeedPost.id);
+  Future<void> _toggleVendorFollow([DemoFeedPost? post]) async {
+    final targetPost = post ?? _activeFeedPost;
+    final updated = await _demoRepository.toggleFollow(targetPost.id);
     if (!mounted) {
       return;
     }
-    setState(() => _vendorFeedPost = updated);
+    setState(() {
+      _feedPostsById[targetPost.id] = updated;
+    });
   }
 
-  Future<void> _toggleVendorLike() async {
-    final updated = await _demoRepository.toggleLike(_vendorFeedPost.id);
+  Future<void> _toggleVendorLike([DemoFeedPost? post]) async {
+    final targetPost = post ?? _activeFeedPost;
+    final updated = await _demoRepository.toggleLike(targetPost.id);
     if (!mounted) {
       return;
     }
-    setState(() => _vendorFeedPost = updated);
+    setState(() {
+      _feedPostsById[targetPost.id] = updated;
+    });
   }
 
-  Future<void> _openVendorComments() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => CommentsScreen(
-          postId: _vendorFeedPost.id,
-          postTitle: _vendorFeedPost.restaurantName,
-        ),
+  Future<void> _openVendorComments([DemoFeedPost? post]) async {
+    final targetPost = post ?? _activeFeedPost;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _FeedCommentsBottomSheet(
+        postId: targetPost.id,
+        postTitle: targetPost.restaurantName,
       ),
     );
     if (!mounted) {
       return;
     }
-    setState(_syncVendorFeedPost);
+    setState(() {
+      _feedPostsById[targetPost.id] = _loadPostForId(targetPost.id);
+    });
   }
 
-  Future<void> _shareVendorPromo() async {
+  Future<void> _shareVendorPromo([DemoFeedPost? post]) async {
+    final targetPost = post ?? _activeFeedPost;
     await showShareFallbackDialog(
       context,
-      title: _vendorFeedPost.restaurantName,
-      body: _vendorFeedPost.caption,
+      title: targetPost.restaurantName,
+      body: targetPost.caption,
     );
   }
 
-  Future<void> _openVendorPromoDetails() async {
+  Future<void> _openVendorPromoDetails([DemoFeedPost? post]) async {
+    final targetPost = post ?? _activeFeedPost;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => PromoDetailsScreen(
-          title: _vendorFeedPost.restaurantName,
-          caption: _vendorFeedPost.caption,
-          audioLabel: _vendorFeedPost.audioLabel,
+          title: targetPost.restaurantName,
+          caption: targetPost.caption,
+          audioLabel: targetPost.audioLabel,
         ),
       ),
     );
@@ -382,6 +558,11 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
   void _onBottomNavSelected(int index) {
     setState(() => _selectedBottomIndex = index);
+    if (index == 0) {
+      _syncVideoPlayback();
+    } else {
+      _pauseAllFeedVideos();
+    }
     if (index == _menuTabIndex || index == _dashboardTabIndex) {
       _refreshRestaurantMenu();
     }
@@ -394,6 +575,34 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
   void _onProfileTabSelected(int index) {
     setState(() => _selectedProfileTabIndex = index);
+  }
+
+  void _handleVideoPageChanged(int index) {
+    _currentVideoIndex = index;
+    _syncVideoPlayback();
+  }
+
+  void _syncVideoPlayback() {
+    for (var i = 0; i < _videoControllers.length; i++) {
+      final controller = _videoControllers[i];
+      if (!controller.value.isInitialized) {
+        continue;
+      }
+      if (i == _currentVideoIndex) {
+        controller.play();
+      } else {
+        controller.pause();
+      }
+    }
+  }
+
+  void _pauseAllFeedVideos() {
+    for (final controller in _videoControllers) {
+      if (!controller.value.isInitialized) {
+        continue;
+      }
+      controller.pause();
+    }
   }
 
   static String _timeAgoShort(DateTime dateTime) {
@@ -539,86 +748,191 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   Widget _buildFeedScaffold() {
     return Scaffold(
       backgroundColor: const Color(0xFF0A2230),
-      body: Stack(
-        children: [
-          const Positioned.fill(child: _FeedBackground()),
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    const Color(0x0D000000),
-                    const Color(0x7A000000),
-                    const Color(0xCF00131A),
-                  ],
-                  stops: const [0.0, 0.62, 1.0],
-                ),
-              ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final safeAreaPadding = MediaQuery.paddingOf(context);
+          final safeHeight =
+              constraints.maxHeight -
+              safeAreaPadding.top -
+              safeAreaPadding.bottom;
+          final metrics = _ResponsiveMetrics.from(
+            BoxConstraints(
+              maxWidth: constraints.maxWidth,
+              maxHeight: safeHeight > 0 ? safeHeight : constraints.maxHeight,
             ),
-          ),
-          SafeArea(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final metrics = _ResponsiveMetrics.from(constraints);
-                return Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    metrics.horizontalPadding,
-                    metrics.topPadding,
-                    metrics.horizontalPadding,
-                    metrics.bottomPadding,
-                  ),
-                  child: Column(
-                    children: [
-                      _TopControls(
-                        metrics: metrics,
-                        onOpenSearch: _openSearch,
-                        onOpenNotifications: _openNotifications,
-                        onOpenFeedInfo: _openVendorPromoDetails,
-                      ),
-                      SizedBox(height: metrics.gapAfterTop),
-                      Expanded(
-                        child: Align(
-                          alignment: Alignment.bottomCenter,
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Expanded(
-                                child: _FeedDetails(
-                                  post: _vendorFeedPost,
-                                  metrics: metrics,
-                                  onOpenRestaurant: _openRestaurantDetails,
-                                  onOpenAudio: _openVendorPromoDetails,
+          );
+          final navBarBottomInset = safeAreaPadding.bottom;
+          final navBarTotalHeight = metrics.navHeight + navBarBottomInset;
+          final topOverlayReservedHeight =
+              metrics.topControlButtonSize + metrics.gapAfterTop;
+
+          return Stack(
+            children: [
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 0,
+                bottom: navBarTotalHeight,
+                child: PageView.builder(
+                  scrollDirection: Axis.vertical,
+                  physics: const BouncingScrollPhysics(),
+                  onPageChanged: _handleVideoPageChanged,
+                  itemCount: _feedVideos.length,
+                  itemBuilder: (context, index) {
+                    final video = _feedVideos[index];
+                    final post = _postForVideo(video);
+                    final itemSize = Size(
+                      constraints.maxWidth,
+                      safeHeight > 0 ? safeHeight : constraints.maxHeight,
+                    );
+                    final likeBursts = _likeBurstsForPost(post.id);
+                    return GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onDoubleTapDown: (details) =>
+                          _rememberDoubleTapPosition(post.id, details),
+                      onDoubleTap: () =>
+                          _handleFeedDoubleTapLike(post, itemSize),
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: _FeedBackground(
+                              controller: _videoControllers[index],
+                            ),
+                          ),
+                          Positioned.fill(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    const Color(0x08000000),
+                                    const Color(0x6B000000),
+                                    const Color(0xD100131A),
+                                  ],
+                                  stops: const [0.0, 0.6, 1.0],
                                 ),
                               ),
-                              SizedBox(width: metrics.railGap),
-                              _ActionRail(
-                                metrics: metrics,
-                                post: _vendorFeedPost,
-                                onOpenRestaurant: _openRestaurantDetails,
-                                onToggleFollow: _toggleVendorFollow,
-                                onToggleLike: _toggleVendorLike,
-                                onOpenComments: _openVendorComments,
-                                onShare: _shareVendorPromo,
-                              ),
-                            ],
+                            ),
                           ),
-                        ),
+                          SafeArea(
+                            bottom: false,
+                            child: Padding(
+                              padding: EdgeInsets.fromLTRB(
+                                metrics.horizontalPadding,
+                                metrics.topPadding,
+                                metrics.horizontalPadding,
+                                0,
+                              ),
+                              child: Column(
+                                children: [
+                                  SizedBox(height: topOverlayReservedHeight),
+                                  Expanded(
+                                    child: Align(
+                                      alignment: Alignment.bottomCenter,
+                                      child: Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.end,
+                                        children: [
+                                          Expanded(
+                                            child: _FeedDetails(
+                                              post: post,
+                                              metrics: metrics,
+                                              onOpenRestaurant: () =>
+                                                  _openRestaurantDetails(post),
+                                              onOpenAudio: () =>
+                                                  _openVendorPromoDetails(post),
+                                            ),
+                                          ),
+                                          SizedBox(width: metrics.railGap),
+                                          _ActionRail(
+                                            metrics: metrics,
+                                            post: post,
+                                            onOpenRestaurant: () =>
+                                                _openRestaurantDetails(post),
+                                            onToggleFollow: () =>
+                                                _toggleVendorFollow(post),
+                                            onToggleLike: () =>
+                                                _toggleVendorLike(post),
+                                            onOpenComments: () =>
+                                                _openVendorComments(post),
+                                            onShare: () =>
+                                                _shareVendorPromo(post),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    height: _clampDouble(
+                                      10 * metrics.scale,
+                                      6,
+                                      12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          if (likeBursts.isNotEmpty)
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                child: Stack(
+                                  children: [
+                                    for (final burst in likeBursts)
+                                      _TastyLikeBurst(
+                                        key: ValueKey<int>(burst.id),
+                                        tapPosition: burst.tapPosition,
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
-                      SizedBox(height: metrics.sectionGapSmall),
-                      _BottomNavBar(
+                    );
+                  },
+                ),
+              ),
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: _BottomNavBar(
+                  metrics: metrics,
+                  selectedIndex: _selectedBottomIndex,
+                  onSelected: _onBottomNavSelected,
+                  fullWidth: true,
+                  bottomInset: navBarBottomInset,
+                ),
+              ),
+              Align(
+                alignment: Alignment.topCenter,
+                child: SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      metrics.horizontalPadding,
+                      metrics.topPadding,
+                      metrics.horizontalPadding,
+                      0,
+                    ),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: _TopControls(
                         metrics: metrics,
-                        selectedIndex: _selectedBottomIndex,
-                        onSelected: _onBottomNavSelected,
+                        selectedTab: _selectedTopTab,
+                        onTabSelected: (index) {
+                          setState(() => _selectedTopTab = index);
+                        },
+                        onOpenSearch: _openSearch,
+                        onOpenNotifications: _openNotifications,
                       ),
-                    ],
+                    ),
                   ),
-                );
-              },
-            ),
-          ),
-        ],
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -636,20 +950,35 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
             _openFollowersList(restaurantName: _profileInfo.name),
         onLogout: _logoutToLogin,
       ),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final metrics = _ResponsiveMetrics.from(constraints);
-            return Padding(
-              padding: EdgeInsets.fromLTRB(
-                metrics.horizontalPadding,
-                metrics.topPadding,
-                metrics.horizontalPadding,
-                metrics.bottomPadding,
-              ),
-              child: Column(
-                children: [
-                  Expanded(
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final safeAreaPadding = MediaQuery.paddingOf(context);
+          final safeHeight =
+              constraints.maxHeight -
+              safeAreaPadding.top -
+              safeAreaPadding.bottom;
+          final metrics = _ResponsiveMetrics.from(
+            BoxConstraints(
+              maxWidth: constraints.maxWidth,
+              maxHeight: safeHeight > 0 ? safeHeight : constraints.maxHeight,
+            ),
+          );
+          final navBarBottomInset = safeAreaPadding.bottom;
+          final navBarTotalHeight = metrics.navHeight + navBarBottomInset;
+
+          return Stack(
+            children: [
+              Positioned.fill(
+                bottom: navBarTotalHeight,
+                child: SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      metrics.horizontalPadding,
+                      metrics.topPadding,
+                      metrics.horizontalPadding,
+                      0,
+                    ),
                     child: _ProfileSection(
                       metrics: metrics,
                       profileInfo: _profileInfo,
@@ -664,17 +993,21 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                       uploadedVideos: _uploadedVideos,
                     ),
                   ),
-                  SizedBox(height: metrics.sectionGapSmall),
-                  _BottomNavBar(
-                    metrics: metrics,
-                    selectedIndex: _selectedBottomIndex,
-                    onSelected: _onBottomNavSelected,
-                  ),
-                ],
+                ),
               ),
-            );
-          },
-        ),
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: _BottomNavBar(
+                  metrics: metrics,
+                  selectedIndex: _selectedBottomIndex,
+                  onSelected: _onBottomNavSelected,
+                  fullWidth: true,
+                  bottomInset: navBarBottomInset,
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -682,64 +1015,90 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   Widget _buildMenuScaffold() {
     return Scaffold(
       backgroundColor: const Color(0xFFF8EFE8),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final metrics = _ResponsiveMetrics.from(constraints);
-            final menuItems = _menuItemsForDisplay;
-            final availableCount = menuItems
-                .where((item) => item.isAvailable)
-                .length;
-            final popularCount = menuItems
-                .where((item) => item.isPopular)
-                .length;
-            final averagePrice = _computeAveragePrice(menuItems);
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final safeAreaPadding = MediaQuery.paddingOf(context);
+          final safeHeight =
+              constraints.maxHeight -
+              safeAreaPadding.top -
+              safeAreaPadding.bottom;
+          final metrics = _ResponsiveMetrics.from(
+            BoxConstraints(
+              maxWidth: constraints.maxWidth,
+              maxHeight: safeHeight > 0 ? safeHeight : constraints.maxHeight,
+            ),
+          );
+          final navBarBottomInset = safeAreaPadding.bottom;
+          final navBarTotalHeight = metrics.navHeight + navBarBottomInset;
+          final menuItems = _menuItemsForDisplay;
+          final availableCount = menuItems
+              .where((item) => item.isAvailable)
+              .length;
+          final popularCount = menuItems.where((item) => item.isPopular).length;
+          final averagePrice = _computeAveragePrice(menuItems);
 
-            return Padding(
-              padding: EdgeInsets.fromLTRB(
-                metrics.horizontalPadding,
-                metrics.topPadding,
-                metrics.horizontalPadding,
-                metrics.bottomPadding,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _MenuScreenHeader(
-                    metrics: metrics,
-                    restaurantName: _restaurantName,
-                    isRefreshing: _isRefreshingMenu,
-                    onRefresh: () => _refreshRestaurantMenu(force: true),
-                  ),
-                  SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
-                  _MenuStatsRow(
-                    metrics: metrics,
-                    totalItems: menuItems.length,
-                    availableItems: availableCount,
-                    popularItems: popularCount,
-                    averagePrice: averagePrice,
-                  ),
-                  SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
-                  Expanded(
-                    child: _MenuSection(
-                      metrics: metrics,
-                      items: menuItems,
-                      isLoading: _isRefreshingMenu,
-                      errorMessage: _menuSyncError,
-                      onRetry: () => _refreshRestaurantMenu(force: true),
+          return Stack(
+            children: [
+              Positioned.fill(
+                bottom: navBarTotalHeight,
+                child: SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      metrics.horizontalPadding,
+                      metrics.topPadding,
+                      metrics.horizontalPadding,
+                      0,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _MenuScreenHeader(
+                          metrics: metrics,
+                          restaurantName: _restaurantName,
+                          isRefreshing: _isRefreshingMenu,
+                          onRefresh: () => _refreshRestaurantMenu(force: true),
+                        ),
+                        SizedBox(
+                          height: _clampDouble(12 * metrics.scale, 8, 12),
+                        ),
+                        _MenuStatsRow(
+                          metrics: metrics,
+                          totalItems: menuItems.length,
+                          availableItems: availableCount,
+                          popularItems: popularCount,
+                          averagePrice: averagePrice,
+                        ),
+                        SizedBox(
+                          height: _clampDouble(12 * metrics.scale, 8, 12),
+                        ),
+                        Expanded(
+                          child: _MenuSection(
+                            metrics: metrics,
+                            items: menuItems,
+                            isLoading: _isRefreshingMenu,
+                            errorMessage: _menuSyncError,
+                            onRetry: () => _refreshRestaurantMenu(force: true),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  SizedBox(height: metrics.sectionGapSmall),
-                  _BottomNavBar(
-                    metrics: metrics,
-                    selectedIndex: _selectedBottomIndex,
-                    onSelected: _onBottomNavSelected,
-                  ),
-                ],
+                ),
               ),
-            );
-          },
-        ),
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: _BottomNavBar(
+                  metrics: metrics,
+                  selectedIndex: _selectedBottomIndex,
+                  onSelected: _onBottomNavSelected,
+                  fullWidth: true,
+                  bottomInset: navBarBottomInset,
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -756,20 +1115,35 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8EFE8),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final metrics = _ResponsiveMetrics.from(constraints);
-            return Padding(
-              padding: EdgeInsets.fromLTRB(
-                metrics.horizontalPadding,
-                metrics.topPadding,
-                metrics.horizontalPadding,
-                metrics.bottomPadding,
-              ),
-              child: Column(
-                children: [
-                  Expanded(
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final safeAreaPadding = MediaQuery.paddingOf(context);
+          final safeHeight =
+              constraints.maxHeight -
+              safeAreaPadding.top -
+              safeAreaPadding.bottom;
+          final metrics = _ResponsiveMetrics.from(
+            BoxConstraints(
+              maxWidth: constraints.maxWidth,
+              maxHeight: safeHeight > 0 ? safeHeight : constraints.maxHeight,
+            ),
+          );
+          final navBarBottomInset = safeAreaPadding.bottom;
+          final navBarTotalHeight = metrics.navHeight + navBarBottomInset;
+
+          return Stack(
+            children: [
+              Positioned.fill(
+                bottom: navBarTotalHeight,
+                child: SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      metrics.horizontalPadding,
+                      metrics.topPadding,
+                      metrics.horizontalPadding,
+                      0,
+                    ),
                     child: _DashboardSection(
                       metrics: metrics,
                       restaurantName: _restaurantName,
@@ -792,17 +1166,21 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                       onOpenOrderDetails: _openOrderDetails,
                     ),
                   ),
-                  SizedBox(height: metrics.sectionGapSmall),
-                  _BottomNavBar(
-                    metrics: metrics,
-                    selectedIndex: _selectedBottomIndex,
-                    onSelected: _onBottomNavSelected,
-                  ),
-                ],
+                ),
               ),
-            );
-          },
-        ),
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: _BottomNavBar(
+                  metrics: metrics,
+                  selectedIndex: _selectedBottomIndex,
+                  onSelected: _onBottomNavSelected,
+                  fullWidth: true,
+                  bottomInset: navBarBottomInset,
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -810,36 +1188,55 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   Widget _buildMessagesScaffold() {
     return Scaffold(
       backgroundColor: const Color(0xFFF8EFE8),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final metrics = _ResponsiveMetrics.from(constraints);
-            return Padding(
-              padding: EdgeInsets.fromLTRB(
-                metrics.horizontalPadding,
-                metrics.topPadding,
-                metrics.horizontalPadding,
-                metrics.bottomPadding,
-              ),
-              child: Column(
-                children: [
-                  Expanded(
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final safeAreaPadding = MediaQuery.paddingOf(context);
+          final safeHeight =
+              constraints.maxHeight -
+              safeAreaPadding.top -
+              safeAreaPadding.bottom;
+          final metrics = _ResponsiveMetrics.from(
+            BoxConstraints(
+              maxWidth: constraints.maxWidth,
+              maxHeight: safeHeight > 0 ? safeHeight : constraints.maxHeight,
+            ),
+          );
+          final navBarBottomInset = safeAreaPadding.bottom;
+          final navBarTotalHeight = metrics.navHeight + navBarBottomInset;
+
+          return Stack(
+            children: [
+              Positioned.fill(
+                bottom: navBarTotalHeight,
+                child: SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      metrics.horizontalPadding,
+                      metrics.topPadding,
+                      metrics.horizontalPadding,
+                      0,
+                    ),
                     child: _MessagesSection(
                       metrics: metrics,
                       restaurantName: _restaurantName,
                     ),
                   ),
-                  SizedBox(height: metrics.sectionGapSmall),
-                  _BottomNavBar(
-                    metrics: metrics,
-                    selectedIndex: _selectedBottomIndex,
-                    onSelected: _onBottomNavSelected,
-                  ),
-                ],
+                ),
               ),
-            );
-          },
-        ),
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: _BottomNavBar(
+                  metrics: metrics,
+                  selectedIndex: _selectedBottomIndex,
+                  onSelected: _onBottomNavSelected,
+                  fullWidth: true,
+                  bottomInset: navBarBottomInset,
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -971,71 +1368,47 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   }
 }
 
-class _FeedBackground extends StatelessWidget {
-  const _FeedBackground();
+class _FeedVideoPostData {
+  const _FeedVideoPostData({
+    required this.videoAssetPath,
+    required this.postId,
+  });
 
-  static const _pizzaImage =
-      'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=1400&q=80';
+  final String videoAssetPath;
+  final String postId;
+}
+
+class _FeedBackground extends StatelessWidget {
+  const _FeedBackground({required this.controller});
+
+  final VideoPlayerController controller;
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        final height = constraints.maxHeight;
-        final pizzaDiameter = _clampDouble(width * 1.72, width * 1.35, 760);
-        final verticalShift = _clampDouble(height * 0.20, 110, 190);
+    if (!controller.value.isInitialized) {
+      return const DecoratedBox(decoration: BoxDecoration(color: Colors.black));
+    }
 
-        return Stack(
-          children: [
-            const Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Color(0xFF53C7D6),
-                      Color(0xFF1F95A7),
-                      Color(0xFF0D4C66),
-                    ],
-                  ),
-                ),
-              ),
+    final aspectRatio = controller.value.aspectRatio > 0
+        ? controller.value.aspectRatio
+        : (9 / 16);
+
+    return ColoredBox(
+      color: Colors.black,
+      child: SizedBox.expand(
+        child: FittedBox(
+          fit: BoxFit.cover,
+          alignment: Alignment.center,
+          child: SizedBox(
+            width: 1080,
+            height: 1080 / aspectRatio,
+            child: AspectRatio(
+              aspectRatio: aspectRatio,
+              child: VideoPlayer(controller),
             ),
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: Transform.translate(
-                offset: Offset(0, verticalShift),
-                child: ClipOval(
-                  child: SizedBox(
-                    width: pizzaDiameter,
-                    height: pizzaDiameter,
-                    child: Image.network(
-                      _pizzaImage,
-                      fit: BoxFit.cover,
-                      alignment: Alignment.center,
-                      errorBuilder: (context, error, stackTrace) {
-                        return const DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: RadialGradient(
-                              colors: [
-                                Color(0xFFF1C76A),
-                                Color(0xFFD1642E),
-                                Color(0xFF863A1E),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
+          ),
+        ),
+      ),
     );
   }
 }
@@ -6372,52 +6745,95 @@ class _ResponsiveMetrics {
   double get actionIconSize => _clampDouble(27 * scale, 19, 27);
   double get actionTextSize => _clampDouble(14 * scale, 11, 14);
 
-  double get navHeight => _clampDouble(96 * scale, 74, 96);
-  double get navRadius => _clampDouble(30 * scale, 22, 30);
-  double get navIconSize => _clampDouble(31 * scale, 22, 31);
-  double get navLabelSize => _clampDouble(13 * scale, 9.5, 13);
+  double get navScaleFactor => 0.6;
+  double get navHeight => _clampDouble(
+    96 * scale * navScaleFactor,
+    72 * navScaleFactor,
+    96 * navScaleFactor,
+  );
+  double get navRadius => _clampDouble(
+    32 * scale * navScaleFactor,
+    22 * navScaleFactor,
+    32 * navScaleFactor,
+  );
+  double get navIconScaleFactor => 0.82;
+  double get navIconSize =>
+      _clampDouble(30 * scale * navIconScaleFactor, 18, 24);
+  double get navLabelSize => _clampDouble(
+    12.5 * scale * navScaleFactor,
+    9 * navScaleFactor,
+    12.5 * navScaleFactor,
+  );
 }
 
 class _TopControls extends StatelessWidget {
   const _TopControls({
     required this.metrics,
+    required this.selectedTab,
+    required this.onTabSelected,
     required this.onOpenSearch,
     required this.onOpenNotifications,
-    required this.onOpenFeedInfo,
   });
 
   final _ResponsiveMetrics metrics;
+  final int selectedTab;
+  final ValueChanged<int> onTabSelected;
   final VoidCallback onOpenSearch;
   final VoidCallback onOpenNotifications;
-  final VoidCallback onOpenFeedInfo;
 
   @override
   Widget build(BuildContext context) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        _RoundIconButton(
-          icon: Icons.search_rounded,
-          metrics: metrics,
-          onTap: onOpenSearch,
-          tooltip: 'Search',
-        ),
-        SizedBox(width: metrics.sideGap),
-        Expanded(
+        SizedBox(
+          height: metrics.topControlButtonSize,
           child: Center(
-            child: _TopTab(
-              label: 'For You',
-              selected: true,
+            child: _RoundIconButton(
+              icon: Icons.search_rounded,
               metrics: metrics,
-              onTap: onOpenFeedInfo,
+              onTap: onOpenSearch,
+              tooltip: 'Search',
             ),
           ),
         ),
         SizedBox(width: metrics.sideGap),
-        _RoundIconButton(
-          icon: Icons.notifications_none_rounded,
-          metrics: metrics,
-          onTap: onOpenNotifications,
-          tooltip: 'Notifications',
+        Expanded(
+          child: SizedBox(
+            height: metrics.topControlButtonSize,
+            child: Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _TopTab(
+                    label: 'Following',
+                    selected: selectedTab == 0,
+                    metrics: metrics,
+                    onTap: () => onTabSelected(0),
+                  ),
+                  SizedBox(width: _clampDouble(18 * metrics.scale, 8, 18)),
+                  _TopTab(
+                    label: 'For You',
+                    selected: selectedTab == 1,
+                    metrics: metrics,
+                    onTap: () => onTabSelected(1),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        SizedBox(width: metrics.sideGap),
+        SizedBox(
+          height: metrics.topControlButtonSize,
+          child: Center(
+            child: _RoundIconButton(
+              icon: Icons.notifications_none_rounded,
+              metrics: metrics,
+              onTap: onOpenNotifications,
+              tooltip: 'Notifications',
+            ),
+          ),
         ),
       ],
     );
@@ -6545,30 +6961,16 @@ class _FeedDetails extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Flexible(
-                child: RichText(
+                child: Text(
+                  post.restaurantHandle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  text: TextSpan(
-                    children: [
-                      TextSpan(
-                        text: '@',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: metrics.handleAtFontSize,
-                          height: 1.1,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      TextSpan(
-                        text: post.restaurantHandle,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: metrics.handleFontSize,
-                          height: 1,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ],
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: metrics.handleFontSize,
+                    height: 1.02,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.2,
                   ),
                 ),
               ),
@@ -6688,7 +7090,7 @@ class _ActionRail extends StatelessWidget {
         children: [
           _CreatorAvatar(
             metrics: metrics,
-            isFollowing: post.isFollowing,
+            post: post,
             onOpenRestaurant: onOpenRestaurant,
             onToggleFollow: onToggleFollow,
           ),
@@ -6725,13 +7127,13 @@ class _ActionRail extends StatelessWidget {
 class _CreatorAvatar extends StatelessWidget {
   const _CreatorAvatar({
     required this.metrics,
-    required this.isFollowing,
+    required this.post,
     required this.onOpenRestaurant,
     required this.onToggleFollow,
   });
 
   final _ResponsiveMetrics metrics;
-  final bool isFollowing;
+  final DemoFeedPost post;
   final VoidCallback onOpenRestaurant;
   final VoidCallback onToggleFollow;
 
@@ -6757,7 +7159,7 @@ class _CreatorAvatar extends StatelessWidget {
             ),
             alignment: Alignment.center,
             child: Text(
-              'BELLA ITALIA',
+              _feedCreatorLabel(post.restaurantName),
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: Colors.white,
@@ -6784,7 +7186,7 @@ class _CreatorAvatar extends StatelessWidget {
                 border: Border.all(color: Colors.white, width: 2),
               ),
               child: Icon(
-                isFollowing ? Icons.check_rounded : Icons.add_rounded,
+                post.isFollowing ? Icons.check_rounded : Icons.add_rounded,
                 color: Colors.white,
                 size: metrics.creatorPlusSize * 0.62,
               ),
@@ -6848,16 +7250,439 @@ class _ActionButton extends StatelessWidget {
   }
 }
 
+class _FeedLikeBurstData {
+  const _FeedLikeBurstData({
+    required this.id,
+    required this.postId,
+    required this.tapPosition,
+  });
+
+  final int id;
+  final String postId;
+  final Offset tapPosition;
+}
+
+class _TastyLikeBurst extends StatelessWidget {
+  const _TastyLikeBurst({super.key, required this.tapPosition});
+
+  final Offset tapPosition;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      left: tapPosition.dx - 62,
+      top: tapPosition.dy - 82,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween<double>(begin: 0, end: 1),
+        duration: const Duration(milliseconds: 900),
+        curve: Curves.easeOutCubic,
+        builder: (context, progress, _) {
+          final fade = progress < 0.72
+              ? 1.0
+              : (1 - (progress - 0.72) / 0.28).clamp(0.0, 1.0);
+          final rise = 34 * progress;
+          final pop = progress < 0.2
+              ? 0.55 + progress * 2.25
+              : 1.0 + (1 - progress) * 0.1;
+          final spread = 42 * Curves.easeOutBack.transform(progress);
+          return Opacity(
+            opacity: fade,
+            child: Transform.translate(
+              offset: Offset(0, -rise),
+              child: Transform.scale(
+                scale: pop,
+                child: SizedBox(
+                  width: 124,
+                  height: 124,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Transform.translate(
+                        offset: Offset(-spread, -spread * 0.75),
+                        child: _TastyBurstChip(
+                          icon: Icons.local_pizza_rounded,
+                          iconColor: const Color(0xFFCF562F),
+                          backgroundColor: const Color(0xFFFFE2C8),
+                        ),
+                      ),
+                      Transform.translate(
+                        offset: Offset(spread * 0.9, -spread * 0.5),
+                        child: _TastyBurstChip(
+                          icon: Icons.icecream_rounded,
+                          iconColor: const Color(0xFFC84A6D),
+                          backgroundColor: const Color(0xFFFFE6EF),
+                        ),
+                      ),
+                      Transform.translate(
+                        offset: Offset(0, spread * 0.78),
+                        child: _TastyBurstChip(
+                          icon: Icons.ramen_dining_rounded,
+                          iconColor: const Color(0xFFB56A2E),
+                          backgroundColor: const Color(0xFFFFF0CF),
+                        ),
+                      ),
+                      Container(
+                        width: 74,
+                        height: 74,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: const LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [Color(0xFFFFAA72), Color(0xFFFF6D4F)],
+                          ),
+                          border: Border.all(
+                            color: const Color(0xFFFDF2E8),
+                            width: 2.4,
+                          ),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x40A84329),
+                              blurRadius: 18,
+                              offset: Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.favorite_rounded,
+                          color: Colors.white,
+                          size: 40,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _TastyBurstChip extends StatelessWidget {
+  const _TastyBurstChip({
+    required this.icon,
+    required this.iconColor,
+    required this.backgroundColor,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final Color backgroundColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 34,
+      height: 34,
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        shape: BoxShape.circle,
+        border: Border.all(color: const Color(0xFFFFF7EE), width: 1.4),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x22A45835),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Icon(icon, color: iconColor, size: 18),
+    );
+  }
+}
+
+class _FeedCommentsBottomSheet extends StatefulWidget {
+  const _FeedCommentsBottomSheet({
+    required this.postId,
+    required this.postTitle,
+  });
+
+  final String postId;
+  final String postTitle;
+
+  @override
+  State<_FeedCommentsBottomSheet> createState() =>
+      _FeedCommentsBottomSheetState();
+}
+
+class _FeedCommentsBottomSheetState extends State<_FeedCommentsBottomSheet> {
+  final _repository = DemoAppRepository.instance;
+  final _controller = TextEditingController();
+
+  late List<DemoComment> _comments;
+  bool _isSending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _comments = _repository.getComments(widget.postId);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _sendComment() async {
+    final text = _controller.text.trim();
+    if (text.isEmpty || _isSending) {
+      return;
+    }
+    FocusScope.of(context).unfocus();
+    setState(() => _isSending = true);
+    final comments = await _repository.addComment(
+      postId: widget.postId,
+      authorName: 'You',
+      text: text,
+    );
+    if (!mounted) {
+      return;
+    }
+    _controller.clear();
+    setState(() {
+      _comments = comments;
+      _isSending = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final sheetHeight = _clampDouble(media.size.height * 0.56, 320, 520);
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+        child: Container(
+          height: sheetHeight,
+          decoration: const BoxDecoration(
+            color: Color(0xFFFFFBF8),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+          ),
+          child: Column(
+            children: [
+              const SizedBox(height: 10),
+              Container(
+                width: 46,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFD2C5BB),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 10, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${_RestaurantProfileInfo._formatCompactCount(_comments.length)} comments',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF231A16),
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close_rounded),
+                      color: const Color(0xFF7A695E),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1, color: Color(0xFFECE1D7)),
+              Expanded(
+                child: _comments.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'No comments yet. Start the conversation.',
+                          style: TextStyle(
+                            color: Color(0xFF7E6D62),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      )
+                    : ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                        itemCount: _comments.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 10),
+                        itemBuilder: (context, index) {
+                          final comment = _comments[index];
+                          return Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFF4EC),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: const Color(0xFFF0E2D5),
+                              ),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  width: 34,
+                                  height: 34,
+                                  alignment: Alignment.center,
+                                  decoration: const BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: Color(0xFFFFE4D1),
+                                  ),
+                                  child: const Icon(
+                                    Icons.person_rounded,
+                                    size: 18,
+                                    color: Color(0xFF9A5A3B),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              comment.authorName,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: Color(0xFF231A16),
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            _formatRelativeTime(
+                                              comment.createdAt,
+                                            ),
+                                            style: const TextStyle(
+                                              color: Color(0xFF8A7A6F),
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        comment.body,
+                                        style: const TextStyle(
+                                          color: Color(0xFF5B4A41),
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                          height: 1.3,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _controller,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => _sendComment(),
+                        decoration: InputDecoration(
+                          hintText: 'Add a comment...',
+                          filled: true,
+                          fillColor: const Color(0xFFFFFFFF),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: const BorderSide(
+                              color: Color(0xFFEADACC),
+                            ),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: const BorderSide(
+                              color: Color(0xFFEADACC),
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: const BorderSide(
+                              color: Color(0xFFFF9E70),
+                            ),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                        ),
+                        maxLines: 3,
+                        minLines: 1,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    FilledButton(
+                      onPressed: _isSending ? null : _sendComment,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFFF7E4D),
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(52, 52),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      child: _isSending
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.send_rounded, size: 22),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _BottomNavBar extends StatelessWidget {
   const _BottomNavBar({
     required this.metrics,
     required this.selectedIndex,
     required this.onSelected,
+    this.fullWidth = false,
+    this.bottomInset = 0,
   });
 
   final _ResponsiveMetrics metrics;
   final int selectedIndex;
   final ValueChanged<int> onSelected;
+  final bool fullWidth;
+  final double bottomInset;
 
   @override
   Widget build(BuildContext context) {
@@ -6871,16 +7696,30 @@ class _BottomNavBar extends StatelessWidget {
       (icon: Icons.chat_bubble_outline_rounded, label: 'Messages'),
       (icon: Icons.person_outline_rounded, label: 'Profile'),
     ];
+    final navScale = metrics.navScaleFactor;
+    final horizontalPadding = fullWidth
+        ? _clampDouble((metrics.compact ? 10 : 14) * navScale, 4, 14)
+        : _clampDouble((metrics.compact ? 6 : 10) * navScale, 3, 10);
+    final verticalPadding = _clampDouble(
+      (metrics.compact ? 6 : 8) * navScale,
+      2,
+      8,
+    );
+    final insetPadding = fullWidth ? bottomInset / 2 : 0;
+    final topPadding = verticalPadding + insetPadding;
+    final bottomPadding = verticalPadding + insetPadding;
 
     return Container(
-      height: metrics.navHeight,
-      padding: EdgeInsets.symmetric(
-        horizontal: metrics.compact ? 6 : 10,
-        vertical: metrics.compact ? 6 : 8,
+      height: metrics.navHeight + (fullWidth ? bottomInset : 0),
+      padding: EdgeInsets.fromLTRB(
+        horizontalPadding,
+        topPadding,
+        horizontalPadding,
+        bottomPadding,
       ),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8EFE8),
-        borderRadius: BorderRadius.circular(metrics.navRadius),
+        color: const Color(0xFFF8F5F2),
+        borderRadius: BorderRadius.zero,
       ),
       child: Row(
         children: List.generate(items.length, (index) {
@@ -6918,14 +7757,15 @@ class _BottomNavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = selected ? const Color(0xFFFF7E4D) : const Color(0xFF9E8B7D);
+    final navScale = metrics.navScaleFactor;
     return InkWell(
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(_clampDouble(16 * navScale, 8, 16)),
       onTap: onTap,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(icon, color: color, size: metrics.navIconSize),
-          SizedBox(height: _clampDouble(6 * metrics.scale, 2, 6)),
+          SizedBox(height: _clampDouble(6 * metrics.scale * navScale, 1.5, 6)),
           Text(
             label,
             maxLines: 1,
