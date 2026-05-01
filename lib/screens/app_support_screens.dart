@@ -32,6 +32,7 @@ Future<void> showRestaurantProfilePopup(
   required String handle,
   required double rating,
   required String caption,
+  int initialTabIndex = 0,
   String? cuisineSummary,
   String? phoneLabel,
   String? locationLabel,
@@ -45,13 +46,16 @@ Future<void> showRestaurantProfilePopup(
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: Colors.transparent,
+    backgroundColor: const Color(0xFFF6F2ED),
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+    clipBehavior: Clip.none,
     builder: (context) {
       return _RestaurantProfilePopup(
         restaurantName: restaurantName,
         handle: handle,
         rating: rating,
         caption: caption,
+        initialTabIndex: initialTabIndex,
         cuisineSummary: cuisineSummary,
         phoneLabel: phoneLabel,
         locationLabel: locationLabel,
@@ -98,6 +102,7 @@ class _RestaurantProfilePopup extends StatelessWidget {
     required this.handle,
     required this.rating,
     required this.caption,
+    this.initialTabIndex = 0,
     this.cuisineSummary,
     this.phoneLabel,
     this.locationLabel,
@@ -113,6 +118,7 @@ class _RestaurantProfilePopup extends StatelessWidget {
   final String handle;
   final double rating;
   final String caption;
+  final int initialTabIndex;
   final String? cuisineSummary;
   final String? phoneLabel;
   final String? locationLabel;
@@ -329,6 +335,7 @@ class _RestaurantProfilePopup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final resolvedInitialTabIndex = initialTabIndex.clamp(0, 2).toInt();
     final bottomPadding = MediaQuery.viewInsetsOf(context).bottom;
     final viewportSize = MediaQuery.sizeOf(context);
     final tabPanelHeight = (viewportSize.height * 0.42)
@@ -338,23 +345,12 @@ class _RestaurantProfilePopup extends StatelessWidget {
     final videos = _resolvedVideos;
     final menuList = _resolvedMenuItems;
     final reviewsList = _resolvedReviews;
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: EdgeInsets.only(bottom: bottomPadding),
-        child: Container(
-          margin: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-          decoration: BoxDecoration(
-            color: const Color(0xFFF6F2ED),
-            borderRadius: BorderRadius.circular(28),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x29000000),
-                blurRadius: 28,
-                offset: Offset(0, -4),
-              ),
-            ],
-          ),
+    return ColoredBox(
+      color: const Color(0xFFF6F2ED),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: bottomPadding),
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(0, 0, 0, 18),
             child: Column(
@@ -378,6 +374,7 @@ class _RestaurantProfilePopup extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 18),
                   child: DefaultTabController(
                     length: 3,
+                    initialIndex: resolvedInitialTabIndex,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [

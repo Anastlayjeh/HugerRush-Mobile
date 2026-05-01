@@ -1970,7 +1970,7 @@ class _FeedVideoPostData {
   final String priceLabel;
 }
 
-class _DiscoverTabBody extends StatelessWidget {
+class _DiscoverTabBody extends StatefulWidget {
   const _DiscoverTabBody({
     required this.userName,
     required this.selectedBottomIndex,
@@ -2015,30 +2015,51 @@ class _DiscoverTabBody extends StatelessWidget {
   static const List<_DiscoverSpotData> _popularSpots = [
     _DiscoverSpotData(
       title: 'The Golden Spoon',
+      handle: 'thegoldenspoon',
+      categoryTitle: 'Pizza',
       subtitle: 'Italian comfort and signature pasta',
       deliveryLabel: '12 min',
       ratingLabel: '4.9',
+      priceTier: 2,
       badge: 'Free delivery',
       imageUrl:
           'https://images.unsplash.com/photo-1552566626-52f8b828add9?auto=format&fit=crop&w=900&q=80',
     ),
     _DiscoverSpotData(
       title: 'Ember Slice',
+      handle: 'emberslice',
+      categoryTitle: 'Burgers',
       subtitle: 'Stone-baked pizza and burrata bites',
       deliveryLabel: '18 min',
       ratingLabel: '4.8',
+      priceTier: 2,
       badge: 'Top rated',
       imageUrl:
           'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=900&q=80',
     ),
     _DiscoverSpotData(
       title: 'Cedar Bowl',
+      handle: 'cedarbowl',
+      categoryTitle: 'Sushi',
       subtitle: 'Fresh wraps, bowls, and grill plates',
       deliveryLabel: '14 min',
       ratingLabel: '4.7',
+      priceTier: 1,
       badge: 'New menu',
       imageUrl:
           'https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&w=900&q=80',
+    ),
+    _DiscoverSpotData(
+      title: 'Sweet Dock',
+      handle: 'sweetdock',
+      categoryTitle: 'Desserts',
+      subtitle: 'Gelato cups, cookies, and warm brownies',
+      deliveryLabel: '16 min',
+      ratingLabel: '4.8',
+      priceTier: 1,
+      badge: 'Chef pick',
+      imageUrl:
+          'https://images.unsplash.com/photo-1488477181946-6428a0291777?auto=format&fit=crop&w=900&q=80',
     ),
   ];
 
@@ -2069,20 +2090,459 @@ class _DiscoverTabBody extends StatelessWidget {
     ),
   ];
 
-  void _openDiscoverFilters(BuildContext context) {
-    _showFeatureComingSoonSnackBar(context, 'Discover Filters');
+  @override
+  State<_DiscoverTabBody> createState() => _DiscoverTabBodyState();
+}
+
+class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
+  final Set<String> _favoriteSpotTitles = <String>{};
+  Set<String> _activeCuisineFilters = <String>{};
+  double _minimumRatingFilter = 0;
+  int? _maximumDeliveryMinutesFilter;
+  int? _maximumPriceTierFilter;
+
+  List<_DiscoverSpotData> get _filteredPopularSpots {
+    return _DiscoverTabBody._popularSpots.where((spot) {
+      if (_activeCuisineFilters.isNotEmpty &&
+          !_activeCuisineFilters.contains(spot.categoryTitle)) {
+        return false;
+      }
+      if (spot.ratingValue < _minimumRatingFilter) {
+        return false;
+      }
+      if (_maximumDeliveryMinutesFilter != null &&
+          spot.deliveryMinutes > _maximumDeliveryMinutesFilter!) {
+        return false;
+      }
+      if (_maximumPriceTierFilter != null &&
+          spot.priceTier > _maximumPriceTierFilter!) {
+        return false;
+      }
+      return true;
+    }).toList(growable: false);
   }
 
-  void _openLocationMap(BuildContext context) {
-    _showFeatureComingSoonSnackBar(context, 'Location Map');
+  List<_DiscoverSpotData> _spotsForCuisine(String cuisineTitle) {
+    return _DiscoverTabBody._popularSpots
+        .where((spot) => spot.categoryTitle == cuisineTitle)
+        .toList(growable: false);
+  }
+
+  Future<void> _openDiscoverSearch(BuildContext context) async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const SearchScreen()));
+  }
+
+  void _openVoiceSearch(BuildContext context) {
+    _showFeatureComingSoonSnackBar(context, 'Voice Search');
+  }
+
+  Future<void> _openDiscoverFilters(BuildContext context) async {
+    final result = await showModalBottomSheet<_DiscoverFiltersState>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFFFEFCFA),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (sheetContext) {
+        var selectedCuisines = Set<String>.from(_activeCuisineFilters);
+        var minimumRating = _minimumRatingFilter;
+        int? maximumDeliveryMinutes = _maximumDeliveryMinutesFilter;
+        int? maximumPriceTier = _maximumPriceTierFilter;
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            String ratingLabelFor(double value) {
+              if (value == 0) {
+                return 'Any';
+              }
+              return '${value.toStringAsFixed(1)}+';
+            }
+
+            String deliveryLabelFor(int? value) {
+              if (value == null) {
+                return 'Any';
+              }
+              return '<= ${value}m';
+            }
+
+            String priceLabelFor(int? value) {
+              if (value == null) {
+                return 'Any';
+              }
+              return '\$' * value;
+            }
+
+            return SafeArea(
+              top: false,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  18,
+                  20,
+                  20 + MediaQuery.viewInsetsOf(context).bottom,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 46,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFD8C6B8),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Discover Filters',
+                      style: TextStyle(
+                        color: Color(0xFF231A16),
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Cuisines',
+                      style: TextStyle(
+                        color: Color(0xFF5D4C41),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _DiscoverTabBody._categories.map((category) {
+                        final isSelected = selectedCuisines.contains(
+                          category.title,
+                        );
+                        return FilterChip(
+                          label: Text(category.title),
+                          selected: isSelected,
+                          onSelected: (selected) {
+                            setModalState(() {
+                              if (selected) {
+                                selectedCuisines.add(category.title);
+                              } else {
+                                selectedCuisines.remove(category.title);
+                              }
+                            });
+                          },
+                          selectedColor: const Color(0xFFFFE2D0),
+                          showCheckmark: false,
+                          labelStyle: TextStyle(
+                            color: isSelected
+                                ? const Color(0xFFFF7E4D)
+                                : const Color(0xFF725F53),
+                            fontWeight: FontWeight.w700,
+                          ),
+                          side: const BorderSide(color: Color(0xFFEAD9CB)),
+                          backgroundColor: const Color(0xFFFFF8F2),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        );
+                      }).toList(growable: false),
+                    ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Minimum rating',
+                      style: TextStyle(
+                        color: Color(0xFF5D4C41),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Builder(
+                      builder: (_) {
+                        final chips = <Widget>[];
+                        for (final value in const <double>[0, 4.5, 4.8]) {
+                          final isSelected = minimumRating == value;
+                          chips.add(
+                            ChoiceChip(
+                              label: Text(ratingLabelFor(value)),
+                              selected: isSelected,
+                              onSelected: (_) => setModalState(
+                                () => minimumRating = value,
+                              ),
+                              selectedColor: const Color(0xFFFFE2D0),
+                              labelStyle: TextStyle(
+                                color: isSelected
+                                    ? const Color(0xFFFF7E4D)
+                                    : const Color(0xFF725F53),
+                                fontWeight: FontWeight.w700,
+                              ),
+                              side: const BorderSide(
+                                color: Color(0xFFEAD9CB),
+                              ),
+                              backgroundColor: const Color(0xFFFFF8F2),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                          );
+                        }
+                        return Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: chips,
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Delivery time',
+                      style: TextStyle(
+                        color: Color(0xFF5D4C41),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Builder(
+                      builder: (_) {
+                        final chips = <Widget>[];
+                        for (final value in const <int?>[null, 15, 20]) {
+                          final isSelected = maximumDeliveryMinutes == value;
+                          chips.add(
+                            ChoiceChip(
+                              label: Text(deliveryLabelFor(value)),
+                              selected: isSelected,
+                              onSelected: (_) => setModalState(
+                                () => maximumDeliveryMinutes = value,
+                              ),
+                              selectedColor: const Color(0xFFFFE2D0),
+                              labelStyle: TextStyle(
+                                color: isSelected
+                                    ? const Color(0xFFFF7E4D)
+                                    : const Color(0xFF725F53),
+                                fontWeight: FontWeight.w700,
+                              ),
+                              side: const BorderSide(
+                                color: Color(0xFFEAD9CB),
+                              ),
+                              backgroundColor: const Color(0xFFFFF8F2),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                          );
+                        }
+                        return Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: chips,
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Price',
+                      style: TextStyle(
+                        color: Color(0xFF5D4C41),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Builder(
+                      builder: (_) {
+                        final chips = <Widget>[];
+                        for (final value in const <int?>[null, 1, 2, 3]) {
+                          final isSelected = maximumPriceTier == value;
+                          chips.add(
+                            ChoiceChip(
+                              label: Text(priceLabelFor(value)),
+                              selected: isSelected,
+                              onSelected: (_) => setModalState(
+                                () => maximumPriceTier = value,
+                              ),
+                              selectedColor: const Color(0xFFFFE2D0),
+                              labelStyle: TextStyle(
+                                color: isSelected
+                                    ? const Color(0xFFFF7E4D)
+                                    : const Color(0xFF725F53),
+                                fontWeight: FontWeight.w700,
+                              ),
+                              side: const BorderSide(
+                                color: Color(0xFFEAD9CB),
+                              ),
+                              backgroundColor: const Color(0xFFFFF8F2),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                          );
+                        }
+                        return Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: chips,
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () {
+                              Navigator.of(
+                                sheetContext,
+                              ).pop(const _DiscoverFiltersState());
+                            },
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF7A6558),
+                              side: const BorderSide(color: Color(0xFFE2D0C1)),
+                              minimumSize: const Size.fromHeight(46),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            child: const Text(
+                              'Reset',
+                              style: TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: () {
+                              Navigator.of(sheetContext).pop(
+                                _DiscoverFiltersState(
+                                  selectedCuisineTitles: selectedCuisines,
+                                  minimumRating: minimumRating,
+                                  maximumDeliveryMinutes:
+                                      maximumDeliveryMinutes,
+                                  maximumPriceTier: maximumPriceTier,
+                                ),
+                              );
+                            },
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFFFF7E4D),
+                              minimumSize: const Size.fromHeight(46),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            child: const Text(
+                              'Apply Filters',
+                              style: TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (!mounted || result == null) {
+      return;
+    }
+    setState(() {
+      _activeCuisineFilters = Set<String>.from(result.selectedCuisineTitles);
+      _minimumRatingFilter = result.minimumRating;
+      _maximumDeliveryMinutesFilter = result.maximumDeliveryMinutes;
+      _maximumPriceTierFilter = result.maximumPriceTier;
+    });
+  }
+
+  Future<void> _openLocationMap(BuildContext context) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _DiscoverMapPreviewScreen(spots: _filteredPopularSpots),
+      ),
+    );
+  }
+
+  Future<void> _openCuisineDetails(
+    BuildContext context,
+    _DiscoverCategoryData category,
+  ) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _DiscoverCuisineDetailsScreen(
+          category: category,
+          spots: _spotsForCuisine(category.title),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openPopularSpot(
+    BuildContext context,
+    _DiscoverSpotData spot,
+  ) async {
+    await _openDiscoverRestaurantProfile(context, spot);
+  }
+
+  Future<void> _openPopularSpotMenu(
+    BuildContext context,
+    _DiscoverSpotData spot,
+  ) async {
+    await _openDiscoverRestaurantProfile(
+      context,
+      spot,
+      initialTabIndex: 1,
+    );
+  }
+
+  Future<void> _openPopularSpotList(BuildContext context) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _DiscoverPopularSpotsScreen(spots: _filteredPopularSpots),
+      ),
+    );
+  }
+
+  void _toggleSpotFavorite(_DiscoverSpotData spot) {
+    setState(() {
+      if (_favoriteSpotTitles.contains(spot.title)) {
+        _favoriteSpotTitles.remove(spot.title);
+      } else {
+        _favoriteSpotTitles.add(spot.title);
+      }
+    });
+  }
+
+  void _openQuickCravingDetails(BuildContext context, _DiscoverDealData deal) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => _DiscoverDealDetailsSheet(data: deal),
+    );
+  }
+
+  void _startExploring(BuildContext context) {
+    if (_DiscoverTabBody._categories.isEmpty) {
+      return;
+    }
+    _openCuisineDetails(context, _DiscoverTabBody._categories.first);
   }
 
   @override
   Widget build(BuildContext context) {
-    final trimmedName = userName.trim();
+    final trimmedName = widget.userName.trim();
     final greetingName = trimmedName.isEmpty
         ? 'Explorer'
         : trimmedName.split(RegExp(r'\s+')).first;
+    final popularSpots = _filteredPopularSpots;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -2166,7 +2626,13 @@ class _DiscoverTabBody extends StatelessWidget {
                       ),
                       Row(
                         children: [
-                          Expanded(child: _DiscoverSearchBar(metrics: metrics)),
+                          Expanded(
+                            child: _DiscoverSearchBar(
+                              metrics: metrics,
+                              onTapSearch: () => _openDiscoverSearch(context),
+                              onTapVoiceSearch: () => _openVoiceSearch(context),
+                            ),
+                          ),
                           SizedBox(
                             width: _clampDouble(12 * metrics.scale, 10, 12),
                           ),
@@ -2186,7 +2652,11 @@ class _DiscoverTabBody extends StatelessWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              _DiscoverFeatureCard(metrics: metrics),
+                              _DiscoverFeatureCard(
+                                metrics: metrics,
+                                onStartExploring: () =>
+                                    _startExploring(context),
+                              ),
                               SizedBox(
                                 height: _clampDouble(
                                   24 * metrics.scale,
@@ -2194,9 +2664,10 @@ class _DiscoverTabBody extends StatelessWidget {
                                   24,
                                 ),
                               ),
-                              const _ProfileSectionHeader(
+                              _ProfileSectionHeader(
                                 title: 'Browse Cuisines',
                                 actionLabel: 'View Map',
+                                onActionTap: () => _openLocationMap(context),
                               ),
                               SizedBox(
                                 height: _clampDouble(
@@ -2214,7 +2685,7 @@ class _DiscoverTabBody extends StatelessWidget {
                                 child: ListView.separated(
                                   scrollDirection: Axis.horizontal,
                                   physics: const BouncingScrollPhysics(),
-                                  itemCount: _categories.length,
+                                  itemCount: _DiscoverTabBody._categories.length,
                                   separatorBuilder: (context, index) =>
                                       SizedBox(
                                         width: _clampDouble(
@@ -2224,9 +2695,13 @@ class _DiscoverTabBody extends StatelessWidget {
                                         ),
                                       ),
                                   itemBuilder: (context, index) {
+                                    final category =
+                                        _DiscoverTabBody._categories[index];
                                     return _DiscoverCuisineChip(
-                                      data: _categories[index],
+                                      data: category,
                                       metrics: metrics,
+                                      onTap: () =>
+                                          _openCuisineDetails(context, category),
                                     );
                                   },
                                 ),
@@ -2238,9 +2713,10 @@ class _DiscoverTabBody extends StatelessWidget {
                                   26,
                                 ),
                               ),
-                              const _ProfileSectionHeader(
+                              _ProfileSectionHeader(
                                 title: 'Popular Near You',
                                 actionLabel: 'See All',
+                                onActionTap: () => _openPopularSpotList(context),
                               ),
                               SizedBox(
                                 height: _clampDouble(
@@ -2249,32 +2725,61 @@ class _DiscoverTabBody extends StatelessWidget {
                                   14,
                                 ),
                               ),
-                              SizedBox(
-                                height: _clampDouble(
-                                  320 * metrics.scale,
-                                  286,
-                                  320,
-                                ),
-                                child: ListView.separated(
-                                  scrollDirection: Axis.horizontal,
-                                  physics: const BouncingScrollPhysics(),
-                                  itemCount: _popularSpots.length,
-                                  separatorBuilder: (context, index) =>
-                                      SizedBox(
-                                        width: _clampDouble(
-                                          14 * metrics.scale,
-                                          10,
-                                          14,
-                                        ),
+                              if (popularSpots.isEmpty)
+                                _ProfilePanel(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(
+                                      _clampDouble(18 * metrics.scale, 14, 18),
+                                    ),
+                                    child: const Text(
+                                      'No restaurants match your filters yet.',
+                                      style: TextStyle(
+                                        color: Color(0xFF7D6C60),
+                                        fontWeight: FontWeight.w600,
                                       ),
-                                  itemBuilder: (context, index) {
-                                    return _DiscoverSpotCard(
-                                      data: _popularSpots[index],
-                                      metrics: metrics,
-                                    );
-                                  },
+                                    ),
+                                  ),
+                                )
+                              else
+                                SizedBox(
+                                  height: _clampDouble(
+                                    320 * metrics.scale,
+                                    286,
+                                    320,
+                                  ),
+                                  child: ListView.separated(
+                                    scrollDirection: Axis.horizontal,
+                                    physics: const BouncingScrollPhysics(),
+                                    itemCount: popularSpots.length,
+                                    separatorBuilder: (context, index) =>
+                                        SizedBox(
+                                          width: _clampDouble(
+                                            14 * metrics.scale,
+                                            10,
+                                            14,
+                                          ),
+                                        ),
+                                    itemBuilder: (context, index) {
+                                      final spot = popularSpots[index];
+                                      return _DiscoverSpotCard(
+                                        data: spot,
+                                        metrics: metrics,
+                                        isFavorite: _favoriteSpotTitles.contains(
+                                          spot.title,
+                                        ),
+                                        onTap: () =>
+                                            _openPopularSpot(context, spot),
+                                        onViewMenuTap: () =>
+                                            _openPopularSpotMenu(
+                                              context,
+                                              spot,
+                                            ),
+                                        onFavoriteTap: () =>
+                                            _toggleSpotFavorite(spot),
+                                      );
+                                    },
+                                  ),
                                 ),
-                              ),
                               SizedBox(
                                 height: _clampDouble(
                                   26 * metrics.scale,
@@ -2295,17 +2800,26 @@ class _DiscoverTabBody extends StatelessWidget {
                               _ProfilePanel(
                                 child: Column(
                                   children: List.generate(
-                                    _quickCravings.length,
+                                    _DiscoverTabBody._quickCravings.length,
                                     (index) {
-                                      final item = _quickCravings[index];
+                                      final item =
+                                          _DiscoverTabBody._quickCravings[index];
                                       return Column(
                                         children: [
                                           _DiscoverDealTile(
                                             data: item,
                                             metrics: metrics,
+                                            onTap: () =>
+                                                _openQuickCravingDetails(
+                                                  context,
+                                                  item,
+                                                ),
                                           ),
                                           if (index !=
-                                              _quickCravings.length - 1)
+                                              _DiscoverTabBody
+                                                      ._quickCravings
+                                                      .length -
+                                                  1)
                                             const Divider(
                                               height: 1,
                                               color: Color(0xFFF0E2D3),
@@ -2332,8 +2846,8 @@ class _DiscoverTabBody extends StatelessWidget {
               alignment: Alignment.bottomCenter,
               child: _BottomNavBar(
                 metrics: metrics,
-                selectedIndex: selectedBottomIndex,
-                onSelected: onBottomNavSelected,
+                selectedIndex: widget.selectedBottomIndex,
+                onSelected: widget.onBottomNavSelected,
                 fullWidth: true,
                 bottomInset: navBarBottomInset,
               ),
@@ -2954,11 +3468,26 @@ class _ActiveOrderCard extends StatelessWidget {
   final _ResponsiveMetrics metrics;
   final _OrderStatus currentStatus;
 
+  void _openOrderTracking(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _OrderTrackingScreen(
+          orderId: 'HR-2048',
+          restaurantName: 'Burger Station',
+          itemSummary: 'Double smash burger combo with Cajun fries',
+          status: currentStatus,
+          etaLabel: '8 min',
+          totalLabel: '\$24.50',
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final steps = _buildOrderTimeline(currentStatus);
     final actionLabel = currentStatus == _OrderStatus.onTheWay
-        ? 'Track rider'
+        ? 'Track order'
         : _orderStatusIsTerminal(currentStatus)
         ? 'View details'
         : 'View progress';
@@ -3102,6 +3631,7 @@ class _ActiveOrderCard extends StatelessWidget {
                   label: actionLabel,
                   filled: true,
                   metrics: metrics,
+                  onTap: () => _openOrderTracking(context),
                 );
                 if (compact) {
                   return Column(
@@ -3420,29 +3950,38 @@ class _OrdersActionPill extends StatelessWidget {
     required this.label,
     required this.filled,
     required this.metrics,
+    this.onTap,
   });
 
   final String label;
   final bool filled;
   final _ResponsiveMetrics metrics;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: _clampDouble(14 * metrics.scale, 12, 14),
-        vertical: _clampDouble(9 * metrics.scale, 7, 9),
-      ),
-      decoration: BoxDecoration(
-        color: filled ? const Color(0xFFFF7E4D) : const Color(0xFFFFF4EC),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(16),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: filled ? Colors.white : const Color(0xFFB66541),
-          fontSize: _clampDouble(13 * metrics.scale, 11, 13),
-          fontWeight: FontWeight.w800,
+        child: Ink(
+          padding: EdgeInsets.symmetric(
+            horizontal: _clampDouble(14 * metrics.scale, 12, 14),
+            vertical: _clampDouble(9 * metrics.scale, 7, 9),
+          ),
+          decoration: BoxDecoration(
+            color: filled ? const Color(0xFFFF7E4D) : const Color(0xFFFFF4EC),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: filled ? Colors.white : const Color(0xFFB66541),
+              fontSize: _clampDouble(13 * metrics.scale, 11, 13),
+              fontWeight: FontWeight.w800,
+            ),
+          ),
         ),
       ),
     );
@@ -3513,6 +4052,392 @@ class _OrdersRewardCard extends StatelessWidget {
                 metrics: metrics,
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OrderTrackingScreen extends StatelessWidget {
+  const _OrderTrackingScreen({
+    required this.orderId,
+    required this.restaurantName,
+    required this.itemSummary,
+    required this.status,
+    required this.etaLabel,
+    required this.totalLabel,
+  });
+
+  final String orderId;
+  final String restaurantName;
+  final String itemSummary;
+  final _OrderStatus status;
+  final String etaLabel;
+  final String totalLabel;
+
+  int _currentStepIndexForStatus() {
+    switch (status) {
+      case _OrderStatus.pending:
+        return 0;
+      case _OrderStatus.accepted:
+        return 1;
+      case _OrderStatus.preparing:
+        return 2;
+      case _OrderStatus.ready:
+        return 3;
+      case _OrderStatus.onTheWay:
+        return 4;
+      case _OrderStatus.delivered:
+        return 5;
+      case _OrderStatus.canceled:
+      case _OrderStatus.rejected:
+        return 1;
+    }
+  }
+
+  String _formatClockTime(DateTime time) {
+    final hour12 = time.hour % 12 == 0 ? 12 : time.hour % 12;
+    final minute = time.minute.toString().padLeft(2, '0');
+    final meridiem = time.hour >= 12 ? 'PM' : 'AM';
+    return '$hour12:$minute $meridiem';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final placedAt = now.subtract(const Duration(minutes: 26));
+    final viewport = MediaQuery.sizeOf(context);
+    final trackingMetrics = _ResponsiveMetrics.from(
+      BoxConstraints(maxWidth: viewport.width, maxHeight: viewport.height),
+    );
+    final checkpoints = <_OrderTrackingStep>[
+      _OrderTrackingStep(
+        label: 'Order placed',
+        subtitle: 'Payment confirmed and ticket sent to the restaurant.',
+        time: placedAt,
+        icon: Icons.shopping_bag_rounded,
+      ),
+      _OrderTrackingStep(
+        label: 'Restaurant accepted',
+        subtitle: 'The kitchen accepted your order and queued it.',
+        time: placedAt.add(const Duration(minutes: 3)),
+        icon: Icons.receipt_long_rounded,
+      ),
+      _OrderTrackingStep(
+        label: 'Preparing',
+        subtitle: 'Your meal is being cooked fresh.',
+        time: placedAt.add(const Duration(minutes: 12)),
+        icon: Icons.restaurant_rounded,
+      ),
+      _OrderTrackingStep(
+        label: 'Packed and ready',
+        subtitle: 'Order packed and assigned to a rider.',
+        time: placedAt.add(const Duration(minutes: 17)),
+        icon: Icons.inventory_2_rounded,
+      ),
+      _OrderTrackingStep(
+        label: 'On the way',
+        subtitle: 'Rider is heading to your location.',
+        time: placedAt.add(const Duration(minutes: 20)),
+        icon: Icons.delivery_dining_rounded,
+      ),
+      _OrderTrackingStep(
+        label: 'Delivered',
+        subtitle: 'Enjoy your meal!',
+        time: placedAt.add(const Duration(minutes: 29)),
+        icon: Icons.check_circle_rounded,
+      ),
+    ];
+    final currentStepIndex = _currentStepIndexForStatus();
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFFFFBF7),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFFFFBF7),
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        title: Text(
+          'Track Order #$orderId',
+          style: const TextStyle(
+            color: Color(0xFF231A16),
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      ),
+      body: SafeArea(
+        child: ListView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 2, 16, 16),
+          children: [
+            _ProfilePanel(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      restaurantName,
+                      style: const TextStyle(
+                        color: Color(0xFF231A16),
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      itemSummary,
+                      style: const TextStyle(
+                        color: Color(0xFF7D6C60),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _OrdersInfoChip(
+                          label: 'ETA $etaLabel',
+                          icon: Icons.timer_outlined,
+                          metrics: trackingMetrics,
+                        ),
+                        _OrdersInfoChip(
+                          label: totalLabel,
+                          icon: Icons.payments_rounded,
+                          metrics: trackingMetrics,
+                        ),
+                        _OrdersInfoChip(
+                          label: 'Status ${_orderStatusLabel(status)}',
+                          icon: _orderStatusIcon(status),
+                          metrics: trackingMetrics,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    LinearProgressIndicator(
+                      value: (currentStepIndex + 1) / checkpoints.length,
+                      minHeight: 9,
+                      color: _orderStatusAccentColor(status),
+                      backgroundColor: const Color(0xFFF2E4D7),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            _ProfilePanel(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  children: List.generate(checkpoints.length, (index) {
+                    final step = checkpoints[index];
+                    final isComplete = index <= currentStepIndex;
+                    final isCurrent = index == currentStepIndex;
+                    final previousTime = index == 0
+                        ? null
+                        : checkpoints[index - 1].time;
+                    final durationLabel = previousTime == null
+                        ? 'Start'
+                        : '${step.time.difference(previousTime).inMinutes} min';
+                    return Padding(
+                      padding: EdgeInsets.only(
+                        bottom: index == checkpoints.length - 1 ? 0 : 10,
+                      ),
+                      child: _OrderTrackingTimelineTile(
+                        step: step,
+                        isComplete: isComplete,
+                        isCurrent: isCurrent,
+                        timeLabel: _formatClockTime(step.time),
+                        durationLabel: durationLabel,
+                      ),
+                    );
+                  }),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            _ProfilePanel(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Helpful Actions',
+                      style: TextStyle(
+                        color: Color(0xFF231A16),
+                        fontSize: 17,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _OrdersActionPill(
+                          label: 'Contact restaurant',
+                          filled: false,
+                          metrics: trackingMetrics,
+                          onTap: () => _showFeatureComingSoonSnackBar(
+                            context,
+                            'Contact Restaurant',
+                          ),
+                        ),
+                        _OrdersActionPill(
+                          label: 'Support chat',
+                          filled: true,
+                          metrics: trackingMetrics,
+                          onTap: () => _showFeatureComingSoonSnackBar(
+                            context,
+                            'Support Chat',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OrderTrackingStep {
+  const _OrderTrackingStep({
+    required this.label,
+    required this.subtitle,
+    required this.time,
+    required this.icon,
+  });
+
+  final String label;
+  final String subtitle;
+  final DateTime time;
+  final IconData icon;
+}
+
+class _OrderTrackingTimelineTile extends StatelessWidget {
+  const _OrderTrackingTimelineTile({
+    required this.step,
+    required this.isComplete,
+    required this.isCurrent,
+    required this.timeLabel,
+    required this.durationLabel,
+  });
+
+  final _OrderTrackingStep step;
+  final bool isComplete;
+  final bool isCurrent;
+  final String timeLabel;
+  final String durationLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final badgeColor = isCurrent
+        ? const Color(0xFFFF7E4D)
+        : isComplete
+        ? const Color(0xFF2F8A7E)
+        : const Color(0xFFD9CABC);
+    final panelColor = isCurrent
+        ? const Color(0xFFFFF2E8)
+        : isComplete
+        ? const Color(0xFFF1F8F5)
+        : const Color(0xFFF8F1EA);
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: panelColor,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(color: badgeColor, shape: BoxShape.circle),
+            child: Icon(step.icon, color: Colors.white, size: 20),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  step.label,
+                  style: const TextStyle(
+                    color: Color(0xFF231A16),
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  step.subtitle,
+                  style: const TextStyle(
+                    color: Color(0xFF7A695E),
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    height: 1.25,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _TrackingMetaPill(
+                      icon: Icons.schedule_rounded,
+                      label: timeLabel,
+                    ),
+                    _TrackingMetaPill(
+                      icon: Icons.timelapse_rounded,
+                      label: durationLabel,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TrackingMetaPill extends StatelessWidget {
+  const _TrackingMetaPill({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFBF7),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFF1E2D3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: const Color(0xFF8A7060)),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xFF5D4C42),
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ],
       ),
@@ -3871,67 +4796,91 @@ class _ProfileBackground extends StatelessWidget {
 }
 
 class _DiscoverSearchBar extends StatelessWidget {
-  const _DiscoverSearchBar({required this.metrics});
+  const _DiscoverSearchBar({
+    required this.metrics,
+    required this.onTapSearch,
+    required this.onTapVoiceSearch,
+  });
 
   final _ResponsiveMetrics metrics;
+  final VoidCallback onTapSearch;
+  final VoidCallback onTapVoiceSearch;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: _clampDouble(56 * metrics.scale, 48, 56),
-      padding: EdgeInsets.symmetric(
-        horizontal: _clampDouble(18 * metrics.scale, 14, 18),
-      ),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFEFCFA),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTapSearch,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0xFFF3DFCF)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x10A7633A),
-            blurRadius: 20,
-            offset: Offset(0, 10),
+        child: Ink(
+          height: _clampDouble(56 * metrics.scale, 48, 56),
+          padding: EdgeInsets.symmetric(
+            horizontal: _clampDouble(18 * metrics.scale, 14, 18),
           ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.search_rounded,
-            color: const Color(0xFFFF7E4D),
-            size: _clampDouble(24 * metrics.scale, 20, 24),
-          ),
-          SizedBox(width: _clampDouble(10 * metrics.scale, 8, 10)),
-          Expanded(
-            child: Text(
-              'Search restaurants or dishes',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: const Color(0xFF9D8A7D),
-                fontSize: _clampDouble(15 * metrics.scale, 12, 15),
-                fontWeight: FontWeight.w600,
+          decoration: BoxDecoration(
+            color: const Color(0xFFFEFCFA),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: const Color(0xFFF3DFCF)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x10A7633A),
+                blurRadius: 20,
+                offset: Offset(0, 10),
               ),
-            ),
+            ],
           ),
-          Icon(
-            Icons.mic_none_rounded,
-            color: const Color(0xFFB9A596),
-            size: _clampDouble(22 * metrics.scale, 18, 22),
+          child: Row(
+            children: [
+              Icon(
+                Icons.search_rounded,
+                color: const Color(0xFFFF7E4D),
+                size: _clampDouble(24 * metrics.scale, 20, 24),
+              ),
+              SizedBox(width: _clampDouble(10 * metrics.scale, 8, 10)),
+              Expanded(
+                child: Text(
+                  'Search restaurants or dishes',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: const Color(0xFF9D8A7D),
+                    fontSize: _clampDouble(15 * metrics.scale, 12, 15),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              GestureDetector(
+                onTap: onTapVoiceSearch,
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.all(2),
+                  child: Icon(
+                    Icons.mic_none_rounded,
+                    color: const Color(0xFFB9A596),
+                    size: _clampDouble(22 * metrics.scale, 18, 22),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
 }
 
 class _DiscoverFeatureCard extends StatelessWidget {
-  const _DiscoverFeatureCard({required this.metrics});
+  const _DiscoverFeatureCard({
+    required this.metrics,
+    required this.onStartExploring,
+  });
 
   static const _featureImage =
       'https://images.unsplash.com/photo-1473093295043-cdd812d0e601?auto=format&fit=crop&w=900&q=80';
 
   final _ResponsiveMetrics metrics;
+  final VoidCallback onStartExploring;
 
   @override
   Widget build(BuildContext context) {
@@ -3982,21 +4931,28 @@ class _DiscoverFeatureCard extends StatelessWidget {
           ),
         ),
         SizedBox(height: _clampDouble(16 * metrics.scale, 12, 16)),
-        Container(
-          padding: EdgeInsets.symmetric(
-            horizontal: _clampDouble(16 * metrics.scale, 12, 16),
-            vertical: _clampDouble(10 * metrics.scale, 8, 10),
-          ),
-          decoration: BoxDecoration(
-            color: const Color(0xFFFF7E4D),
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onStartExploring,
             borderRadius: BorderRadius.circular(18),
-          ),
-          child: Text(
-            'Start exploring',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: _clampDouble(14 * metrics.scale, 11, 14),
-              fontWeight: FontWeight.w800,
+            child: Ink(
+              padding: EdgeInsets.symmetric(
+                horizontal: _clampDouble(16 * metrics.scale, 12, 16),
+                vertical: _clampDouble(10 * metrics.scale, 8, 10),
+              ),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF7E4D),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Text(
+                'Start exploring',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: _clampDouble(14 * metrics.scale, 11, 14),
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             ),
           ),
         ),
@@ -4090,84 +5046,107 @@ class _DiscoverFeatureCard extends StatelessWidget {
 }
 
 class _DiscoverCuisineChip extends StatelessWidget {
-  const _DiscoverCuisineChip({required this.data, required this.metrics});
+  const _DiscoverCuisineChip({
+    required this.data,
+    required this.metrics,
+    required this.onTap,
+  });
 
   final _DiscoverCategoryData data;
   final _ResponsiveMetrics metrics;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: _clampDouble(104 * metrics.scale, 90, 104),
-      padding: EdgeInsets.symmetric(
-        horizontal: _clampDouble(12 * metrics.scale, 10, 12),
-        vertical: _clampDouble(
-          (metrics.compact ? 10 : 12) * metrics.scale,
-          8,
-          metrics.compact ? 10 : 12,
-        ),
-      ),
-      decoration: BoxDecoration(
-        color: data.backgroundColor,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFFF3DFCF)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.start,
-        children: [
-          Container(
-            width: _clampDouble(38 * metrics.scale, 32, 38),
-            height: _clampDouble(38 * metrics.scale, 32, 38),
-            decoration: BoxDecoration(
-              color: data.accentColor,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Icon(
-              data.icon,
-              color: Colors.white,
-              size: _clampDouble(20 * metrics.scale, 16, 20),
+        child: Ink(
+          width: _clampDouble(104 * metrics.scale, 90, 104),
+          padding: EdgeInsets.symmetric(
+            horizontal: _clampDouble(12 * metrics.scale, 10, 12),
+            vertical: _clampDouble(
+              (metrics.compact ? 10 : 12) * metrics.scale,
+              8,
+              metrics.compact ? 10 : 12,
             ),
           ),
-          SizedBox(
-            height: _clampDouble(
-              (metrics.compact ? 8 : 12) * metrics.scale,
-              6,
-              12,
-            ),
+          decoration: BoxDecoration(
+            color: data.backgroundColor,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: const Color(0xFFF3DFCF)),
           ),
-          Text(
-            data.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: const Color(0xFF231A16),
-              fontSize: _clampDouble(15 * metrics.scale, 12, 15),
-              fontWeight: FontWeight.w800,
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.start,
+            children: [
+              Container(
+                width: _clampDouble(38 * metrics.scale, 32, 38),
+                height: _clampDouble(38 * metrics.scale, 32, 38),
+                decoration: BoxDecoration(
+                  color: data.accentColor,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(
+                  data.icon,
+                  color: Colors.white,
+                  size: _clampDouble(20 * metrics.scale, 16, 20),
+                ),
+              ),
+              SizedBox(
+                height: _clampDouble(
+                  (metrics.compact ? 8 : 12) * metrics.scale,
+                  6,
+                  12,
+                ),
+              ),
+              Text(
+                data.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: const Color(0xFF231A16),
+                  fontSize: _clampDouble(15 * metrics.scale, 12, 15),
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              SizedBox(height: _clampDouble(2 * metrics.scale, 1, 2)),
+              Text(
+                data.subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: const Color(0xFF857467),
+                  fontSize: _clampDouble(12 * metrics.scale, 10, 12),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
-          SizedBox(height: _clampDouble(2 * metrics.scale, 1, 2)),
-          Text(
-            data.subtitle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: const Color(0xFF857467),
-              fontSize: _clampDouble(12 * metrics.scale, 10, 12),
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 }
 
 class _DiscoverSpotCard extends StatelessWidget {
-  const _DiscoverSpotCard({required this.data, required this.metrics});
+  const _DiscoverSpotCard({
+    required this.data,
+    required this.metrics,
+    required this.isFavorite,
+    required this.onTap,
+    required this.onViewMenuTap,
+    required this.onFavoriteTap,
+  });
 
   final _DiscoverSpotData data;
   final _ResponsiveMetrics metrics;
+  final bool isFavorite;
+  final VoidCallback onTap;
+  final VoidCallback onViewMenuTap;
+  final VoidCallback onFavoriteTap;
 
   @override
   Widget build(BuildContext context) {
@@ -4177,214 +5156,245 @@ class _DiscoverSpotCard extends StatelessWidget {
       metrics.compact ? 96 : 112,
       metrics.compact ? 110 : 128,
     );
-    return Container(
-      width: cardWidth,
-      decoration: BoxDecoration(
-        color: const Color(0xFFFEFCFA),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: const Color(0xFFF3DFCF)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x10A7633A),
-            blurRadius: 24,
-            offset: Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Stack(
-            children: [
-              ClipRRect(
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(30),
-                ),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: imageHeight,
-                  child: Image.network(
-                    data.imageUrl,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) {
-                      return DecoratedBox(
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [Color(0xFFFFD6B4), Color(0xFFFF9C6C)],
-                          ),
-                        ),
-                        child: Icon(
-                          Icons.restaurant_rounded,
-                          color: Colors.white,
-                          size: _clampDouble(44 * metrics.scale, 34, 44),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ),
-              Positioned(
-                top: _clampDouble(14 * metrics.scale, 10, 14),
-                left: _clampDouble(14 * metrics.scale, 10, 14),
-                child: Container(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: _clampDouble(12 * metrics.scale, 9, 12),
-                    vertical: _clampDouble(7 * metrics.scale, 5, 7),
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFDF9F6),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Text(
-                    data.badge,
-                    style: TextStyle(
-                      color: const Color(0xFFFF7E4D),
-                      fontSize: _clampDouble(12 * metrics.scale, 10, 12),
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                top: _clampDouble(12 * metrics.scale, 10, 12),
-                right: _clampDouble(12 * metrics.scale, 10, 12),
-                child: Container(
-                  width: _clampDouble(34 * metrics.scale, 30, 34),
-                  height: _clampDouble(34 * metrics.scale, 30, 34),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFFDF9F6),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.favorite_border_rounded,
-                    color: const Color(0xFF8D7464),
-                    size: _clampDouble(20 * metrics.scale, 16, 20),
-                  ),
-                ),
+        child: Ink(
+          width: cardWidth,
+          decoration: BoxDecoration(
+            color: const Color(0xFFFEFCFA),
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(color: const Color(0xFFF3DFCF)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x10A7633A),
+                blurRadius: 24,
+                offset: Offset(0, 10),
               ),
             ],
           ),
-          Expanded(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                _clampDouble(15 * metrics.scale, 12, 15),
-                _clampDouble(
-                  (metrics.compact ? 12 : 14) * metrics.scale,
-                  10,
-                  metrics.compact ? 12 : 14,
-                ),
-                _clampDouble(15 * metrics.scale, 12, 15),
-                _clampDouble(
-                  (metrics.compact ? 12 : 16) * metrics.scale,
-                  10,
-                  metrics.compact ? 12 : 16,
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Stack(
                 children: [
-                  Text(
-                    data.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: const Color(0xFF231A16),
-                      fontSize: _clampDouble(19 * metrics.scale, 15, 19),
-                      fontWeight: FontWeight.w900,
+                  ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(30),
                     ),
-                  ),
-                  SizedBox(height: _clampDouble(4 * metrics.scale, 3, 4)),
-                  Text(
-                    data.subtitle,
-                    maxLines: metrics.compact ? 1 : 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: const Color(0xFF7D6C60),
-                      fontSize: _clampDouble(14 * metrics.scale, 11, 14),
-                      fontWeight: FontWeight.w600,
-                      height: 1.3,
-                    ),
-                  ),
-                  SizedBox(
-                    height: _clampDouble(
-                      (metrics.compact ? 10 : 12) * metrics.scale,
-                      8,
-                      metrics.compact ? 10 : 12,
-                    ),
-                  ),
-                  Row(
-                    children: [
-                      Container(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: _clampDouble(12 * metrics.scale, 9, 12),
-                          vertical: _clampDouble(7 * metrics.scale, 5, 7),
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFF0E6),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Text(
-                          data.deliveryLabel,
-                          style: TextStyle(
-                            color: const Color(0xFFFF7E4D),
-                            fontSize: _clampDouble(12 * metrics.scale, 10, 12),
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: imageHeight,
+                      child: Image.network(
+                        data.imageUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return DecoratedBox(
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [Color(0xFFFFD6B4), Color(0xFFFF9C6C)],
+                              ),
+                            ),
+                            child: Icon(
+                              Icons.restaurant_rounded,
+                              color: Colors.white,
+                              size: _clampDouble(44 * metrics.scale, 34, 44),
+                            ),
+                          );
+                        },
                       ),
-                      const Spacer(),
-                      Icon(
-                        Icons.star_rounded,
-                        color: const Color(0xFFF5B63F),
-                        size: _clampDouble(18 * metrics.scale, 14, 18),
+                    ),
+                  ),
+                  Positioned(
+                    top: _clampDouble(14 * metrics.scale, 10, 14),
+                    left: _clampDouble(14 * metrics.scale, 10, 14),
+                    child: Container(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: _clampDouble(12 * metrics.scale, 9, 12),
+                        vertical: _clampDouble(7 * metrics.scale, 5, 7),
                       ),
-                      SizedBox(width: _clampDouble(4 * metrics.scale, 2, 4)),
-                      Text(
-                        data.ratingLabel,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFDF9F6),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Text(
+                        data.badge,
                         style: TextStyle(
-                          color: const Color(0xFF5A4A40),
-                          fontSize: _clampDouble(14 * metrics.scale, 11, 14),
+                          color: const Color(0xFFFF7E4D),
+                          fontSize: _clampDouble(12 * metrics.scale, 10, 12),
                           fontWeight: FontWeight.w800,
                         ),
                       ),
-                    ],
+                    ),
                   ),
-                  SizedBox(height: _clampDouble(8 * metrics.scale, 6, 8)),
-                  Container(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: _clampDouble(13 * metrics.scale, 10, 13),
-                      vertical: _clampDouble(8 * metrics.scale, 6, 8),
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF4EEE8),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Text(
-                      'View menu',
-                      style: TextStyle(
-                        color: const Color(0xFF5A4A40),
-                        fontSize: _clampDouble(12.5 * metrics.scale, 10, 12.5),
-                        fontWeight: FontWeight.w800,
+                  Positioned(
+                    top: _clampDouble(12 * metrics.scale, 10, 12),
+                    right: _clampDouble(12 * metrics.scale, 10, 12),
+                    child: Material(
+                      color: const Color(0xFFFDF9F6),
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        onTap: onFavoriteTap,
+                        customBorder: const CircleBorder(),
+                        child: SizedBox(
+                          width: _clampDouble(34 * metrics.scale, 30, 34),
+                          height: _clampDouble(34 * metrics.scale, 30, 34),
+                          child: Icon(
+                            isFavorite
+                                ? Icons.favorite_rounded
+                                : Icons.favorite_border_rounded,
+                            color: isFavorite
+                                ? const Color(0xFFFF7E4D)
+                                : const Color(0xFF8D7464),
+                            size: _clampDouble(20 * metrics.scale, 16, 20),
+                          ),
+                        ),
                       ),
                     ),
                   ),
                 ],
               ),
-            ),
+              Expanded(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    _clampDouble(15 * metrics.scale, 12, 15),
+                    _clampDouble(
+                      (metrics.compact ? 12 : 14) * metrics.scale,
+                      10,
+                      metrics.compact ? 12 : 14,
+                    ),
+                    _clampDouble(15 * metrics.scale, 12, 15),
+                    _clampDouble(
+                      (metrics.compact ? 12 : 16) * metrics.scale,
+                      10,
+                      metrics.compact ? 12 : 16,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        data.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: const Color(0xFF231A16),
+                          fontSize: _clampDouble(19 * metrics.scale, 15, 19),
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      SizedBox(height: _clampDouble(4 * metrics.scale, 3, 4)),
+                      Text(
+                        data.subtitle,
+                        maxLines: metrics.compact ? 1 : 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: const Color(0xFF7D6C60),
+                          fontSize: _clampDouble(14 * metrics.scale, 11, 14),
+                          fontWeight: FontWeight.w600,
+                          height: 1.3,
+                        ),
+                      ),
+                      SizedBox(
+                        height: _clampDouble(
+                          (metrics.compact ? 10 : 12) * metrics.scale,
+                          8,
+                          metrics.compact ? 10 : 12,
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          Container(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: _clampDouble(12 * metrics.scale, 9, 12),
+                              vertical: _clampDouble(7 * metrics.scale, 5, 7),
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFF0E6),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Text(
+                              data.deliveryLabel,
+                              style: TextStyle(
+                                color: const Color(0xFFFF7E4D),
+                                fontSize: _clampDouble(12 * metrics.scale, 10, 12),
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          const Spacer(),
+                          Icon(
+                            Icons.star_rounded,
+                            color: const Color(0xFFF5B63F),
+                            size: _clampDouble(18 * metrics.scale, 14, 18),
+                          ),
+                          SizedBox(width: _clampDouble(4 * metrics.scale, 2, 4)),
+                          Text(
+                            data.ratingLabel,
+                            style: TextStyle(
+                              color: const Color(0xFF5A4A40),
+                              fontSize: _clampDouble(14 * metrics.scale, 11, 14),
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: _clampDouble(8 * metrics.scale, 6, 8)),
+                      Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: onViewMenuTap,
+                          borderRadius: BorderRadius.circular(16),
+                          child: Ink(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: _clampDouble(13 * metrics.scale, 10, 13),
+                              vertical: _clampDouble(8 * metrics.scale, 6, 8),
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF4EEE8),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Text(
+                              'View menu',
+                              style: TextStyle(
+                                color: const Color(0xFF5A4A40),
+                                fontSize: _clampDouble(
+                                  12.5 * metrics.scale,
+                                  10,
+                                  12.5,
+                                ),
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
 }
 
 class _DiscoverDealTile extends StatelessWidget {
-  const _DiscoverDealTile({required this.data, required this.metrics});
+  const _DiscoverDealTile({
+    required this.data,
+    required this.metrics,
+    required this.onTap,
+  });
 
   final _DiscoverDealData data;
   final _ResponsiveMetrics metrics;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -4463,42 +5473,536 @@ class _DiscoverDealTile extends StatelessWidget {
       ),
     );
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final useStackedMeta = metrics.tiny || constraints.maxWidth < 315;
-        return Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: _clampDouble(18 * metrics.scale, 14, 18),
-            vertical: _clampDouble(16 * metrics.scale, 12, 16),
-          ),
-          child: useStackedMeta
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final useStackedMeta = metrics.tiny || constraints.maxWidth < 315;
+            return Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: _clampDouble(18 * metrics.scale, 14, 18),
+                vertical: _clampDouble(16 * metrics.scale, 12, 16),
+              ),
+              child: useStackedMeta
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            iconTile,
+                            SizedBox(
+                              width: _clampDouble(14 * metrics.scale, 10, 14),
+                            ),
+                            Expanded(child: details),
+                          ],
+                        ),
+                        SizedBox(
+                          height: _clampDouble(12 * metrics.scale, 8, 12),
+                        ),
+                        Align(alignment: Alignment.centerRight, child: meta),
+                      ],
+                    )
+                  : Row(
                       children: [
                         iconTile,
                         SizedBox(
                           width: _clampDouble(14 * metrics.scale, 10, 14),
                         ),
                         Expanded(child: details),
+                        SizedBox(
+                          width: _clampDouble(10 * metrics.scale, 8, 10),
+                        ),
+                        meta,
                       ],
                     ),
-                    SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
-                    Align(alignment: Alignment.centerRight, child: meta),
-                  ],
-                )
-              : Row(
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+Future<void> _openDiscoverRestaurantProfile(
+  BuildContext context,
+  _DiscoverSpotData spot, {
+  int initialTabIndex = 0,
+}
+) {
+  return showRestaurantProfilePopup(
+    context,
+    restaurantName: spot.title,
+    handle: spot.handle,
+    rating: spot.ratingValue,
+    caption: spot.subtitle,
+    initialTabIndex: initialTabIndex,
+    followersCountLabel:
+        '${_formatCompactCount(8400 + (spot.deliveryMinutes * 28))} followers',
+  );
+}
+
+class _DiscoverCuisineDetailsScreen extends StatelessWidget {
+  const _DiscoverCuisineDetailsScreen({
+    required this.category,
+    required this.spots,
+  });
+
+  final _DiscoverCategoryData category;
+  final List<_DiscoverSpotData> spots;
+
+  @override
+  Widget build(BuildContext context) {
+    return _DiscoverSpotsCatalogScreen(
+      title: category.title,
+      subtitle: category.subtitle,
+      spots: spots,
+    );
+  }
+}
+
+class _DiscoverPopularSpotsScreen extends StatelessWidget {
+  const _DiscoverPopularSpotsScreen({required this.spots});
+
+  final List<_DiscoverSpotData> spots;
+
+  @override
+  Widget build(BuildContext context) {
+    return _DiscoverSpotsCatalogScreen(
+      title: 'Popular Near You',
+      subtitle: 'Top picks around your area',
+      spots: spots,
+    );
+  }
+}
+
+class _DiscoverSpotsCatalogScreen extends StatelessWidget {
+  const _DiscoverSpotsCatalogScreen({
+    required this.title,
+    required this.subtitle,
+    required this.spots,
+  });
+
+  final String title;
+  final String subtitle;
+  final List<_DiscoverSpotData> spots;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFFFFBF7),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFFFFBF7),
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        title: Text(
+          title,
+          style: const TextStyle(
+            color: Color(0xFF231A16),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 4, 18, 18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                subtitle,
+                style: const TextStyle(
+                  color: Color(0xFF7C6A5F),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Expanded(
+                child: spots.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'No restaurants available yet.',
+                          style: TextStyle(
+                            color: Color(0xFF7D6C60),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      )
+                    : ListView.separated(
+                        physics: const BouncingScrollPhysics(),
+                        itemCount: spots.length,
+                        separatorBuilder: (context, index) =>
+                            const SizedBox(height: 12),
+                        itemBuilder: (context, index) {
+                          return _DiscoverSpotPreviewTile(spot: spots[index]);
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DiscoverMapPreviewScreen extends StatelessWidget {
+  const _DiscoverMapPreviewScreen({required this.spots});
+
+  final List<_DiscoverSpotData> spots;
+
+  @override
+  Widget build(BuildContext context) {
+    const pinOffsets = <Offset>[
+      Offset(0.2, 0.22),
+      Offset(0.72, 0.3),
+      Offset(0.34, 0.58),
+      Offset(0.64, 0.72),
+    ];
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFFFFBF7),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFFFFBF7),
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        title: const Text(
+          'Nearby Map',
+          style: TextStyle(
+            color: Color(0xFF231A16),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 8, 18, 18),
+          child: Column(
+            children: [
+              Container(
+                height: 230,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF9E9D7),
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(color: const Color(0xFFECCFB7)),
+                ),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    return Stack(
+                      children: List.generate(spots.length.clamp(0, 4), (index) {
+                        final pinPosition = pinOffsets[index];
+                        final spot = spots[index];
+                        return Positioned(
+                          left: constraints.maxWidth * pinPosition.dx - 44,
+                          top: constraints.maxHeight * pinPosition.dy - 20,
+                          child: Material(
+                            color: const Color(0xFFFF7E4D),
+                            borderRadius: BorderRadius.circular(18),
+                            child: InkWell(
+                              onTap: () =>
+                                  _openDiscoverRestaurantProfile(context, spot),
+                              borderRadius: BorderRadius.circular(18),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                child: Text(
+                                  spot.title,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 11.5,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      }),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 14),
+              Expanded(
+                child: spots.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'No restaurants match your filters.',
+                          style: TextStyle(
+                            color: Color(0xFF7D6C60),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      )
+                    : ListView.separated(
+                        itemCount: spots.length,
+                        physics: const BouncingScrollPhysics(),
+                        separatorBuilder: (context, index) =>
+                            const SizedBox(height: 10),
+                        itemBuilder: (context, index) {
+                          return _DiscoverSpotPreviewTile(spot: spots[index]);
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DiscoverSpotPreviewTile extends StatelessWidget {
+  const _DiscoverSpotPreviewTile({required this.spot});
+
+  final _DiscoverSpotData spot;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFFFEFCFA),
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        onTap: () => _openDiscoverRestaurantProfile(context, spot),
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.network(
+                  spot.imageUrl,
+                  width: 68,
+                  height: 68,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) {
+                    return const ColoredBox(
+                      color: Color(0xFFFFE6D3),
+                      child: SizedBox(
+                        width: 68,
+                        height: 68,
+                        child: Icon(
+                          Icons.restaurant_rounded,
+                          color: Color(0xFFFF7E4D),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    iconTile,
-                    SizedBox(width: _clampDouble(14 * metrics.scale, 10, 14)),
-                    Expanded(child: details),
-                    SizedBox(width: _clampDouble(10 * metrics.scale, 8, 10)),
-                    meta,
+                    Text(
+                      spot.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF231A16),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      spot.subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF7D6C60),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.schedule_rounded,
+                          size: 14,
+                          color: Color(0xFFFF7E4D),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          spot.deliveryLabel,
+                          style: const TextStyle(
+                            color: Color(0xFFFF7E4D),
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        const Icon(
+                          Icons.star_rounded,
+                          size: 15,
+                          color: Color(0xFFF5B63F),
+                        ),
+                        const SizedBox(width: 2),
+                        Text(
+                          spot.ratingLabel,
+                          style: const TextStyle(
+                            color: Color(0xFF6B594D),
+                            fontWeight: FontWeight.w800,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
-        );
-      },
+              ),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: Color(0xFF9E8A7E),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DiscoverDealDetailsSheet extends StatelessWidget {
+  const _DiscoverDealDetailsSheet({required this.data});
+
+  final _DiscoverDealData data;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFFFEFCFA),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            18,
+            20,
+            20 + MediaQuery.viewInsetsOf(context).bottom,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 46,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD8C6B8),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Container(
+                    width: 50,
+                    height: 50,
+                    decoration: BoxDecoration(
+                      color: data.accentColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Icon(data.icon, color: data.accentColor, size: 26),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      data.title,
+                      style: const TextStyle(
+                        color: Color(0xFF231A16),
+                        fontSize: 19,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                data.subtitle,
+                style: const TextStyle(
+                  color: Color(0xFF7F6D61),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Text(
+                    data.priceLabel,
+                    style: const TextStyle(
+                      color: Color(0xFF231A16),
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: data.accentColor,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      data.promoLabel,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () {
+                    final messenger = ScaffoldMessenger.maybeOf(context);
+                    messenger
+                      ?..hideCurrentSnackBar()
+                      ..showSnackBar(
+                        SnackBar(content: Text('${data.title} added to cart')),
+                      );
+                    Navigator.of(context).pop();
+                  },
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF7E4D),
+                    minimumSize: const Size.fromHeight(48),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  icon: const Icon(Icons.add_shopping_cart_rounded),
+                  label: const Text(
+                    'Add To Cart',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -6428,10 +7932,15 @@ class _ProfileStatCard extends StatelessWidget {
 }
 
 class _ProfileSectionHeader extends StatelessWidget {
-  const _ProfileSectionHeader({required this.title, this.actionLabel});
+  const _ProfileSectionHeader({
+    required this.title,
+    this.actionLabel,
+    this.onActionTap,
+  });
 
   final String title;
   final String? actionLabel;
+  final VoidCallback? onActionTap;
 
   @override
   Widget build(BuildContext context) {
@@ -6448,12 +7957,22 @@ class _ProfileSectionHeader extends StatelessWidget {
           ),
         ),
         if (actionLabel != null)
-          Text(
-            actionLabel!,
-            style: const TextStyle(
-              color: Color(0xFFFF7E4D),
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onActionTap,
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Text(
+                  actionLabel!,
+                  style: const TextStyle(
+                    color: Color(0xFFFF7E4D),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
             ),
           ),
       ],
@@ -6842,19 +8361,30 @@ class _DiscoverCategoryData {
 class _DiscoverSpotData {
   const _DiscoverSpotData({
     required this.title,
+    required this.handle,
+    required this.categoryTitle,
     required this.subtitle,
     required this.deliveryLabel,
     required this.ratingLabel,
+    required this.priceTier,
     required this.badge,
     required this.imageUrl,
   });
 
   final String title;
+  final String handle;
+  final String categoryTitle;
   final String subtitle;
   final String deliveryLabel;
   final String ratingLabel;
+  final int priceTier;
   final String badge;
   final String imageUrl;
+
+  int get deliveryMinutes =>
+      int.tryParse(deliveryLabel.split(' ').first.trim()) ?? 999;
+
+  double get ratingValue => double.tryParse(ratingLabel.trim()) ?? 0;
 }
 
 class _DiscoverDealData {
@@ -6873,6 +8403,20 @@ class _DiscoverDealData {
   final String promoLabel;
   final IconData icon;
   final Color accentColor;
+}
+
+class _DiscoverFiltersState {
+  const _DiscoverFiltersState({
+    this.selectedCuisineTitles = const <String>{},
+    this.minimumRating = 0,
+    this.maximumDeliveryMinutes,
+    this.maximumPriceTier,
+  });
+
+  final Set<String> selectedCuisineTitles;
+  final double minimumRating;
+  final int? maximumDeliveryMinutes;
+  final int? maximumPriceTier;
 }
 
 class _ProfileSettingsItemData {
