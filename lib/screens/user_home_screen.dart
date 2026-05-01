@@ -15,6 +15,57 @@ String _profileEmailFromHandle(String handle) {
   return '${cleaned.isEmpty ? 'foodie' : cleaned}@hungerrush.app';
 }
 
+String _formatCompactCount(int value) {
+  if (value >= 1000000) {
+    return '${_trimTrailingZero((value / 1000000).toStringAsFixed(1))}M';
+  }
+  if (value >= 1000) {
+    return '${_trimTrailingZero((value / 1000).toStringAsFixed(1))}k';
+  }
+  return value.toString();
+}
+
+String _trimTrailingZero(String value) {
+  if (value.endsWith('.0')) {
+    return value.substring(0, value.length - 2);
+  }
+  return value;
+}
+
+String _formatRelativeTime(DateTime dateTime) {
+  final difference = DateTime.now().difference(dateTime);
+  if (difference.inMinutes < 1) {
+    return 'Now';
+  }
+  if (difference.inHours < 1) {
+    return '${difference.inMinutes}m';
+  }
+  if (difference.inDays < 1) {
+    return '${difference.inHours}h';
+  }
+  return '${difference.inDays}d';
+}
+
+String _feedCreatorLabel(String restaurantName) {
+  final label = restaurantName
+      .trim()
+      .split(RegExp(r'\s+'))
+      .where((word) => word.isNotEmpty)
+      .take(2)
+      .join(' ');
+  return (label.isEmpty ? 'HR' : label).toUpperCase();
+}
+
+void _showFeatureComingSoonSnackBar(BuildContext context, String buttonName) {
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  if (messenger == null) {
+    return;
+  }
+  messenger
+    ..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(content: Text('Feature Coming Soon: $buttonName')));
+}
+
 enum _OrderStatus {
   pending,
   accepted,
@@ -276,7 +327,6 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
               },
             )
           : _FeedTabBody(
-              userHandle: _userHandle,
               selectedTopTab: _selectedTopTab,
               selectedBottomIndex: _selectedBottomIndex,
               onTopTabSelected: (index) {
@@ -292,14 +342,12 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
 
 class _FeedTabBody extends StatefulWidget {
   const _FeedTabBody({
-    required this.userHandle,
     required this.selectedTopTab,
     required this.selectedBottomIndex,
     required this.onTopTabSelected,
     required this.onBottomNavSelected,
   });
 
-  final String userHandle;
   final int selectedTopTab;
   final int selectedBottomIndex;
   final ValueChanged<int> onTopTabSelected;
@@ -308,28 +356,12 @@ class _FeedTabBody extends StatefulWidget {
   static const List<_FeedVideoPostData> _feedVideos = [
     _FeedVideoPostData(
       videoAssetPath: 'assets/videos/home_video_1.mp4',
-      ratingLabel: '4.8',
-      caption:
-          'Feeling hungry? Our new Pepperoni Feast is here. Cheesy and absolutely delicious.',
-      tags: '#pizza #yum #foodie',
-      audioLabel: 'Original Audio - Bella Italia Promo',
-      creatorLabel: 'BELLA ITALIA',
-      likesLabel: '4.2k',
-      commentsLabel: '156',
-      shareLabel: 'Share',
+      postId: 'for-you',
       priceLabel: '\$14.99',
     ),
     _FeedVideoPostData(
       videoAssetPath: 'assets/videos/home_video_2.mp4',
-      ratingLabel: '4.7',
-      caption:
-          'Smoky smashed burgers are sizzling tonight. Fresh brioche, crisp pickles, and melted cheddar.',
-      tags: '#burger #fresh #hungerrush',
-      audioLabel: 'Original Audio - Smash House Kitchen',
-      creatorLabel: 'SMASH HOUSE',
-      likesLabel: '3.6k',
-      commentsLabel: '94',
-      shareLabel: 'Share',
+      postId: 'following',
       priceLabel: '\$12.40',
     ),
   ];
@@ -339,13 +371,35 @@ class _FeedTabBody extends StatefulWidget {
 }
 
 class _FeedTabBodyState extends State<_FeedTabBody> {
+  final _demoRepository = DemoAppRepository.instance;
+  final Map<String, DemoFeedPost> _feedPostsById = <String, DemoFeedPost>{};
+  final Map<String, Offset> _lastDoubleTapOffsetsByPostId = <String, Offset>{};
+  final List<_FeedLikeBurstData> _activeLikeBursts = <_FeedLikeBurstData>[];
+  final Set<String> _pendingDoubleTapLikePostIds = <String>{};
+  late final List<bool> _hasShownOrderNowByVideoIndex;
+  late final List<bool> _isOrderNowVisibleByVideoIndex;
+  late final List<bool> _wasNearVideoEndByIndex;
   late final List<VideoPlayerController> _videoControllers;
   late final List<bool> _videoErrorLogged;
   int _currentVideoIndex = 0;
+  int _nextLikeBurstId = 0;
 
   @override
   void initState() {
     super.initState();
+    _syncFeedPosts();
+    _hasShownOrderNowByVideoIndex = List<bool>.filled(
+      _FeedTabBody._feedVideos.length,
+      false,
+    );
+    _isOrderNowVisibleByVideoIndex = List<bool>.filled(
+      _FeedTabBody._feedVideos.length,
+      false,
+    );
+    _wasNearVideoEndByIndex = List<bool>.filled(
+      _FeedTabBody._feedVideos.length,
+      false,
+    );
     _videoControllers = List<VideoPlayerController>.generate(
       _FeedTabBody._feedVideos.length,
       (index) => VideoPlayerController.asset(
@@ -365,6 +419,7 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
             'Home feed video playback error for index $i: ${controller.value.errorDescription}',
           );
         }
+        _handleOrderNowTriggerByVideoProgress(i);
       });
       controller.setLooping(true);
       controller.setVolume(0);
@@ -383,8 +438,207 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
     }
   }
 
+  DemoFeedPost _loadPostForId(String postId) {
+    return _demoRepository.getFeedPost(following: postId == 'following');
+  }
+
+  void _syncFeedPosts() {
+    for (final video in _FeedTabBody._feedVideos) {
+      _feedPostsById[video.postId] = _loadPostForId(video.postId);
+    }
+  }
+
+  DemoFeedPost _postForVideo(_FeedVideoPostData video) {
+    return _feedPostsById[video.postId] ?? _loadPostForId(video.postId);
+  }
+
+  Future<void> _openSearch() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const SearchScreen()));
+  }
+
+  Future<void> _openNotifications() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
+    );
+  }
+
+  Future<void> _openRestaurantDetails(DemoFeedPost post) async {
+    await showRestaurantProfilePopup(
+      context,
+      restaurantName: post.restaurantName,
+      handle: post.restaurantHandle,
+      rating: post.rating,
+      caption: post.caption,
+      followersCountLabel:
+          '${_formatCompactCount(post.followersCount)} followers',
+    );
+  }
+
+  Future<void> _toggleFollow(DemoFeedPost post) async {
+    final updated = await _demoRepository.toggleFollow(post.id);
+    if (!mounted) {
+      return;
+    }
+    setState(() => _feedPostsById[post.id] = updated);
+  }
+
+  Future<void> _toggleLike(DemoFeedPost post) async {
+    final updated = await _demoRepository.toggleLike(post.id);
+    if (!mounted) {
+      return;
+    }
+    setState(() => _feedPostsById[post.id] = updated);
+  }
+
+  void _rememberDoubleTapPosition(String postId, TapDownDetails details) {
+    _lastDoubleTapOffsetsByPostId[postId] = details.localPosition;
+  }
+
+  List<_FeedLikeBurstData> _likeBurstsForPost(String postId) {
+    return _activeLikeBursts
+        .where((item) => item.postId == postId)
+        .toList(growable: false);
+  }
+
+  void _spawnTastyLikeBurst({
+    required String postId,
+    required Offset tapPosition,
+    required Size surfaceSize,
+  }) {
+    final maxWidth = surfaceSize.width <= 0 ? 390.0 : surfaceSize.width;
+    final maxHeight = surfaceSize.height <= 0 ? 700.0 : surfaceSize.height;
+    final clampedX = maxWidth <= 96
+        ? maxWidth / 2
+        : tapPosition.dx.clamp(48.0, maxWidth - 48.0).toDouble();
+    final clampedY = maxHeight <= 180
+        ? maxHeight / 2
+        : tapPosition.dy.clamp(90.0, maxHeight - 90.0).toDouble();
+    final burst = _FeedLikeBurstData(
+      id: _nextLikeBurstId++,
+      postId: postId,
+      tapPosition: Offset(clampedX, clampedY),
+    );
+    setState(() => _activeLikeBursts.add(burst));
+    Future<void>.delayed(const Duration(milliseconds: 900), () {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _activeLikeBursts.removeWhere((item) => item.id == burst.id);
+      });
+    });
+  }
+
+  Future<void> _handleFeedDoubleTapLike(
+    DemoFeedPost post,
+    Size surfaceSize,
+  ) async {
+    final tapPosition =
+        _lastDoubleTapOffsetsByPostId[post.id] ??
+        Offset(surfaceSize.width / 2, surfaceSize.height * 0.55);
+    _spawnTastyLikeBurst(
+      postId: post.id,
+      tapPosition: tapPosition,
+      surfaceSize: surfaceSize,
+    );
+    if (post.isLiked || _pendingDoubleTapLikePostIds.contains(post.id)) {
+      return;
+    }
+    _pendingDoubleTapLikePostIds.add(post.id);
+    try {
+      final updated = await _demoRepository.toggleLike(post.id);
+      if (!mounted) {
+        return;
+      }
+      setState(() => _feedPostsById[post.id] = updated);
+    } finally {
+      _pendingDoubleTapLikePostIds.remove(post.id);
+    }
+  }
+
+  void _handleOrderNowTriggerByVideoProgress(int index) {
+    final controller = _videoControllers[index];
+    if (!controller.value.isInitialized) {
+      return;
+    }
+    final duration = controller.value.duration;
+    if (duration <= Duration.zero) {
+      return;
+    }
+    final endThreshold = duration > const Duration(milliseconds: 300)
+        ? const Duration(milliseconds: 300)
+        : const Duration(milliseconds: 80);
+    final isNearEnd = controller.value.position >= duration - endThreshold;
+    final wasNearEnd = _wasNearVideoEndByIndex[index];
+    _wasNearVideoEndByIndex[index] = isNearEnd;
+    if (!isNearEnd || wasNearEnd || _hasShownOrderNowByVideoIndex[index]) {
+      return;
+    }
+    _hasShownOrderNowByVideoIndex[index] = true;
+    _isOrderNowVisibleByVideoIndex[index] = true;
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
+  }
+
+  void _dismissOrderNowForVideoIndex(int index) {
+    if (!_isOrderNowVisibleByVideoIndex[index]) {
+      return;
+    }
+    setState(() => _isOrderNowVisibleByVideoIndex[index] = false);
+  }
+
+  Future<void> _openComments(DemoFeedPost post) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _FeedCommentsBottomSheet(
+        postId: post.id,
+        postTitle: post.restaurantName,
+      ),
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() => _feedPostsById[post.id] = _loadPostForId(post.id));
+  }
+
+  Future<void> _sharePromo(DemoFeedPost post) async {
+    await showShareFallbackDialog(
+      context,
+      title: post.restaurantName,
+      body: post.caption,
+    );
+  }
+
+  Future<void> _openPromoDetails(DemoFeedPost post) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PromoDetailsScreen(
+          title: post.restaurantName,
+          caption: post.caption,
+          audioLabel: post.audioLabel,
+        ),
+      ),
+    );
+  }
+
   void _handleVideoPageChanged(int index) {
+    final previousIndex = _currentVideoIndex;
     _currentVideoIndex = index;
+    if (previousIndex != index &&
+        previousIndex >= 0 &&
+        previousIndex < _isOrderNowVisibleByVideoIndex.length &&
+        _isOrderNowVisibleByVideoIndex[previousIndex]) {
+      _isOrderNowVisibleByVideoIndex[previousIndex] = false;
+      if (mounted) {
+        setState(() {});
+      }
+    }
     _syncVideoPlayback();
   }
 
@@ -425,11 +679,22 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
             maxHeight: safeHeight > 0 ? safeHeight : constraints.maxHeight,
           ),
         );
+        final navBarBottomInset = safeAreaPadding.bottom;
+        final navBarTotalHeight = metrics.navHeight + navBarBottomInset;
+        final pageViewportHeight = _clampDouble(
+          constraints.maxHeight - navBarTotalHeight,
+          0,
+          constraints.maxHeight,
+        );
         final topOverlayReservedHeight =
             metrics.topControlButtonSize + metrics.gapAfterTop;
         return Stack(
           children: [
-            Positioned.fill(
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              bottom: navBarTotalHeight,
               child: PageView.builder(
                 scrollDirection: Axis.vertical,
                 physics: const BouncingScrollPhysics(),
@@ -437,100 +702,135 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
                 itemCount: _FeedTabBody._feedVideos.length,
                 itemBuilder: (context, index) {
                   final video = _FeedTabBody._feedVideos[index];
-                  return Stack(
-                    children: [
-                      Positioned.fill(
-                        child: _FeedBackground(
-                          controller: _videoControllers[index],
+                  final post = _postForVideo(video);
+                  final showOrderNow = _isOrderNowVisibleByVideoIndex[index];
+                  final itemSize = Size(
+                    constraints.maxWidth,
+                    pageViewportHeight > 0
+                        ? pageViewportHeight
+                        : (safeHeight > 0 ? safeHeight : constraints.maxHeight),
+                  );
+                  final likeBursts = _likeBurstsForPost(post.id);
+                  return GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onDoubleTapDown: (details) =>
+                        _rememberDoubleTapPosition(post.id, details),
+                    onDoubleTap: () => _handleFeedDoubleTapLike(post, itemSize),
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: _FeedBackground(
+                            controller: _videoControllers[index],
+                          ),
                         ),
-                      ),
-                      Positioned.fill(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [
-                                const Color(0x08000000),
-                                const Color(0x6B000000),
-                                const Color(0xD100131A),
-                              ],
-                              stops: const [0.0, 0.6, 1.0],
+                        Positioned.fill(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  const Color(0x08000000),
+                                  const Color(0x6B000000),
+                                  const Color(0xD100131A),
+                                ],
+                                stops: const [0.0, 0.6, 1.0],
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                      SafeArea(
-                        bottom: false,
-                        child: Padding(
-                          padding: EdgeInsets.fromLTRB(
-                            metrics.horizontalPadding,
-                            metrics.topPadding,
-                            metrics.horizontalPadding,
-                            0,
-                          ),
-                          child: Column(
-                            children: [
-                              SizedBox(height: topOverlayReservedHeight),
-                              Expanded(
-                                child: Align(
-                                  alignment: Alignment.bottomCenter,
-                                  child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: [
-                                      Expanded(
-                                        child: _FeedDetails(
-                                          userHandle: widget.userHandle,
-                                          metrics: metrics,
-                                          video: video,
+                        SafeArea(
+                          bottom: false,
+                          child: Padding(
+                            padding: EdgeInsets.fromLTRB(
+                              metrics.horizontalPadding,
+                              metrics.topPadding,
+                              metrics.horizontalPadding,
+                              0,
+                            ),
+                            child: Column(
+                              children: [
+                                SizedBox(height: topOverlayReservedHeight),
+                                Expanded(
+                                  child: Align(
+                                    alignment: Alignment.bottomCenter,
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.end,
+                                      children: [
+                                        Expanded(
+                                          child: _FeedDetails(
+                                            post: post,
+                                            metrics: metrics,
+                                            onOpenRestaurant: () =>
+                                                _openRestaurantDetails(post),
+                                            onOpenAudio: () =>
+                                                _openPromoDetails(post),
+                                            showOrderNow: showOrderNow,
+                                            orderNowPriceLabel:
+                                                video.priceLabel,
+                                            onDismissOrderNow: () =>
+                                                _dismissOrderNowForVideoIndex(
+                                                  index,
+                                                ),
+                                          ),
                                         ),
-                                      ),
-                                      SizedBox(width: metrics.railGap),
-                                      _ActionRail(
-                                        metrics: metrics,
-                                        video: video,
-                                      ),
-                                    ],
+                                        SizedBox(width: metrics.railGap),
+                                        _ActionRail(
+                                          metrics: metrics,
+                                          post: post,
+                                          onOpenRestaurant: () =>
+                                              _openRestaurantDetails(post),
+                                          onToggleFollow: () =>
+                                              _toggleFollow(post),
+                                          onToggleLike: () => _toggleLike(post),
+                                          onOpenComments: () =>
+                                              _openComments(post),
+                                          onShare: () => _sharePromo(post),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
-                              ),
-                              SizedBox(height: metrics.sectionGapSmall),
-                              _OrderNowBar(
-                                metrics: metrics,
-                                priceLabel: video.priceLabel,
-                              ),
-                              SizedBox(
-                                height:
-                                    metrics.sectionGapSmall +
-                                    metrics.navHeight +
-                                    metrics.bottomPadding,
-                              ),
-                            ],
+                                SizedBox(
+                                  height: _clampDouble(
+                                    10 * metrics.scale,
+                                    6,
+                                    12,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                        if (likeBursts.isNotEmpty)
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: Stack(
+                                children: [
+                                  for (final burst in likeBursts)
+                                    _TastyLikeBurst(
+                                      key: ValueKey<int>(burst.id),
+                                      tapPosition: burst.tapPosition,
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   );
                 },
               ),
             ),
             Align(
               alignment: Alignment.bottomCenter,
-              child: SafeArea(
-                top: false,
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    metrics.horizontalPadding,
-                    0,
-                    metrics.horizontalPadding,
-                    metrics.bottomPadding,
-                  ),
-                  child: _BottomNavBar(
-                    metrics: metrics,
-                    selectedIndex: widget.selectedBottomIndex,
-                    onSelected: widget.onBottomNavSelected,
-                  ),
-                ),
+              child: _BottomNavBar(
+                metrics: metrics,
+                selectedIndex: widget.selectedBottomIndex,
+                onSelected: widget.onBottomNavSelected,
+                fullWidth: true,
+                bottomInset: navBarBottomInset,
               ),
             ),
             Align(
@@ -550,6 +850,8 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
                       metrics: metrics,
                       selectedTab: widget.selectedTopTab,
                       onTabSelected: widget.onTopTabSelected,
+                      onOpenSearch: _openSearch,
+                      onOpenNotifications: _openNotifications,
                     ),
                   ),
                 ),
@@ -575,36 +877,54 @@ class _MessagesTabBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final metrics = _ResponsiveMetrics.from(constraints);
-          return Padding(
-            padding: EdgeInsets.fromLTRB(
-              metrics.horizontalPadding,
-              metrics.topPadding,
-              metrics.horizontalPadding,
-              metrics.bottomPadding,
-            ),
-            child: Column(
-              children: [
-                Expanded(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final safeAreaPadding = MediaQuery.paddingOf(context);
+        final safeHeight =
+            constraints.maxHeight -
+            safeAreaPadding.top -
+            safeAreaPadding.bottom;
+        final metrics = _ResponsiveMetrics.from(
+          BoxConstraints(
+            maxWidth: constraints.maxWidth,
+            maxHeight: safeHeight > 0 ? safeHeight : constraints.maxHeight,
+          ),
+        );
+        final navBarBottomInset = safeAreaPadding.bottom;
+        final navBarTotalHeight = metrics.navHeight + navBarBottomInset;
+        return Stack(
+          children: [
+            Positioned.fill(
+              bottom: navBarTotalHeight,
+              child: SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    metrics.horizontalPadding,
+                    metrics.topPadding,
+                    metrics.horizontalPadding,
+                    0,
+                  ),
                   child: _CustomerMessagesSection(
                     metrics: metrics,
                     userName: userName,
                   ),
                 ),
-                SizedBox(height: metrics.sectionGapSmall),
-                _BottomNavBar(
-                  metrics: metrics,
-                  selectedIndex: selectedBottomIndex,
-                  onSelected: onBottomNavSelected,
-                ),
-              ],
+              ),
             ),
-          );
-        },
-      ),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: _BottomNavBar(
+                metrics: metrics,
+                selectedIndex: selectedBottomIndex,
+                onSelected: onBottomNavSelected,
+                fullWidth: true,
+                bottomInset: navBarBottomInset,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -1606,26 +1926,12 @@ class _CustomerMessageMetaPill extends StatelessWidget {
 class _FeedVideoPostData {
   const _FeedVideoPostData({
     required this.videoAssetPath,
-    required this.ratingLabel,
-    required this.caption,
-    required this.tags,
-    required this.audioLabel,
-    required this.creatorLabel,
-    required this.likesLabel,
-    required this.commentsLabel,
-    required this.shareLabel,
+    required this.postId,
     required this.priceLabel,
   });
 
   final String videoAssetPath;
-  final String ratingLabel;
-  final String caption;
-  final String tags;
-  final String audioLabel;
-  final String creatorLabel;
-  final String likesLabel;
-  final String commentsLabel;
-  final String shareLabel;
+  final String postId;
   final String priceLabel;
 }
 
@@ -1728,6 +2034,14 @@ class _DiscoverTabBody extends StatelessWidget {
     ),
   ];
 
+  void _openDiscoverFilters(BuildContext context) {
+    _showFeatureComingSoonSnackBar(context, 'Discover Filters');
+  }
+
+  void _openLocationMap(BuildContext context) {
+    _showFeatureComingSoonSnackBar(context, 'Location Map');
+  }
+
   @override
   Widget build(BuildContext context) {
     final trimmedName = userName.trim();
@@ -1735,211 +2049,263 @@ class _DiscoverTabBody extends StatelessWidget {
         ? 'Explorer'
         : trimmedName.split(RegExp(r'\s+')).first;
 
-    return Stack(
-      children: [
-        const Positioned.fill(child: _DiscoverBackground()),
-        SafeArea(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final metrics = _ResponsiveMetrics.from(constraints);
-              return Padding(
-                padding: EdgeInsets.fromLTRB(
-                  metrics.horizontalPadding,
-                  _clampDouble(metrics.topPadding + 6, 12, 20),
-                  metrics.horizontalPadding,
-                  metrics.bottomPadding,
-                ),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final safeAreaPadding = MediaQuery.paddingOf(context);
+        final safeHeight =
+            constraints.maxHeight -
+            safeAreaPadding.top -
+            safeAreaPadding.bottom;
+        final metrics = _ResponsiveMetrics.from(
+          BoxConstraints(
+            maxWidth: constraints.maxWidth,
+            maxHeight: safeHeight > 0 ? safeHeight : constraints.maxHeight,
+          ),
+        );
+        final navBarBottomInset = safeAreaPadding.bottom;
+        final navBarTotalHeight = metrics.navHeight + navBarBottomInset;
+        return Stack(
+          children: [
+            const Positioned.fill(child: _DiscoverBackground()),
+            Positioned.fill(
+              bottom: navBarTotalHeight,
+              child: SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    metrics.horizontalPadding,
+                    _clampDouble(metrics.topPadding + 6, 12, 20),
+                    metrics.horizontalPadding,
+                    0,
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Discover',
+                                  style: TextStyle(
+                                    color: const Color(0xFF231A16),
+                                    fontSize: _clampDouble(
+                                      34 * metrics.scale,
+                                      26,
+                                      34,
+                                    ),
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: -0.6,
+                                  ),
+                                ),
+                                SizedBox(
+                                  height: _clampDouble(6 * metrics.scale, 4, 6),
+                                ),
+                                Text(
+                                  'Fresh picks for $greetingName tonight',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: const Color(0xFF7F6D61),
+                                    fontSize: _clampDouble(
+                                      15 * metrics.scale,
+                                      12,
+                                      15,
+                                    ),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          _ProfileIconButton(
+                            icon: Icons.tune_rounded,
+                            metrics: metrics,
+                            onTap: () => _openDiscoverFilters(context),
+                          ),
+                        ],
+                      ),
+                      SizedBox(
+                        height: _clampDouble(18 * metrics.scale, 14, 18),
+                      ),
+                      Row(
+                        children: [
+                          Expanded(child: _DiscoverSearchBar(metrics: metrics)),
+                          SizedBox(
+                            width: _clampDouble(12 * metrics.scale, 10, 12),
+                          ),
+                          _ProfileIconButton(
+                            icon: Icons.place_outlined,
+                            metrics: metrics,
+                            onTap: () => _openLocationMap(context),
+                          ),
+                        ],
+                      ),
+                      SizedBox(
+                        height: _clampDouble(20 * metrics.scale, 16, 20),
+                      ),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          physics: const BouncingScrollPhysics(),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                'Discover',
-                                style: TextStyle(
-                                  color: const Color(0xFF231A16),
-                                  fontSize: _clampDouble(
-                                    34 * metrics.scale,
-                                    26,
-                                    34,
-                                  ),
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: -0.6,
+                              _DiscoverFeatureCard(metrics: metrics),
+                              SizedBox(
+                                height: _clampDouble(
+                                  24 * metrics.scale,
+                                  18,
+                                  24,
+                                ),
+                              ),
+                              const _ProfileSectionHeader(
+                                title: 'Browse Cuisines',
+                                actionLabel: 'View Map',
+                              ),
+                              SizedBox(
+                                height: _clampDouble(
+                                  14 * metrics.scale,
+                                  10,
+                                  14,
                                 ),
                               ),
                               SizedBox(
-                                height: _clampDouble(6 * metrics.scale, 4, 6),
-                              ),
-                              Text(
-                                'Fresh picks for $greetingName tonight',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: const Color(0xFF7F6D61),
-                                  fontSize: _clampDouble(
-                                    15 * metrics.scale,
-                                    12,
-                                    15,
-                                  ),
-                                  fontWeight: FontWeight.w600,
+                                height: _clampDouble(
+                                  126 * metrics.scale,
+                                  112,
+                                  126,
                                 ),
+                                child: ListView.separated(
+                                  scrollDirection: Axis.horizontal,
+                                  physics: const BouncingScrollPhysics(),
+                                  itemCount: _categories.length,
+                                  separatorBuilder: (context, index) =>
+                                      SizedBox(
+                                        width: _clampDouble(
+                                          12 * metrics.scale,
+                                          8,
+                                          12,
+                                        ),
+                                      ),
+                                  itemBuilder: (context, index) {
+                                    return _DiscoverCuisineChip(
+                                      data: _categories[index],
+                                      metrics: metrics,
+                                    );
+                                  },
+                                ),
+                              ),
+                              SizedBox(
+                                height: _clampDouble(
+                                  26 * metrics.scale,
+                                  20,
+                                  26,
+                                ),
+                              ),
+                              const _ProfileSectionHeader(
+                                title: 'Popular Near You',
+                                actionLabel: 'See All',
+                              ),
+                              SizedBox(
+                                height: _clampDouble(
+                                  14 * metrics.scale,
+                                  10,
+                                  14,
+                                ),
+                              ),
+                              SizedBox(
+                                height: _clampDouble(
+                                  320 * metrics.scale,
+                                  286,
+                                  320,
+                                ),
+                                child: ListView.separated(
+                                  scrollDirection: Axis.horizontal,
+                                  physics: const BouncingScrollPhysics(),
+                                  itemCount: _popularSpots.length,
+                                  separatorBuilder: (context, index) =>
+                                      SizedBox(
+                                        width: _clampDouble(
+                                          14 * metrics.scale,
+                                          10,
+                                          14,
+                                        ),
+                                      ),
+                                  itemBuilder: (context, index) {
+                                    return _DiscoverSpotCard(
+                                      data: _popularSpots[index],
+                                      metrics: metrics,
+                                    );
+                                  },
+                                ),
+                              ),
+                              SizedBox(
+                                height: _clampDouble(
+                                  26 * metrics.scale,
+                                  20,
+                                  26,
+                                ),
+                              ),
+                              const _ProfileSectionHeader(
+                                title: 'Quick Cravings',
+                              ),
+                              SizedBox(
+                                height: _clampDouble(
+                                  14 * metrics.scale,
+                                  10,
+                                  14,
+                                ),
+                              ),
+                              _ProfilePanel(
+                                child: Column(
+                                  children: List.generate(
+                                    _quickCravings.length,
+                                    (index) {
+                                      final item = _quickCravings[index];
+                                      return Column(
+                                        children: [
+                                          _DiscoverDealTile(
+                                            data: item,
+                                            metrics: metrics,
+                                          ),
+                                          if (index !=
+                                              _quickCravings.length - 1)
+                                            const Divider(
+                                              height: 1,
+                                              color: Color(0xFFF0E2D3),
+                                            ),
+                                        ],
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
+                              SizedBox(
+                                height: _clampDouble(12 * metrics.scale, 8, 12),
                               ),
                             ],
                           ),
                         ),
-                        _ProfileIconButton(
-                          icon: Icons.tune_rounded,
-                          metrics: metrics,
-                          onTap: () {},
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: _clampDouble(18 * metrics.scale, 14, 18)),
-                    Row(
-                      children: [
-                        Expanded(child: _DiscoverSearchBar(metrics: metrics)),
-                        SizedBox(
-                          width: _clampDouble(12 * metrics.scale, 10, 12),
-                        ),
-                        _ProfileIconButton(
-                          icon: Icons.place_outlined,
-                          metrics: metrics,
-                          onTap: () {},
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: _clampDouble(20 * metrics.scale, 16, 20)),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        physics: const BouncingScrollPhysics(),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _DiscoverFeatureCard(metrics: metrics),
-                            SizedBox(
-                              height: _clampDouble(24 * metrics.scale, 18, 24),
-                            ),
-                            const _ProfileSectionHeader(
-                              title: 'Browse Cuisines',
-                              actionLabel: 'View Map',
-                            ),
-                            SizedBox(
-                              height: _clampDouble(14 * metrics.scale, 10, 14),
-                            ),
-                            SizedBox(
-                              height: _clampDouble(
-                                126 * metrics.scale,
-                                112,
-                                126,
-                              ),
-                              child: ListView.separated(
-                                scrollDirection: Axis.horizontal,
-                                physics: const BouncingScrollPhysics(),
-                                itemCount: _categories.length,
-                                separatorBuilder: (context, index) => SizedBox(
-                                  width: _clampDouble(
-                                    12 * metrics.scale,
-                                    8,
-                                    12,
-                                  ),
-                                ),
-                                itemBuilder: (context, index) {
-                                  return _DiscoverCuisineChip(
-                                    data: _categories[index],
-                                    metrics: metrics,
-                                  );
-                                },
-                              ),
-                            ),
-                            SizedBox(
-                              height: _clampDouble(26 * metrics.scale, 20, 26),
-                            ),
-                            const _ProfileSectionHeader(
-                              title: 'Popular Near You',
-                              actionLabel: 'See All',
-                            ),
-                            SizedBox(
-                              height: _clampDouble(14 * metrics.scale, 10, 14),
-                            ),
-                            SizedBox(
-                              height: _clampDouble(
-                                320 * metrics.scale,
-                                286,
-                                320,
-                              ),
-                              child: ListView.separated(
-                                scrollDirection: Axis.horizontal,
-                                physics: const BouncingScrollPhysics(),
-                                itemCount: _popularSpots.length,
-                                separatorBuilder: (context, index) => SizedBox(
-                                  width: _clampDouble(
-                                    14 * metrics.scale,
-                                    10,
-                                    14,
-                                  ),
-                                ),
-                                itemBuilder: (context, index) {
-                                  return _DiscoverSpotCard(
-                                    data: _popularSpots[index],
-                                    metrics: metrics,
-                                  );
-                                },
-                              ),
-                            ),
-                            SizedBox(
-                              height: _clampDouble(26 * metrics.scale, 20, 26),
-                            ),
-                            const _ProfileSectionHeader(
-                              title: 'Quick Cravings',
-                            ),
-                            SizedBox(
-                              height: _clampDouble(14 * metrics.scale, 10, 14),
-                            ),
-                            _ProfilePanel(
-                              child: Column(
-                                children: List.generate(_quickCravings.length, (
-                                  index,
-                                ) {
-                                  final item = _quickCravings[index];
-                                  return Column(
-                                    children: [
-                                      _DiscoverDealTile(
-                                        data: item,
-                                        metrics: metrics,
-                                      ),
-                                      if (index != _quickCravings.length - 1)
-                                        const Divider(
-                                          height: 1,
-                                          color: Color(0xFFF0E2D3),
-                                        ),
-                                    ],
-                                  );
-                                }),
-                              ),
-                            ),
-                            SizedBox(
-                              height: _clampDouble(12 * metrics.scale, 8, 12),
-                            ),
-                          ],
-                        ),
                       ),
-                    ),
-                    const SizedBox.shrink(),
-                    _BottomNavBar(
-                      metrics: metrics,
-                      selectedIndex: selectedBottomIndex,
-                      onSelected: onBottomNavSelected,
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              );
-            },
-          ),
-        ),
-      ],
+              ),
+            ),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: _BottomNavBar(
+                metrics: metrics,
+                selectedIndex: selectedBottomIndex,
+                onSelected: onBottomNavSelected,
+                fullWidth: true,
+                bottomInset: navBarBottomInset,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -2076,6 +2442,38 @@ class _OrdersTabBody extends StatelessWidget {
     ),
   ];
 
+  static List<DemoOrder> _buildOrderHistoryItems() {
+    return List<DemoOrder>.generate(_pastOrders.length, (index) {
+      final item = _pastOrders[index];
+      final completed =
+          item.status == _OrderStatus.delivered ||
+          item.status == _OrderStatus.canceled ||
+          item.status == _OrderStatus.rejected;
+      return DemoOrder(
+        id: '#${4700 - index}',
+        customerName: item.title,
+        itemSummary: item.summary,
+        etaLabel: item.dateLabel,
+        statusLabel: _orderStatusLabel(item.status),
+        channelLabel: 'Delivery',
+        highlighted: false,
+        totalLabel: item.totalLabel,
+        completed: completed,
+      );
+    });
+  }
+
+  void _openOrderHistory(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => OrderListScreen(
+          title: 'Order History',
+          orders: _buildOrderHistoryItems(),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final trimmedName = userName.trim();
@@ -2083,155 +2481,201 @@ class _OrdersTabBody extends StatelessWidget {
         ? 'Explorer'
         : trimmedName.split(RegExp(r'\s+')).first;
 
-    return Stack(
-      children: [
-        const Positioned.fill(child: _OrdersBackground()),
-        SafeArea(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final metrics = _ResponsiveMetrics.from(constraints);
-              return Padding(
-                padding: EdgeInsets.fromLTRB(
-                  metrics.horizontalPadding,
-                  _clampDouble(metrics.topPadding + 6, 12, 20),
-                  metrics.horizontalPadding,
-                  metrics.bottomPadding,
-                ),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final safeAreaPadding = MediaQuery.paddingOf(context);
+        final safeHeight =
+            constraints.maxHeight -
+            safeAreaPadding.top -
+            safeAreaPadding.bottom;
+        final metrics = _ResponsiveMetrics.from(
+          BoxConstraints(
+            maxWidth: constraints.maxWidth,
+            maxHeight: safeHeight > 0 ? safeHeight : constraints.maxHeight,
+          ),
+        );
+        final navBarBottomInset = safeAreaPadding.bottom;
+        final navBarTotalHeight = metrics.navHeight + navBarBottomInset;
+        return Stack(
+          children: [
+            const Positioned.fill(child: _OrdersBackground()),
+            Positioned.fill(
+              bottom: navBarTotalHeight,
+              child: SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    metrics.horizontalPadding,
+                    _clampDouble(metrics.topPadding + 6, 12, 20),
+                    metrics.horizontalPadding,
+                    0,
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Orders',
+                                  style: TextStyle(
+                                    color: const Color(0xFF231A16),
+                                    fontSize: _clampDouble(
+                                      34 * metrics.scale,
+                                      26,
+                                      34,
+                                    ),
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: -0.6,
+                                  ),
+                                ),
+                                SizedBox(
+                                  height: _clampDouble(6 * metrics.scale, 4, 6),
+                                ),
+                                Text(
+                                  'Track deliveries and reorder favorites for $greetingName',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: const Color(0xFF7F6D61),
+                                    fontSize: _clampDouble(
+                                      15 * metrics.scale,
+                                      12,
+                                      15,
+                                    ),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          _ProfileIconButton(
+                            icon: Icons.receipt_long_rounded,
+                            metrics: metrics,
+                            onTap: () => _openOrderHistory(context),
+                          ),
+                        ],
+                      ),
+                      SizedBox(
+                        height: _clampDouble(20 * metrics.scale, 16, 20),
+                      ),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          physics: const BouncingScrollPhysics(),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                'Orders',
-                                style: TextStyle(
-                                  color: const Color(0xFF231A16),
-                                  fontSize: _clampDouble(
-                                    34 * metrics.scale,
-                                    26,
-                                    34,
-                                  ),
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: -0.6,
-                                ),
+                              _OrdersHeroCard(
+                                metrics: metrics,
+                                greetingName: greetingName,
+                                metricsData: _heroMetrics,
                               ),
                               SizedBox(
-                                height: _clampDouble(6 * metrics.scale, 4, 6),
-                              ),
-                              Text(
-                                'Track deliveries and reorder favorites for $greetingName',
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: const Color(0xFF7F6D61),
-                                  fontSize: _clampDouble(
-                                    15 * metrics.scale,
-                                    12,
-                                    15,
-                                  ),
-                                  fontWeight: FontWeight.w600,
+                                height: _clampDouble(
+                                  26 * metrics.scale,
+                                  20,
+                                  26,
                                 ),
+                              ),
+                              const _ProfileSectionHeader(
+                                title: 'Live Order',
+                                actionLabel: 'Need Help?',
+                              ),
+                              SizedBox(
+                                height: _clampDouble(
+                                  14 * metrics.scale,
+                                  10,
+                                  14,
+                                ),
+                              ),
+                              _ActiveOrderCard(
+                                metrics: metrics,
+                                currentStatus: _activeStatus,
+                              ),
+                              SizedBox(
+                                height: _clampDouble(
+                                  26 * metrics.scale,
+                                  20,
+                                  26,
+                                ),
+                              ),
+                              const _ProfileSectionHeader(
+                                title: 'Recent Orders',
+                                actionLabel: 'View All',
+                              ),
+                              SizedBox(
+                                height: _clampDouble(
+                                  14 * metrics.scale,
+                                  10,
+                                  14,
+                                ),
+                              ),
+                              Column(
+                                children: List.generate(_pastOrders.length, (
+                                  index,
+                                ) {
+                                  return Padding(
+                                    padding: EdgeInsets.only(
+                                      bottom: index == _pastOrders.length - 1
+                                          ? 0
+                                          : _clampDouble(
+                                              14 * metrics.scale,
+                                              10,
+                                              14,
+                                            ),
+                                    ),
+                                    child: _PastOrderCard(
+                                      data: _pastOrders[index],
+                                      metrics: metrics,
+                                    ),
+                                  );
+                                }),
+                              ),
+                              SizedBox(
+                                height: _clampDouble(
+                                  26 * metrics.scale,
+                                  20,
+                                  26,
+                                ),
+                              ),
+                              const _ProfileSectionHeader(
+                                title: 'Reorder Tonight',
+                              ),
+                              SizedBox(
+                                height: _clampDouble(
+                                  14 * metrics.scale,
+                                  10,
+                                  14,
+                                ),
+                              ),
+                              _OrdersRewardCard(metrics: metrics),
+                              SizedBox(
+                                height: _clampDouble(12 * metrics.scale, 8, 12),
                               ),
                             ],
                           ),
                         ),
-                        _ProfileIconButton(
-                          icon: Icons.receipt_long_rounded,
-                          metrics: metrics,
-                          onTap: () {},
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: _clampDouble(20 * metrics.scale, 16, 20)),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        physics: const BouncingScrollPhysics(),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _OrdersHeroCard(
-                              metrics: metrics,
-                              greetingName: greetingName,
-                              metricsData: _heroMetrics,
-                            ),
-                            SizedBox(
-                              height: _clampDouble(26 * metrics.scale, 20, 26),
-                            ),
-                            const _ProfileSectionHeader(
-                              title: 'Live Order',
-                              actionLabel: 'Need Help?',
-                            ),
-                            SizedBox(
-                              height: _clampDouble(14 * metrics.scale, 10, 14),
-                            ),
-                            _ActiveOrderCard(
-                              metrics: metrics,
-                              currentStatus: _activeStatus,
-                            ),
-                            SizedBox(
-                              height: _clampDouble(26 * metrics.scale, 20, 26),
-                            ),
-                            const _ProfileSectionHeader(
-                              title: 'Recent Orders',
-                              actionLabel: 'View All',
-                            ),
-                            SizedBox(
-                              height: _clampDouble(14 * metrics.scale, 10, 14),
-                            ),
-                            Column(
-                              children: List.generate(_pastOrders.length, (
-                                index,
-                              ) {
-                                return Padding(
-                                  padding: EdgeInsets.only(
-                                    bottom: index == _pastOrders.length - 1
-                                        ? 0
-                                        : _clampDouble(
-                                            14 * metrics.scale,
-                                            10,
-                                            14,
-                                          ),
-                                  ),
-                                  child: _PastOrderCard(
-                                    data: _pastOrders[index],
-                                    metrics: metrics,
-                                  ),
-                                );
-                              }),
-                            ),
-                            SizedBox(
-                              height: _clampDouble(26 * metrics.scale, 20, 26),
-                            ),
-                            const _ProfileSectionHeader(
-                              title: 'Reorder Tonight',
-                            ),
-                            SizedBox(
-                              height: _clampDouble(14 * metrics.scale, 10, 14),
-                            ),
-                            _OrdersRewardCard(metrics: metrics),
-                            SizedBox(
-                              height: _clampDouble(12 * metrics.scale, 8, 12),
-                            ),
-                          ],
-                        ),
                       ),
-                    ),
-                    const SizedBox.shrink(),
-                    _BottomNavBar(
-                      metrics: metrics,
-                      selectedIndex: selectedBottomIndex,
-                      onSelected: onBottomNavSelected,
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              );
-            },
-          ),
-        ),
-      ],
+              ),
+            ),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: _BottomNavBar(
+                metrics: metrics,
+                selectedIndex: selectedBottomIndex,
+                onSelected: onBottomNavSelected,
+                fullWidth: true,
+                bottomInset: navBarBottomInset,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -3090,184 +3534,229 @@ class _ProfileTabBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        const Positioned.fill(child: _ProfileBackground()),
-        SafeArea(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final metrics = _ResponsiveMetrics.from(constraints);
-              return Padding(
-                padding: EdgeInsets.fromLTRB(
-                  metrics.horizontalPadding,
-                  _clampDouble(metrics.topPadding + 6, 12, 20),
-                  metrics.horizontalPadding,
-                  metrics.bottomPadding,
-                ),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'My Profile',
-                            style: TextStyle(
-                              color: const Color(0xFF231A16),
-                              fontSize: _clampDouble(
-                                34 * metrics.scale,
-                                26,
-                                34,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final safeAreaPadding = MediaQuery.paddingOf(context);
+        final safeHeight =
+            constraints.maxHeight -
+            safeAreaPadding.top -
+            safeAreaPadding.bottom;
+        final metrics = _ResponsiveMetrics.from(
+          BoxConstraints(
+            maxWidth: constraints.maxWidth,
+            maxHeight: safeHeight > 0 ? safeHeight : constraints.maxHeight,
+          ),
+        );
+        final navBarBottomInset = safeAreaPadding.bottom;
+        final navBarTotalHeight = metrics.navHeight + navBarBottomInset;
+        return Stack(
+          children: [
+            const Positioned.fill(child: _ProfileBackground()),
+            Positioned.fill(
+              bottom: navBarTotalHeight,
+              child: SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    metrics.horizontalPadding,
+                    _clampDouble(metrics.topPadding + 6, 12, 20),
+                    metrics.horizontalPadding,
+                    0,
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'My Profile',
+                              style: TextStyle(
+                                color: const Color(0xFF231A16),
+                                fontSize: _clampDouble(
+                                  34 * metrics.scale,
+                                  26,
+                                  34,
+                                ),
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.6,
                               ),
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.6,
                             ),
                           ),
-                        ),
-                        _ProfileIconButton(
-                          icon: Icons.menu_rounded,
-                          metrics: metrics,
-                          onTap: onOpenMenu,
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: _clampDouble(22 * metrics.scale, 16, 22)),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        physics: const BouncingScrollPhysics(),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _ProfileHeroCard(
-                              userName: userName,
-                              userHandle: userHandle,
-                              metrics: metrics,
-                            ),
-                            SizedBox(
-                              height: _clampDouble(18 * metrics.scale, 14, 18),
-                            ),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: _ProfileStatCard(
-                                    title: 'Points Balance',
-                                    value: '1,250',
-                                    subtitle: '50 points expiring soon',
-                                    accentColor: const Color(0xFFFF7E4D),
-                                    icon: Icons.stars_rounded,
-                                    metrics: metrics,
-                                  ),
-                                ),
-                                SizedBox(
-                                  width: _clampDouble(
-                                    14 * metrics.scale,
-                                    10,
-                                    14,
-                                  ),
-                                ),
-                                Expanded(
-                                  child: _ProfileStatCard(
-                                    title: 'Rewards',
-                                    value: '3',
-                                    subtitle: 'Active perks to use',
-                                    accentColor: const Color(0xFF2F8A7E),
-                                    icon: Icons.local_offer_rounded,
-                                    metrics: metrics,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            SizedBox(
-                              height: _clampDouble(28 * metrics.scale, 20, 28),
-                            ),
-                            const _ProfileSectionHeader(
-                              title: 'Recent Orders',
-                              actionLabel: 'View All',
-                            ),
-                            SizedBox(
-                              height: _clampDouble(14 * metrics.scale, 10, 14),
-                            ),
-                            SizedBox(
-                              height: _clampDouble(
-                                146 * metrics.scale,
-                                126,
-                                156,
+                          _ProfileIconButton(
+                            icon: Icons.menu_rounded,
+                            metrics: metrics,
+                            onTap: onOpenMenu,
+                          ),
+                        ],
+                      ),
+                      SizedBox(
+                        height: _clampDouble(22 * metrics.scale, 16, 22),
+                      ),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          physics: const BouncingScrollPhysics(),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _ProfileHeroCard(
+                                userName: userName,
+                                userHandle: userHandle,
+                                metrics: metrics,
                               ),
-                              child: ListView.separated(
-                                scrollDirection: Axis.horizontal,
-                                physics: const BouncingScrollPhysics(),
-                                itemCount: _recentOrders.length,
-                                separatorBuilder: (context, index) => SizedBox(
-                                  width: _clampDouble(
-                                    14 * metrics.scale,
-                                    10,
-                                    14,
-                                  ),
+                              SizedBox(
+                                height: _clampDouble(
+                                  18 * metrics.scale,
+                                  14,
+                                  18,
                                 ),
-                                itemBuilder: (context, index) {
-                                  return _RecentOrderCard(
-                                    data: _recentOrders[index],
-                                    metrics: metrics,
-                                  );
-                                },
                               ),
-                            ),
-                            SizedBox(
-                              height: _clampDouble(28 * metrics.scale, 20, 28),
-                            ),
-                            const _ProfileSectionHeader(title: 'Saved Places'),
-                            SizedBox(
-                              height: _clampDouble(14 * metrics.scale, 10, 14),
-                            ),
-                            _ProfilePanel(
-                              child: Column(
-                                children: List.generate(_savedPlaces.length, (
-                                  index,
-                                ) {
-                                  final place = _savedPlaces[index];
-                                  return Column(
-                                    children: [
-                                      _SavedPlaceTile(
-                                        data: place,
-                                        metrics: metrics,
-                                      ),
-                                      if (index != _savedPlaces.length - 1)
-                                        Divider(
-                                          height: 1,
-                                          color: const Color(0xFFF0E2D3),
-                                          indent: _clampDouble(
-                                            74 * metrics.scale,
-                                            58,
-                                            74,
-                                          ),
-                                          endIndent: _clampDouble(
-                                            18 * metrics.scale,
-                                            14,
-                                            18,
-                                          ),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _ProfileStatCard(
+                                      title: 'Points Balance',
+                                      value: '1,250',
+                                      subtitle: '50 points expiring soon',
+                                      accentColor: const Color(0xFFFF7E4D),
+                                      icon: Icons.stars_rounded,
+                                      metrics: metrics,
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: _clampDouble(
+                                      14 * metrics.scale,
+                                      10,
+                                      14,
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: _ProfileStatCard(
+                                      title: 'Rewards',
+                                      value: '3',
+                                      subtitle: 'Active perks to use',
+                                      accentColor: const Color(0xFF2F8A7E),
+                                      icon: Icons.local_offer_rounded,
+                                      metrics: metrics,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              SizedBox(
+                                height: _clampDouble(
+                                  28 * metrics.scale,
+                                  20,
+                                  28,
+                                ),
+                              ),
+                              const _ProfileSectionHeader(
+                                title: 'Recent Orders',
+                                actionLabel: 'View All',
+                              ),
+                              SizedBox(
+                                height: _clampDouble(
+                                  14 * metrics.scale,
+                                  10,
+                                  14,
+                                ),
+                              ),
+                              SizedBox(
+                                height: _clampDouble(
+                                  146 * metrics.scale,
+                                  126,
+                                  156,
+                                ),
+                                child: ListView.separated(
+                                  scrollDirection: Axis.horizontal,
+                                  physics: const BouncingScrollPhysics(),
+                                  itemCount: _recentOrders.length,
+                                  separatorBuilder: (context, index) =>
+                                      SizedBox(
+                                        width: _clampDouble(
+                                          14 * metrics.scale,
+                                          10,
+                                          14,
                                         ),
-                                    ],
-                                  );
-                                }),
+                                      ),
+                                  itemBuilder: (context, index) {
+                                    return _RecentOrderCard(
+                                      data: _recentOrders[index],
+                                      metrics: metrics,
+                                    );
+                                  },
+                                ),
                               ),
-                            ),
-                            const SizedBox.shrink(),
-                          ],
+                              SizedBox(
+                                height: _clampDouble(
+                                  28 * metrics.scale,
+                                  20,
+                                  28,
+                                ),
+                              ),
+                              const _ProfileSectionHeader(
+                                title: 'Saved Places',
+                              ),
+                              SizedBox(
+                                height: _clampDouble(
+                                  14 * metrics.scale,
+                                  10,
+                                  14,
+                                ),
+                              ),
+                              _ProfilePanel(
+                                child: Column(
+                                  children: List.generate(_savedPlaces.length, (
+                                    index,
+                                  ) {
+                                    final place = _savedPlaces[index];
+                                    return Column(
+                                      children: [
+                                        _SavedPlaceTile(
+                                          data: place,
+                                          metrics: metrics,
+                                        ),
+                                        if (index != _savedPlaces.length - 1)
+                                          Divider(
+                                            height: 1,
+                                            color: const Color(0xFFF0E2D3),
+                                            indent: _clampDouble(
+                                              74 * metrics.scale,
+                                              58,
+                                              74,
+                                            ),
+                                            endIndent: _clampDouble(
+                                              18 * metrics.scale,
+                                              14,
+                                              18,
+                                            ),
+                                          ),
+                                      ],
+                                    );
+                                  }),
+                                ),
+                              ),
+                              const SizedBox.shrink(),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox.shrink(),
-                    _BottomNavBar(
-                      metrics: metrics,
-                      selectedIndex: selectedBottomIndex,
-                      onSelected: onBottomNavSelected,
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              );
-            },
-          ),
-        ),
-      ],
+              ),
+            ),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: _BottomNavBar(
+                metrics: metrics,
+                selectedIndex: selectedBottomIndex,
+                onSelected: onBottomNavSelected,
+                fullWidth: true,
+                bottomInset: navBarBottomInset,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -4046,17 +4535,17 @@ class _ResponsiveMetrics {
   double get railWidth => _clampDouble(70 * scale, 54, 70);
   double get railItemGap => _clampDouble(12 * scale, 7, 12);
 
-  double get topControlButtonSize => _clampDouble(54 * scale, 44, 54);
-  double get topControlIconSize => _clampDouble(27 * scale, 21, 27);
+  double get topControlButtonSize => _clampDouble(54 * scale, 42, 54);
+  double get topControlIconSize => _clampDouble(28 * scale, 20, 28);
   double get topTabFontSize => _clampDouble(17 * scale, 13, 17);
   double get topTabIndicatorWidth => _clampDouble(52 * scale, 40, 52);
   double get topTabIndicatorHeight => _clampDouble(5 * scale, 3, 5);
 
-  double get handleFontSize => _clampDouble(32 * scale, 18, 32);
-  double get handleAtFontSize => _clampDouble(18 * scale, 12, 18);
-  double get captionFontSize => _clampDouble(17 * scale, 12.5, 17);
-  double get tagsFontSize => _clampDouble(17 * scale, 12.5, 17);
-  double get audioFontSize => _clampDouble(13 * scale, 10, 13);
+  double get handleFontSize => _clampDouble(24 * scale, 16, 24);
+  double get handleAtFontSize => _clampDouble(16 * scale, 11, 16);
+  double get captionFontSize => _clampDouble(17 * scale, 13, 17);
+  double get tagsFontSize => _clampDouble(17 * scale, 13, 17);
+  double get audioFontSize => _clampDouble(13 * scale, 10.5, 13);
   double get ratingFontSize => _clampDouble(17 * scale, 12, 17);
   double get ratingStarSize => _clampDouble(18 * scale, 13, 18);
 
@@ -4073,10 +4562,25 @@ class _ResponsiveMetrics {
   double get ctaPriceSize => _clampDouble(24 * scale, 16, 24);
   double get ctaIconSize => _clampDouble(22 * scale, 15, 22);
 
-  double get navHeight => _clampDouble(96 * scale, 72, 96);
-  double get navRadius => _clampDouble(32 * scale, 22, 32);
-  double get navIconSize => _clampDouble(30 * scale, 21, 30);
-  double get navLabelSize => _clampDouble(12.5 * scale, 9, 12.5);
+  double get navScaleFactor => 0.6;
+  double get navHeight => _clampDouble(
+    96 * scale * navScaleFactor,
+    72 * navScaleFactor,
+    96 * navScaleFactor,
+  );
+  double get navRadius => _clampDouble(
+    32 * scale * navScaleFactor,
+    22 * navScaleFactor,
+    32 * navScaleFactor,
+  );
+  double get navIconScaleFactor => 0.82;
+  double get navIconSize =>
+      _clampDouble(30 * scale * navIconScaleFactor, 18, 24);
+  double get navLabelSize => _clampDouble(
+    12.5 * scale * navScaleFactor,
+    9 * navScaleFactor,
+    12.5 * navScaleFactor,
+  );
 }
 
 class _TopControls extends StatelessWidget {
@@ -4084,11 +4588,15 @@ class _TopControls extends StatelessWidget {
     required this.metrics,
     required this.selectedTab,
     required this.onTabSelected,
+    required this.onOpenSearch,
+    required this.onOpenNotifications,
   });
 
   final _ResponsiveMetrics metrics;
   final int selectedTab;
   final ValueChanged<int> onTabSelected;
+  final VoidCallback onOpenSearch;
+  final VoidCallback onOpenNotifications;
 
   @override
   Widget build(BuildContext context) {
@@ -4101,6 +4609,8 @@ class _TopControls extends StatelessWidget {
             child: _RoundIconButton(
               icon: Icons.search_rounded,
               metrics: metrics,
+              onTap: onOpenSearch,
+              tooltip: 'Search',
             ),
           ),
         ),
@@ -4137,6 +4647,8 @@ class _TopControls extends StatelessWidget {
             child: _RoundIconButton(
               icon: Icons.notifications_none_rounded,
               metrics: metrics,
+              onTap: onOpenNotifications,
+              tooltip: 'Notifications',
             ),
           ),
         ),
@@ -4199,36 +4711,65 @@ class _TopTab extends StatelessWidget {
 }
 
 class _RoundIconButton extends StatelessWidget {
-  const _RoundIconButton({required this.icon, required this.metrics});
+  const _RoundIconButton({
+    required this.icon,
+    required this.metrics,
+    required this.onTap,
+    required this.tooltip,
+  });
 
   final IconData icon;
   final _ResponsiveMetrics metrics;
+  final VoidCallback onTap;
+  final String tooltip;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: metrics.topControlButtonSize,
-      height: metrics.topControlButtonSize,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: const Color(0x38FFFFFF),
-        border: Border.all(color: const Color(0x26FFFFFF)),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Tooltip(
+          message: tooltip,
+          child: Container(
+            width: metrics.topControlButtonSize,
+            height: metrics.topControlButtonSize,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0x38FFFFFF),
+              border: Border.all(color: const Color(0x26FFFFFF)),
+            ),
+            child: Icon(
+              icon,
+              color: Colors.white,
+              size: metrics.topControlIconSize,
+            ),
+          ),
+        ),
       ),
-      child: Icon(icon, color: Colors.white, size: metrics.topControlIconSize),
     );
   }
 }
 
 class _FeedDetails extends StatelessWidget {
   const _FeedDetails({
-    required this.userHandle,
+    required this.post,
     required this.metrics,
-    required this.video,
+    required this.onOpenRestaurant,
+    required this.onOpenAudio,
+    required this.showOrderNow,
+    required this.orderNowPriceLabel,
+    required this.onDismissOrderNow,
   });
 
-  final String userHandle;
+  final DemoFeedPost post;
   final _ResponsiveMetrics metrics;
-  final _FeedVideoPostData video;
+  final VoidCallback onOpenRestaurant;
+  final VoidCallback onOpenAudio;
+  final bool showOrderNow;
+  final String orderNowPriceLabel;
+  final VoidCallback onDismissOrderNow;
 
   @override
   Widget build(BuildContext context) {
@@ -4236,72 +4777,118 @@ class _FeedDetails extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Flexible(
-              child: RichText(
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                text: TextSpan(
-                  children: [
-                    TextSpan(
-                      text: '@',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: metrics.handleAtFontSize,
-                        height: 1.1,
-                        fontWeight: FontWeight.w800,
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 340),
+          reverseDuration: const Duration(milliseconds: 250),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, animation) {
+            return FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position:
+                    Tween<Offset>(
+                      begin: const Offset(0, 0.14),
+                      end: Offset.zero,
+                    ).animate(
+                      CurvedAnimation(
+                        parent: animation,
+                        curve: Curves.easeOutCubic,
                       ),
                     ),
-                    TextSpan(
-                      text: userHandle,
+                child: child,
+              ),
+            );
+          },
+          child: showOrderNow
+              ? Padding(
+                  key: ValueKey<String>('order-now-${post.id}'),
+                  padding: EdgeInsets.only(
+                    bottom: _clampDouble(8 * metrics.scale, 4, 10),
+                  ),
+                  child: _SwipeDismissSurface(
+                    onDismissed: onDismissOrderNow,
+                    child: _OrderNowBar(
+                      metrics: metrics,
+                      priceLabel: orderNowPriceLabel,
+                      compactStyle: true,
+                    ),
+                  ),
+                )
+              : const SizedBox.shrink(
+                  key: ValueKey<String>('order-now-hidden'),
+                ),
+        ),
+        InkWell(
+          onTap: onOpenRestaurant,
+          borderRadius: BorderRadius.circular(20),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Flexible(
+                child: RichText(
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  text: TextSpan(
+                    children: [
+                      TextSpan(
+                        text: '@',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: metrics.handleFontSize,
+                          height: 1,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      TextSpan(
+                        text: post.restaurantHandle,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: metrics.handleFontSize,
+                          height: 1,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              SizedBox(width: _clampDouble(8 * metrics.scale, 4, 8)),
+              Container(
+                padding: EdgeInsets.symmetric(
+                  horizontal: _clampDouble(10 * metrics.scale, 7, 10),
+                  vertical: _clampDouble(6 * metrics.scale, 4, 6),
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xBF2E2521),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.star_rounded,
+                      color: const Color(0xFFF9C949),
+                      size: metrics.ratingStarSize,
+                    ),
+                    SizedBox(width: _clampDouble(4 * metrics.scale, 2, 4)),
+                    Text(
+                      post.rating.toStringAsFixed(1),
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: metrics.handleFontSize,
-                        height: 1,
-                        fontWeight: FontWeight.w900,
+                        fontSize: metrics.ratingFontSize,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                   ],
                 ),
               ),
-            ),
-            SizedBox(width: _clampDouble(8 * metrics.scale, 4, 8)),
-            Container(
-              padding: EdgeInsets.symmetric(
-                horizontal: _clampDouble(10 * metrics.scale, 7, 10),
-                vertical: _clampDouble(6 * metrics.scale, 4, 6),
-              ),
-              decoration: BoxDecoration(
-                color: const Color(0xBF2E2521),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.star_rounded,
-                    color: const Color(0xFFF9C949),
-                    size: metrics.ratingStarSize,
-                  ),
-                  SizedBox(width: _clampDouble(4 * metrics.scale, 2, 4)),
-                  Text(
-                    video.ratingLabel,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: metrics.ratingFontSize,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
         SizedBox(height: _clampDouble(8 * metrics.scale, 4, 8)),
         Text(
-          video.caption,
+          post.caption,
           maxLines: metrics.tiny ? 2 : 3,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
@@ -4313,7 +4900,7 @@ class _FeedDetails extends StatelessWidget {
         ),
         SizedBox(height: _clampDouble(4 * metrics.scale, 2, 4)),
         Text(
-          video.tags,
+          post.tags,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
@@ -4323,27 +4910,31 @@ class _FeedDetails extends StatelessWidget {
           ),
         ),
         SizedBox(height: _clampDouble(12 * metrics.scale, 6, 14)),
-        Row(
-          children: [
-            Icon(
-              Icons.music_note_rounded,
-              color: Colors.white,
-              size: _clampDouble(metrics.audioFontSize + 4, 14, 20),
-            ),
-            SizedBox(width: _clampDouble(6 * metrics.scale, 4, 6)),
-            Flexible(
-              child: Text(
-                video.audioLabel,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: const Color(0xD9FFFFFF),
-                  fontSize: metrics.audioFontSize,
-                  fontWeight: FontWeight.w600,
+        InkWell(
+          onTap: onOpenAudio,
+          borderRadius: BorderRadius.circular(16),
+          child: Row(
+            children: [
+              Icon(
+                Icons.music_note_rounded,
+                color: Colors.white,
+                size: _clampDouble(metrics.audioFontSize + 4, 14, 20),
+              ),
+              SizedBox(width: _clampDouble(6 * metrics.scale, 4, 6)),
+              Flexible(
+                child: Text(
+                  post.audioLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: const Color(0xD9FFFFFF),
+                    fontSize: metrics.audioFontSize,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ],
     );
@@ -4351,10 +4942,23 @@ class _FeedDetails extends StatelessWidget {
 }
 
 class _ActionRail extends StatelessWidget {
-  const _ActionRail({required this.metrics, required this.video});
+  const _ActionRail({
+    required this.metrics,
+    required this.post,
+    required this.onOpenRestaurant,
+    required this.onToggleFollow,
+    required this.onToggleLike,
+    required this.onOpenComments,
+    required this.onShare,
+  });
 
   final _ResponsiveMetrics metrics;
-  final _FeedVideoPostData video;
+  final DemoFeedPost post;
+  final VoidCallback onOpenRestaurant;
+  final VoidCallback onToggleFollow;
+  final VoidCallback onToggleLike;
+  final VoidCallback onOpenComments;
+  final VoidCallback onShare;
 
   @override
   Widget build(BuildContext context) {
@@ -4363,25 +4967,33 @@ class _ActionRail extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _CreatorAvatar(metrics: metrics, video: video),
+          _CreatorAvatar(
+            metrics: metrics,
+            post: post,
+            onOpenRestaurant: onOpenRestaurant,
+            onToggleFollow: onToggleFollow,
+          ),
           SizedBox(height: metrics.railItemGap),
           _ActionButton(
             icon: Icons.favorite_rounded,
-            value: video.likesLabel,
-            iconColor: const Color(0xFFFF7E4D),
+            value: _formatCompactCount(post.likeCount),
+            iconColor: post.isLiked ? const Color(0xFFFF7E4D) : Colors.white,
             metrics: metrics,
+            onTap: onToggleLike,
           ),
           SizedBox(height: metrics.railItemGap),
           _ActionButton(
             icon: Icons.mode_comment_outlined,
-            value: video.commentsLabel,
+            value: _formatCompactCount(post.commentCount),
             metrics: metrics,
+            onTap: onOpenComments,
           ),
           SizedBox(height: metrics.railItemGap),
           _ActionButton(
             icon: Icons.share_outlined,
-            value: video.shareLabel,
+            value: 'Share',
             metrics: metrics,
+            onTap: onShare,
           ),
         ],
       ),
@@ -4390,56 +5002,71 @@ class _ActionRail extends StatelessWidget {
 }
 
 class _CreatorAvatar extends StatelessWidget {
-  const _CreatorAvatar({required this.metrics, required this.video});
+  const _CreatorAvatar({
+    required this.metrics,
+    required this.post,
+    required this.onOpenRestaurant,
+    required this.onToggleFollow,
+  });
 
   final _ResponsiveMetrics metrics;
-  final _FeedVideoPostData video;
+  final DemoFeedPost post;
+  final VoidCallback onOpenRestaurant;
+  final VoidCallback onToggleFollow;
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        Container(
-          width: metrics.creatorSize,
-          height: metrics.creatorSize,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 2),
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF135D42), Color(0xFF0E3D2D)],
+        InkWell(
+          onTap: onOpenRestaurant,
+          customBorder: const CircleBorder(),
+          child: Container(
+            width: metrics.creatorSize,
+            height: metrics.creatorSize,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2),
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF135D42), Color(0xFF0E3D2D)],
+              ),
             ),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            video.creatorLabel,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: _clampDouble(8 * metrics.scale, 6, 8),
-              height: 1.2,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.3,
+            alignment: Alignment.center,
+            child: Text(
+              _feedCreatorLabel(post.restaurantName),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: _clampDouble(8 * metrics.scale, 6, 8),
+                height: 1.2,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.3,
+              ),
             ),
           ),
         ),
         Positioned(
           bottom: -4,
           right: -4,
-          child: Container(
-            width: metrics.creatorPlusSize,
-            height: metrics.creatorPlusSize,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xFFFF7E4D),
-              border: Border.all(color: Colors.white, width: 2),
-            ),
-            child: Icon(
-              Icons.add_rounded,
-              color: Colors.white,
-              size: metrics.creatorPlusSize * 0.62,
+          child: InkWell(
+            onTap: onToggleFollow,
+            customBorder: const CircleBorder(),
+            child: Container(
+              width: metrics.creatorPlusSize,
+              height: metrics.creatorPlusSize,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0xFFFF7E4D),
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+              child: Icon(
+                post.isFollowing ? Icons.check_rounded : Icons.add_rounded,
+                color: Colors.white,
+                size: metrics.creatorPlusSize * 0.62,
+              ),
             ),
           ),
         ),
@@ -4453,27 +5080,36 @@ class _ActionButton extends StatelessWidget {
     required this.icon,
     required this.value,
     required this.metrics,
+    required this.onTap,
     this.iconColor = Colors.white,
   });
 
   final IconData icon;
   final String value;
   final _ResponsiveMetrics metrics;
+  final VoidCallback onTap;
   final Color iconColor;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Container(
-          width: metrics.actionBubbleSize,
-          height: metrics.actionBubbleSize,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: const Color(0x36FFFFFF),
-            border: Border.all(color: const Color(0x2BFFFFFF)),
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            customBorder: const CircleBorder(),
+            child: Container(
+              width: metrics.actionBubbleSize,
+              height: metrics.actionBubbleSize,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0x36FFFFFF),
+                border: Border.all(color: const Color(0x2BFFFFFF)),
+              ),
+              child: Icon(icon, color: iconColor, size: metrics.actionIconSize),
+            ),
           ),
-          child: Icon(icon, color: iconColor, size: metrics.actionIconSize),
         ),
         SizedBox(height: _clampDouble(6 * metrics.scale, 3, 6)),
         Text(
@@ -4491,28 +5127,189 @@ class _ActionButton extends StatelessWidget {
   }
 }
 
+class _FeedLikeBurstData {
+  const _FeedLikeBurstData({
+    required this.id,
+    required this.postId,
+    required this.tapPosition,
+  });
+
+  final int id;
+  final String postId;
+  final Offset tapPosition;
+}
+
+class _TastyLikeBurst extends StatelessWidget {
+  const _TastyLikeBurst({super.key, required this.tapPosition});
+
+  final Offset tapPosition;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      left: tapPosition.dx - 62,
+      top: tapPosition.dy - 82,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween<double>(begin: 0, end: 1),
+        duration: const Duration(milliseconds: 900),
+        curve: Curves.easeOutCubic,
+        builder: (context, progress, _) {
+          final fade = progress < 0.72
+              ? 1.0
+              : (1 - (progress - 0.72) / 0.28).clamp(0.0, 1.0);
+          final rise = 34 * progress;
+          final pop = progress < 0.2
+              ? 0.55 + progress * 2.25
+              : 1.0 + (1 - progress) * 0.1;
+          final spread = 42 * Curves.easeOutBack.transform(progress);
+          return Opacity(
+            opacity: fade,
+            child: Transform.translate(
+              offset: Offset(0, -rise),
+              child: Transform.scale(
+                scale: pop,
+                child: SizedBox(
+                  width: 124,
+                  height: 124,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Transform.translate(
+                        offset: Offset(-spread, -spread * 0.75),
+                        child: _TastyBurstChip(
+                          icon: Icons.local_pizza_rounded,
+                          iconColor: const Color(0xFFCF562F),
+                          backgroundColor: const Color(0xFFFFE2C8),
+                        ),
+                      ),
+                      Transform.translate(
+                        offset: Offset(spread * 0.9, -spread * 0.5),
+                        child: _TastyBurstChip(
+                          icon: Icons.icecream_rounded,
+                          iconColor: const Color(0xFFC84A6D),
+                          backgroundColor: const Color(0xFFFFE6EF),
+                        ),
+                      ),
+                      Transform.translate(
+                        offset: Offset(0, spread * 0.78),
+                        child: _TastyBurstChip(
+                          icon: Icons.ramen_dining_rounded,
+                          iconColor: const Color(0xFFB56A2E),
+                          backgroundColor: const Color(0xFFFFF0CF),
+                        ),
+                      ),
+                      Container(
+                        width: 74,
+                        height: 74,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: const LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [Color(0xFFFFAA72), Color(0xFFFF6D4F)],
+                          ),
+                          border: Border.all(
+                            color: const Color(0xFFFDF2E8),
+                            width: 2.4,
+                          ),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x40A84329),
+                              blurRadius: 18,
+                              offset: Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.favorite_rounded,
+                          color: Colors.white,
+                          size: 40,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _TastyBurstChip extends StatelessWidget {
+  const _TastyBurstChip({
+    required this.icon,
+    required this.iconColor,
+    required this.backgroundColor,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final Color backgroundColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 34,
+      height: 34,
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        shape: BoxShape.circle,
+        border: Border.all(color: const Color(0xFFFFF7EE), width: 1.4),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x22A45835),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Icon(icon, color: iconColor, size: 18),
+    );
+  }
+}
+
 class _OrderNowBar extends StatelessWidget {
-  const _OrderNowBar({required this.metrics, required this.priceLabel});
+  const _OrderNowBar({
+    required this.metrics,
+    required this.priceLabel,
+    this.compactStyle = false,
+  });
 
   final _ResponsiveMetrics metrics;
   final String priceLabel;
+  final bool compactStyle;
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact = constraints.maxWidth < 360;
-        final showMoreButton = constraints.maxWidth >= 340;
+        final compact = compactStyle || constraints.maxWidth < 360;
+        final compactScale = compactStyle ? 0.82 : 1.0;
+        final showMoreButton =
+            constraints.maxWidth >= (compactStyle ? 260 : 340);
 
         return Container(
-          height: metrics.ctaHeight,
+          height: _clampDouble(
+            metrics.ctaHeight * compactScale,
+            42,
+            metrics.ctaHeight,
+          ),
           padding: EdgeInsets.symmetric(
-            horizontal: _clampDouble(12 * metrics.scale, 8, 12),
-            vertical: _clampDouble(8 * metrics.scale, 5, 8),
+            horizontal: _clampDouble(12 * metrics.scale * compactScale, 7, 12),
+            vertical: _clampDouble(8 * metrics.scale * compactScale, 4, 8),
           ),
           decoration: BoxDecoration(
             color: const Color(0xFFFF8A5B),
-            borderRadius: BorderRadius.circular(metrics.ctaRadius),
+            borderRadius: BorderRadius.circular(
+              _clampDouble(
+                metrics.ctaRadius * (compactStyle ? 0.88 : 1.0),
+                18,
+                metrics.ctaRadius,
+              ),
+            ),
             boxShadow: const [
               BoxShadow(
                 color: Color(0x4A5A2B17),
@@ -4524,8 +5321,8 @@ class _OrderNowBar extends StatelessWidget {
           child: Row(
             children: [
               Container(
-                width: _clampDouble(42 * metrics.scale, 30, 42),
-                height: _clampDouble(42 * metrics.scale, 30, 42),
+                width: _clampDouble(42 * metrics.scale * compactScale, 24, 42),
+                height: _clampDouble(42 * metrics.scale * compactScale, 24, 42),
                 decoration: const BoxDecoration(
                   color: Color(0x2EFFFFFF),
                   shape: BoxShape.circle,
@@ -4533,10 +5330,16 @@ class _OrderNowBar extends StatelessWidget {
                 child: Icon(
                   Icons.restaurant_menu_rounded,
                   color: Colors.white,
-                  size: metrics.ctaIconSize,
+                  size: _clampDouble(
+                    metrics.ctaIconSize * compactScale,
+                    12,
+                    metrics.ctaIconSize,
+                  ),
                 ),
               ),
-              SizedBox(width: _clampDouble(12 * metrics.scale, 6, 12)),
+              SizedBox(
+                width: _clampDouble(12 * metrics.scale * compactScale, 5, 12),
+              ),
               Expanded(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -4549,20 +5352,38 @@ class _OrderNowBar extends StatelessWidget {
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: compact
-                            ? _clampDouble(metrics.ctaMainSize - 4, 16, 24)
-                            : metrics.ctaMainSize,
+                            ? _clampDouble(
+                                (metrics.ctaMainSize - 4) * compactScale,
+                                13,
+                                24,
+                              )
+                            : _clampDouble(
+                                metrics.ctaMainSize * compactScale,
+                                13,
+                                metrics.ctaMainSize,
+                              ),
                         height: 1,
                         fontWeight: FontWeight.w900,
                       ),
                     ),
-                    SizedBox(height: _clampDouble(3 * metrics.scale, 1, 3)),
+                    SizedBox(
+                      height: _clampDouble(
+                        3 * metrics.scale * compactScale,
+                        1,
+                        3,
+                      ),
+                    ),
                     Text(
                       'DELIVERY IN 25M',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: const Color(0xF2FFFFFF),
-                        fontSize: metrics.ctaSubSize,
+                        fontSize: _clampDouble(
+                          metrics.ctaSubSize * compactScale,
+                          7.5,
+                          metrics.ctaSubSize,
+                        ),
                         letterSpacing: 0.8,
                         fontWeight: FontWeight.w700,
                       ),
@@ -4570,7 +5391,9 @@ class _OrderNowBar extends StatelessWidget {
                   ],
                 ),
               ),
-              SizedBox(width: _clampDouble(6 * metrics.scale, 2, 6)),
+              SizedBox(
+                width: _clampDouble(6 * metrics.scale * compactScale, 2, 6),
+              ),
               Flexible(
                 child: Align(
                   alignment: Alignment.centerRight,
@@ -4582,15 +5405,31 @@ class _OrderNowBar extends StatelessWidget {
                         Container(
                           width: 1,
                           margin: EdgeInsets.symmetric(
-                            horizontal: _clampDouble(8 * metrics.scale, 4, 8),
-                            vertical: _clampDouble(6 * metrics.scale, 4, 6),
+                            horizontal: _clampDouble(
+                              8 * metrics.scale * compactScale,
+                              3,
+                              8,
+                            ),
+                            vertical: _clampDouble(
+                              6 * metrics.scale * compactScale,
+                              3,
+                              6,
+                            ),
                           ),
                           color: const Color(0x58FFFFFF),
                         ),
                         Container(
                           padding: EdgeInsets.symmetric(
-                            horizontal: _clampDouble(14 * metrics.scale, 8, 14),
-                            vertical: _clampDouble(8 * metrics.scale, 4, 8),
+                            horizontal: _clampDouble(
+                              14 * metrics.scale * compactScale,
+                              6,
+                              14,
+                            ),
+                            vertical: _clampDouble(
+                              8 * metrics.scale * compactScale,
+                              3,
+                              8,
+                            ),
                           ),
                           decoration: BoxDecoration(
                             color: const Color(0x1DFFFFFF),
@@ -4603,22 +5442,38 @@ class _OrderNowBar extends StatelessWidget {
                               color: Colors.white,
                               fontSize: compact
                                   ? _clampDouble(
-                                      metrics.ctaPriceSize - 3,
-                                      14,
+                                      (metrics.ctaPriceSize - 3) * compactScale,
+                                      11,
                                       20,
                                     )
-                                  : metrics.ctaPriceSize,
+                                  : _clampDouble(
+                                      metrics.ctaPriceSize * compactScale,
+                                      11,
+                                      metrics.ctaPriceSize,
+                                    ),
                               fontWeight: FontWeight.w900,
                             ),
                           ),
                         ),
                         if (showMoreButton) ...[
                           SizedBox(
-                            width: _clampDouble(8 * metrics.scale, 4, 8),
+                            width: _clampDouble(
+                              8 * metrics.scale * compactScale,
+                              3,
+                              8,
+                            ),
                           ),
                           Container(
-                            width: _clampDouble(34 * metrics.scale, 24, 34),
-                            height: _clampDouble(34 * metrics.scale, 24, 34),
+                            width: _clampDouble(
+                              34 * metrics.scale * compactScale,
+                              20,
+                              34,
+                            ),
+                            height: _clampDouble(
+                              34 * metrics.scale * compactScale,
+                              20,
+                              34,
+                            ),
                             decoration: const BoxDecoration(
                               color: Color(0x1DFFFFFF),
                               shape: BoxShape.circle,
@@ -4626,7 +5481,11 @@ class _OrderNowBar extends StatelessWidget {
                             child: Icon(
                               Icons.more_horiz_rounded,
                               color: Colors.white,
-                              size: _clampDouble(22 * metrics.scale, 14, 22),
+                              size: _clampDouble(
+                                22 * metrics.scale * compactScale,
+                                10,
+                                22,
+                              ),
                             ),
                           ),
                         ],
@@ -4639,6 +5498,340 @@ class _OrderNowBar extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _SwipeDismissSurface extends StatefulWidget {
+  const _SwipeDismissSurface({required this.child, required this.onDismissed});
+
+  final Widget child;
+  final VoidCallback onDismissed;
+
+  @override
+  State<_SwipeDismissSurface> createState() => _SwipeDismissSurfaceState();
+}
+
+class _SwipeDismissSurfaceState extends State<_SwipeDismissSurface> {
+  double _accumulatedDragDistance = 0;
+  bool _dismissed = false;
+
+  void _dismiss() {
+    if (_dismissed) {
+      return;
+    }
+    _dismissed = true;
+    widget.onDismissed();
+  }
+
+  void _resetDrag() {
+    _accumulatedDragDistance = 0;
+    _dismissed = false;
+  }
+
+  void _trackDragDelta(double delta) {
+    _accumulatedDragDistance += delta.abs();
+    if (_accumulatedDragDistance >= 24) {
+      _dismiss();
+    }
+  }
+
+  void _dismissByVelocity(double velocity) {
+    if (velocity.abs() >= 420) {
+      _dismiss();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onHorizontalDragStart: (_) => _resetDrag(),
+      onVerticalDragStart: (_) => _resetDrag(),
+      onHorizontalDragUpdate: (details) =>
+          _trackDragDelta(details.primaryDelta ?? 0),
+      onVerticalDragUpdate: (details) =>
+          _trackDragDelta(details.primaryDelta ?? 0),
+      onHorizontalDragEnd: (details) =>
+          _dismissByVelocity(details.primaryVelocity ?? 0),
+      onVerticalDragEnd: (details) =>
+          _dismissByVelocity(details.primaryVelocity ?? 0),
+      child: widget.child,
+    );
+  }
+}
+
+class _FeedCommentsBottomSheet extends StatefulWidget {
+  const _FeedCommentsBottomSheet({
+    required this.postId,
+    required this.postTitle,
+  });
+
+  final String postId;
+  final String postTitle;
+
+  @override
+  State<_FeedCommentsBottomSheet> createState() =>
+      _FeedCommentsBottomSheetState();
+}
+
+class _FeedCommentsBottomSheetState extends State<_FeedCommentsBottomSheet> {
+  final _repository = DemoAppRepository.instance;
+  final _controller = TextEditingController();
+
+  late List<DemoComment> _comments;
+  bool _isSending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _comments = _repository.getComments(widget.postId);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _sendComment() async {
+    final text = _controller.text.trim();
+    if (text.isEmpty || _isSending) {
+      return;
+    }
+    FocusScope.of(context).unfocus();
+    setState(() => _isSending = true);
+    final comments = await _repository.addComment(
+      postId: widget.postId,
+      authorName: 'You',
+      text: text,
+    );
+    if (!mounted) {
+      return;
+    }
+    _controller.clear();
+    setState(() {
+      _comments = comments;
+      _isSending = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final sheetHeight = _clampDouble(media.size.height * 0.56, 320, 520);
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+        child: Container(
+          height: sheetHeight,
+          decoration: const BoxDecoration(
+            color: Color(0xFFFFFBF8),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+          ),
+          child: Column(
+            children: [
+              const SizedBox(height: 10),
+              Container(
+                width: 46,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFD2C5BB),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 10, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${_formatCompactCount(_comments.length)} comments',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF231A16),
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close_rounded),
+                      color: const Color(0xFF7A695E),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1, color: Color(0xFFECE1D7)),
+              Expanded(
+                child: _comments.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'No comments yet. Start the conversation.',
+                          style: TextStyle(
+                            color: Color(0xFF7E6D62),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      )
+                    : ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                        itemCount: _comments.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 10),
+                        itemBuilder: (context, index) {
+                          final comment = _comments[index];
+                          return Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFF4EC),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: const Color(0xFFF0E2D5),
+                              ),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  width: 34,
+                                  height: 34,
+                                  alignment: Alignment.center,
+                                  decoration: const BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: Color(0xFFFFE4D1),
+                                  ),
+                                  child: const Icon(
+                                    Icons.person_rounded,
+                                    size: 18,
+                                    color: Color(0xFF9A5A3B),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              comment.authorName,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: Color(0xFF231A16),
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            _formatRelativeTime(
+                                              comment.createdAt,
+                                            ),
+                                            style: const TextStyle(
+                                              color: Color(0xFF8A7A6F),
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        comment.body,
+                                        style: const TextStyle(
+                                          color: Color(0xFF5B4A41),
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                          height: 1.3,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _controller,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => _sendComment(),
+                        decoration: InputDecoration(
+                          hintText: 'Add a comment...',
+                          filled: true,
+                          fillColor: const Color(0xFFFFFFFF),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: const BorderSide(
+                              color: Color(0xFFEADACC),
+                            ),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: const BorderSide(
+                              color: Color(0xFFEADACC),
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: const BorderSide(
+                              color: Color(0xFFFF9E70),
+                            ),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                        ),
+                        maxLines: 3,
+                        minLines: 1,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    FilledButton(
+                      onPressed: _isSending ? null : _sendComment,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFFF7E4D),
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(52, 52),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      child: _isSending
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.send_rounded, size: 22),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -5607,11 +6800,15 @@ class _BottomNavBar extends StatelessWidget {
     required this.metrics,
     required this.selectedIndex,
     required this.onSelected,
+    this.fullWidth = false,
+    this.bottomInset = 0,
   });
 
   final _ResponsiveMetrics metrics;
   final int selectedIndex;
   final ValueChanged<int> onSelected;
+  final bool fullWidth;
+  final double bottomInset;
 
   @override
   Widget build(BuildContext context) {
@@ -5622,16 +6819,30 @@ class _BottomNavBar extends StatelessWidget {
       (icon: Icons.chat_bubble_outline_rounded, label: 'Messages'),
       (icon: Icons.person_rounded, label: 'Profile'),
     ];
+    final navScale = metrics.navScaleFactor;
+    final horizontalPadding = fullWidth
+        ? _clampDouble((metrics.compact ? 10 : 14) * navScale, 4, 14)
+        : _clampDouble((metrics.compact ? 6 : 10) * navScale, 3, 10);
+    final verticalPadding = _clampDouble(
+      (metrics.compact ? 6 : 8) * navScale,
+      2,
+      8,
+    );
+    final insetPadding = fullWidth ? bottomInset / 2 : 0;
+    final topPadding = verticalPadding + insetPadding;
+    final bottomPadding = verticalPadding + insetPadding;
 
     return Container(
-      height: metrics.navHeight,
-      padding: EdgeInsets.symmetric(
-        horizontal: metrics.compact ? 6 : 10,
-        vertical: metrics.compact ? 6 : 8,
+      height: metrics.navHeight + (fullWidth ? bottomInset : 0),
+      padding: EdgeInsets.fromLTRB(
+        horizontalPadding,
+        topPadding,
+        horizontalPadding,
+        bottomPadding,
       ),
       decoration: BoxDecoration(
         color: const Color(0xFFF8F5F2),
-        borderRadius: BorderRadius.circular(metrics.navRadius),
+        borderRadius: BorderRadius.zero,
       ),
       child: Row(
         children: List.generate(items.length, (index) {
@@ -5669,14 +6880,15 @@ class _BottomNavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = selected ? const Color(0xFFFF7E4D) : const Color(0xFF9E8B7D);
+    final navScale = metrics.navScaleFactor;
     return InkWell(
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(_clampDouble(16 * navScale, 8, 16)),
       onTap: onTap,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(icon, color: color, size: metrics.navIconSize),
-          SizedBox(height: _clampDouble(6 * metrics.scale, 2, 6)),
+          SizedBox(height: _clampDouble(6 * metrics.scale * navScale, 1.5, 6)),
           Text(
             label,
             maxLines: 1,
