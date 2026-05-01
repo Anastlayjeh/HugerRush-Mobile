@@ -439,7 +439,11 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
   }
 
   DemoFeedPost _loadPostForId(String postId) {
-    return _demoRepository.getFeedPost(following: postId == 'following');
+    var post = _demoRepository.getFeedPost(following: postId == 'following');
+    if (postId == 'following' && post.isLiked) {
+      post = post.copyWith(isLiked: false);
+    }
+    return post;
   }
 
   void _syncFeedPosts() {
@@ -4826,30 +4830,16 @@ class _FeedDetails extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Flexible(
-                child: RichText(
+                child: Text(
+                  post.restaurantHandle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  text: TextSpan(
-                    children: [
-                      TextSpan(
-                        text: '@',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: metrics.handleFontSize,
-                          height: 1,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      TextSpan(
-                        text: post.restaurantHandle,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: metrics.handleFontSize,
-                          height: 1,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ],
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: metrics.handleFontSize,
+                    height: 1.02,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.2,
                   ),
                 ),
               ),
