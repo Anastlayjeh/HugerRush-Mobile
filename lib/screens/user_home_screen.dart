@@ -12,6 +12,21 @@ String _profileEmailFromHandle(String handle) {
   return '${cleaned.isEmpty ? 'foodie' : cleaned}@hungerrush.app';
 }
 
+String _profileEmail({required String handle, String? email}) {
+  final cleanedEmail = email?.trim();
+  if (cleanedEmail != null && cleanedEmail.isNotEmpty) {
+    return cleanedEmail;
+  }
+  return _profileEmailFromHandle(handle);
+}
+
+bool _looksLikeHttpUrl(String? value) {
+  final parsed = Uri.tryParse(value?.trim() ?? '');
+  return parsed != null &&
+      parsed.hasScheme &&
+      (parsed.scheme == 'http' || parsed.scheme == 'https');
+}
+
 enum _OrderStatus {
   pending,
   accepted,
@@ -201,9 +216,18 @@ List<_OrderTimelineStepData> _buildOrderTimeline(_OrderStatus status) {
 }
 
 class UserHomeScreen extends StatefulWidget {
-  const UserHomeScreen({super.key, required this.userName});
+  const UserHomeScreen({
+    super.key,
+    required this.userName,
+    this.userEmail,
+    this.userAvatarUrl,
+    this.accountLabel,
+  });
 
   final String userName;
+  final String? userEmail;
+  final String? userAvatarUrl;
+  final String? accountLabel;
 
   @override
   State<UserHomeScreen> createState() => _UserHomeScreenState();
@@ -236,11 +260,18 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
       backgroundColor: showProfile || showDiscover || showOrders
           ? const Color(0xFFF8EFE5)
           : const Color(0xFF0A2230),
-      endDrawer: _UserProfileMenuDrawer(userName: widget.userName),
+      endDrawer: _UserProfileMenuDrawer(
+        userName: widget.userName,
+        userEmail: widget.userEmail,
+        userAvatarUrl: widget.userAvatarUrl,
+      ),
       body: showProfile
           ? _ProfileTabBody(
               userName: widget.userName,
               userHandle: _userHandle,
+              userEmail: widget.userEmail,
+              userAvatarUrl: widget.userAvatarUrl,
+              accountLabel: widget.accountLabel,
               selectedBottomIndex: _selectedBottomIndex,
               onOpenMenu: _openProfileMenu,
               onBottomNavSelected: (index) {
@@ -1992,6 +2023,9 @@ class _ProfileTabBody extends StatelessWidget {
   const _ProfileTabBody({
     required this.userName,
     required this.userHandle,
+    this.userEmail,
+    this.userAvatarUrl,
+    this.accountLabel,
     required this.selectedBottomIndex,
     required this.onOpenMenu,
     required this.onBottomNavSelected,
@@ -1999,6 +2033,9 @@ class _ProfileTabBody extends StatelessWidget {
 
   final String userName;
   final String userHandle;
+  final String? userEmail;
+  final String? userAvatarUrl;
+  final String? accountLabel;
   final int selectedBottomIndex;
   final VoidCallback onOpenMenu;
   final ValueChanged<int> onBottomNavSelected;
@@ -2087,6 +2124,9 @@ class _ProfileTabBody extends StatelessWidget {
                             _ProfileHeroCard(
                               userName: userName,
                               userHandle: userHandle,
+                              userEmail: userEmail,
+                              userAvatarUrl: userAvatarUrl,
+                              accountLabel: accountLabel,
                               metrics: metrics,
                             ),
                             SizedBox(
@@ -3635,9 +3675,15 @@ class _ProfileIconButton extends StatelessWidget {
 }
 
 class _UserProfileMenuDrawer extends StatelessWidget {
-  const _UserProfileMenuDrawer({required this.userName});
+  const _UserProfileMenuDrawer({
+    required this.userName,
+    this.userEmail,
+    this.userAvatarUrl,
+  });
 
   final String userName;
+  final String? userEmail;
+  final String? userAvatarUrl;
 
   static const List<_ProfileSettingsItemData> _settingsItems = [
     _ProfileSettingsItemData(
@@ -3669,6 +3715,12 @@ class _UserProfileMenuDrawer extends StatelessWidget {
             final displayName = userName.trim().isEmpty
                 ? 'Hungry Explorer'
                 : userName.trim();
+            final displayEmail = _profileEmail(
+              handle: displayName.replaceAll(RegExp(r'\s+'), ''),
+              email: userEmail,
+            );
+            final avatarUrl = userAvatarUrl?.trim();
+            final hasAvatarUrl = _looksLikeHttpUrl(avatarUrl);
             return Padding(
               padding: EdgeInsets.fromLTRB(
                 _clampDouble(20 * metrics.scale, 18, 20),
@@ -3722,10 +3774,30 @@ class _UserProfileMenuDrawer extends StatelessWidget {
                               colors: [Color(0xFFFFE4C0), Color(0xFFFFC18E)],
                             ),
                           ),
-                          child: Icon(
-                            Icons.person_rounded,
-                            color: const Color(0xFF8B5C41),
-                            size: _clampDouble(28 * metrics.scale, 22, 28),
+                          child: ClipOval(
+                            child: hasAvatarUrl
+                                ? Image.network(
+                                    avatarUrl!,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, error, stackTrace) => Icon(
+                                      Icons.person_rounded,
+                                      color: const Color(0xFF8B5C41),
+                                      size: _clampDouble(
+                                        28 * metrics.scale,
+                                        22,
+                                        28,
+                                      ),
+                                    ),
+                                  )
+                                : Icon(
+                                    Icons.person_rounded,
+                                    color: const Color(0xFF8B5C41),
+                                    size: _clampDouble(
+                                      28 * metrics.scale,
+                                      22,
+                                      28,
+                                    ),
+                                  ),
                           ),
                         ),
                         SizedBox(
@@ -3753,8 +3825,8 @@ class _UserProfileMenuDrawer extends StatelessWidget {
                                 height: _clampDouble(4 * metrics.scale, 2, 4),
                               ),
                               Text(
-                                'Profile shortcuts and account tools',
-                                maxLines: 2,
+                                displayEmail,
+                                maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                   color: const Color(0xFF847468),
@@ -3843,11 +3915,17 @@ class _ProfileHeroCard extends StatelessWidget {
   const _ProfileHeroCard({
     required this.userName,
     required this.userHandle,
+    this.userEmail,
+    this.userAvatarUrl,
+    this.accountLabel,
     required this.metrics,
   });
 
   final String userName;
   final String userHandle;
+  final String? userEmail;
+  final String? userAvatarUrl;
+  final String? accountLabel;
   final _ResponsiveMetrics metrics;
 
   @override
@@ -3856,6 +3934,12 @@ class _ProfileHeroCard extends StatelessWidget {
     final displayName = userName.trim().isEmpty
         ? 'Hungry Explorer'
         : userName.trim();
+    final displayEmail = _profileEmail(handle: userHandle, email: userEmail);
+    final avatarUrl = userAvatarUrl?.trim();
+    final hasAvatarUrl = _looksLikeHttpUrl(avatarUrl);
+    final displayAccountLabel = accountLabel?.trim().isNotEmpty == true
+        ? accountLabel!.trim()
+        : 'Customer Account';
 
     return Container(
       padding: EdgeInsets.all(_clampDouble(20 * metrics.scale, 16, 20)),
@@ -3895,10 +3979,22 @@ class _ProfileHeroCard extends StatelessWidget {
                     ),
                   ],
                 ),
-                child: Icon(
-                  Icons.person_rounded,
-                  color: const Color(0xFF8B5C41),
-                  size: avatarSize * 0.56,
+                child: ClipOval(
+                  child: hasAvatarUrl
+                      ? Image.network(
+                          avatarUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, error, stackTrace) => Icon(
+                            Icons.person_rounded,
+                            color: const Color(0xFF8B5C41),
+                            size: avatarSize * 0.56,
+                          ),
+                        )
+                      : Icon(
+                          Icons.person_rounded,
+                          color: const Color(0xFF8B5C41),
+                          size: avatarSize * 0.56,
+                        ),
                 ),
               ),
               Positioned(
@@ -3933,7 +4029,7 @@ class _ProfileHeroCard extends StatelessWidget {
                 ),
                 SizedBox(height: _clampDouble(4 * metrics.scale, 2, 4)),
                 Text(
-                  _profileEmailFromHandle(userHandle),
+                  displayEmail,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -3953,7 +4049,7 @@ class _ProfileHeroCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Text(
-                    'Rush Gold Member',
+                    displayAccountLabel,
                     style: TextStyle(
                       color: const Color(0xFFFF7E4D),
                       fontSize: _clampDouble(13 * metrics.scale, 11, 13),

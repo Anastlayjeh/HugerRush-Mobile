@@ -1,22 +1,31 @@
 import 'package:flutter/material.dart';
 
 class AuthSocialButton extends StatelessWidget {
-  const AuthSocialButton({required this.child, super.key});
+  const AuthSocialButton({required this.child, this.onPressed, super.key});
 
   final Widget child;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       width: 50,
       height: 50,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: const Color(0xFFF7F3EF),
-          shape: BoxShape.circle,
-          border: Border.all(color: const Color(0xFFE8DCCF)),
+      child: Material(
+        color: Colors.transparent,
+        shape: const CircleBorder(),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: const Color(0xFFF7F3EF),
+            shape: BoxShape.circle,
+            border: Border.all(color: const Color(0xFFE8DCCF)),
+          ),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onPressed,
+            child: Center(child: child),
+          ),
         ),
-        child: Center(child: child),
       ),
     );
   }

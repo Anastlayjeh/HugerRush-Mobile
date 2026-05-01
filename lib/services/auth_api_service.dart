@@ -23,6 +23,18 @@ class AuthApiService {
     );
   }
 
+  Future<AuthResult> loginWithGoogleIdToken({required String idToken}) {
+    final cleanedIdToken = idToken.trim();
+    if (cleanedIdToken.isEmpty) {
+      throw const AuthApiException('Google ID token is missing.');
+    }
+
+    return _sendAuthRequest(
+      endpoint: AppConfig.googleAuthEndpoint,
+      payload: <String, dynamic>{'id_token': cleanedIdToken},
+    );
+  }
+
   Future<AuthResult> register({required Map<String, dynamic> payload}) {
     return _sendAuthRequest(
       endpoint: '/api/v1/auth/register',

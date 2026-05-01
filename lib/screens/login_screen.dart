@@ -1,7 +1,9 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
+import '../config/app_config.dart';
 import '../models/auth_session.dart';
 import '../services/auth_api_service.dart';
 import '../services/auth_session_service.dart';
@@ -35,6 +37,8 @@ class _LoginScreenState extends State<LoginScreen> {
     'vendor',
     'merchant',
   };
+  static bool _googleSignInInitialized = false;
+  static Future<void>? _googleSignInInitialization;
 
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -43,6 +47,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _obscurePassword = true;
   bool _isSubmitting = false;
+  bool _isGoogleSubmitting = false;
 
   @override
   void initState() {
@@ -198,7 +203,16 @@ class _LoginScreenState extends State<LoginScreen> {
     return 'Restaurant';
   }
 
-  String _extractUserName(Map<String, dynamic>? user, {String? fallbackEmail}) {
+  String _extractUserName(
+    Map<String, dynamic>? user, {
+    String? fallbackEmail,
+    String? fallbackDisplayName,
+  }) {
+    final fallbackName = fallbackDisplayName?.trim();
+    if (fallbackName != null && fallbackName.isNotEmpty) {
+      return fallbackName;
+    }
+
     if (user == null) {
       if (fallbackEmail != null && fallbackEmail.contains('@')) {
         final prefix = fallbackEmail.split('@').first.trim();
@@ -241,15 +255,282 @@ class _LoginScreenState extends State<LoginScreen> {
     return 'FoodExplorer';
   }
 
+  String? _extractUserEmail(
+    Map<String, dynamic>? user, {
+    String? fallbackEmail,
+  }) {
+    if (user != null) {
+      final possibleKeys = ['email', 'mail', 'user_email', 'contact_email'];
+      for (final key in possibleKeys) {
+        final value = user[key];
+        if (value is String && value.trim().isNotEmpty) {
+          return value.trim();
+        }
+      }
+    }
+
+    final cleanedFallback = fallbackEmail?.trim();
+    if (cleanedFallback != null && cleanedFallback.isNotEmpty) {
+      return cleanedFallback;
+    }
+
+    return null;
+  }
+
+  String? _extractUserAvatarUrl(
+    Map<String, dynamic>? user, {
+    String? fallbackAvatarUrl,
+  }) {
+    if (user != null) {
+      final possibleKeys = [
+        'avatar_url',
+        'avatar',
+        'photo_url',
+        'photo',
+        'profile_photo_url',
+        'profile_image',
+        'image_url',
+        'image',
+        'picture',
+      ];
+      for (final key in possibleKeys) {
+        final value = user[key];
+        if (value is String && value.trim().isNotEmpty) {
+          return value.trim();
+        }
+      }
+    }
+
+    final cleanedFallback = fallbackAvatarUrl?.trim();
+    if (cleanedFallback != null && cleanedFallback.isNotEmpty) {
+      return cleanedFallback;
+    }
+
+    return null;
+  }
+
+  String? _extractUserAccountLabel(
+    Map<String, dynamic>? user, {
+    String? fallbackLabel,
+  }) {
+    final cleanedFallback = fallbackLabel?.trim();
+    if (cleanedFallback != null && cleanedFallback.isNotEmpty) {
+      return cleanedFallback;
+    }
+
+    if (user == null) {
+      return null;
+    }
+
+    final possibleKeys = [
+      'account_type',
+      'user_type',
+      'role',
+      'membership_tier',
+      'membership',
+      'plan',
+    ];
+    for (final key in possibleKeys) {
+      final value = user[key];
+      if (value is String && value.trim().isNotEmpty) {
+        return value.trim();
+      }
+    }
+
+    return null;
+  }
+
+  bool get _isBusy => _isSubmitting || _isGoogleSubmitting;
+
+  void _showErrorSnackBar(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: const Color(0xFFB7372B),
+      ),
+    );
+  }
+
+  Future<void> _handleSuccessfulAuth(
+    AuthResult result, {
+    String? fallbackEmail,
+    String? fallbackDisplayName,
+    String? fallbackAvatarUrl,
+    String? fallbackAccountLabel,
+  }) async {
+    final token = result.token?.trim();
+    if (token == null || token.isEmpty) {
+      throw const AuthApiException(
+        'Login response did not include an access token.',
+      );
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    final detectedRole =
+        _findRestaurantRole(result.user) ??
+        _normalizeRole(result.role) ??
+        _extractRoleFromMessage(result.message);
+
+    if (detectedRole != null && _isRestaurantRole(detectedRole)) {
+      final session = AuthSession(
+        token: token,
+        role: detectedRole,
+        restaurantName: _extractRestaurantName(result.user),
+        refreshToken: result.refreshToken?.trim(),
+        user: result.user,
+      );
+      await _authSessionService.saveSession(session);
+      if (!mounted) {
+        return;
+      }
+
+      final onAuthenticated = widget.onAuthenticated;
+      if (onAuthenticated != null) {
+        onAuthenticated(session);
+        return;
+      }
+
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) => RestaurantFeedScreen(
+            restaurantName: session.restaurantName,
+            authToken: session.token,
+            initialUserData: session.user,
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (detectedRole == null || _isNormalUserRole(detectedRole)) {
+      await _authSessionService.clearSession();
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) => UserHomeScreen(
+            userName: _extractUserName(
+              result.user,
+              fallbackEmail: fallbackEmail,
+              fallbackDisplayName: fallbackDisplayName,
+            ),
+            userEmail: _extractUserEmail(
+              result.user,
+              fallbackEmail: fallbackEmail,
+            ),
+            userAvatarUrl: _extractUserAvatarUrl(
+              result.user,
+              fallbackAvatarUrl: fallbackAvatarUrl,
+            ),
+            accountLabel: _extractUserAccountLabel(
+              result.user,
+              fallbackLabel: fallbackAccountLabel,
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+
+    final displayRole = detectedRole.replaceAll('_', ' ');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '${result.message} ($displayRole). Role is not mapped to a screen yet.',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _ensureGoogleSignInInitialized() async {
+    if (_googleSignInInitialized) {
+      return;
+    }
+
+    _googleSignInInitialization ??= GoogleSignIn.instance.initialize(
+      serverClientId: AppConfig.googleServerClientId.trim().isEmpty
+          ? null
+          : AppConfig.googleServerClientId.trim(),
+    );
+
+    try {
+      await _googleSignInInitialization;
+      _googleSignInInitialized = true;
+    } catch (_) {
+      _googleSignInInitialization = null;
+      rethrow;
+    }
+  }
+
+  Future<void> signInWithGoogle() async {
+    if (_isBusy) {
+      return;
+    }
+
+    setState(() => _isGoogleSubmitting = true);
+    try {
+      await _ensureGoogleSignInInitialized();
+      final googleAccount = await GoogleSignIn.instance.authenticate();
+      final idToken = googleAccount.authentication.idToken;
+      if (idToken == null || idToken.trim().isEmpty) {
+        throw const AuthApiException(
+          'Google ID token is missing. Verify Google OAuth setup and server client ID.',
+        );
+      }
+
+      final result = await _authApiService.loginWithGoogleIdToken(
+        idToken: idToken,
+      );
+      await _handleSuccessfulAuth(
+        result,
+        fallbackEmail: googleAccount.email,
+        fallbackDisplayName: googleAccount.displayName,
+        fallbackAvatarUrl: googleAccount.photoUrl,
+        fallbackAccountLabel: 'Google Account',
+      );
+    } on GoogleSignInException catch (e) {
+      debugPrint(
+        'Google sign-in error: code=${e.code.name}, description=${e.description}, details=${e.details}',
+      );
+      if (e.code == GoogleSignInExceptionCode.canceled ||
+          e.code == GoogleSignInExceptionCode.interrupted) {
+        _showErrorSnackBar(
+          'Google sign-in was canceled or blocked by configuration. '
+          'If this happens right after choosing an account, verify OAuth package name and SHA fingerprints.',
+        );
+      } else if (e.code == GoogleSignInExceptionCode.clientConfigurationError) {
+        _showErrorSnackBar(
+          'Google sign-in configuration is invalid. Check package/bundle ID and OAuth client setup.',
+        );
+      } else {
+        _showErrorSnackBar('Google sign-in failed. Please try again.');
+      }
+    } on AuthApiException catch (e) {
+      _showErrorSnackBar(e.message);
+    } on AuthSessionException catch (e) {
+      _showErrorSnackBar(e.message);
+    } finally {
+      if (mounted) {
+        setState(() => _isGoogleSubmitting = false);
+      }
+    }
+  }
+
   Future<void> _submit() async {
     final validationError = _validateInputs();
     if (validationError != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(validationError),
-          backgroundColor: const Color(0xFFB7372B),
-        ),
-      );
+      _showErrorSnackBar(validationError);
+      return;
+    }
+
+    if (_isBusy) {
       return;
     }
 
@@ -259,100 +540,15 @@ class _LoginScreenState extends State<LoginScreen> {
         email: _emailController.text,
         password: _passwordController.text,
       );
-
-      final token = result.token?.trim();
-      if (token == null || token.isEmpty) {
-        throw const AuthApiException(
-          'Login response did not include an access token.',
-        );
-      }
-
-      if (!mounted) {
-        return;
-      }
-
-      final detectedRole =
-          _findRestaurantRole(result.user) ??
-          _normalizeRole(result.role) ??
-          _extractRoleFromMessage(result.message);
-
-      if (detectedRole != null && _isRestaurantRole(detectedRole)) {
-        final session = AuthSession(
-          token: token,
-          role: detectedRole,
-          restaurantName: _extractRestaurantName(result.user),
-          refreshToken: result.refreshToken?.trim(),
-          user: result.user,
-        );
-        await _authSessionService.saveSession(session);
-        if (!mounted) {
-          return;
-        }
-
-        final onAuthenticated = widget.onAuthenticated;
-        if (onAuthenticated != null) {
-          onAuthenticated(session);
-          return;
-        }
-
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute<void>(
-            builder: (_) => RestaurantFeedScreen(
-              restaurantName: session.restaurantName,
-              authToken: session.token,
-              initialUserData: session.user,
-            ),
-          ),
-        );
-        return;
-      }
-
-      if (detectedRole == null || _isNormalUserRole(detectedRole)) {
-        await _authSessionService.clearSession();
-        if (!mounted) {
-          return;
-        }
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute<void>(
-            builder: (_) => UserHomeScreen(
-              userName: _extractUserName(
-                result.user,
-                fallbackEmail: _emailController.text.trim(),
-              ),
-            ),
-          ),
-        );
-        return;
-      }
-
-      final displayRole = detectedRole.replaceAll('_', ' ');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${result.message} ($displayRole). Role is not mapped to a screen yet.',
-          ),
-        ),
+      await _handleSuccessfulAuth(
+        result,
+        fallbackEmail: _emailController.text.trim(),
+        fallbackAccountLabel: 'Customer Account',
       );
     } on AuthApiException catch (e) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.message),
-          backgroundColor: const Color(0xFFB7372B),
-        ),
-      );
+      _showErrorSnackBar(e.message);
     } on AuthSessionException catch (e) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.message),
-          backgroundColor: const Color(0xFFB7372B),
-        ),
-      );
+      _showErrorSnackBar(e.message);
     } finally {
       if (mounted) {
         setState(() => _isSubmitting = false);
@@ -468,7 +664,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         width: double.infinity,
                         height: 56,
                         child: FilledButton(
-                          onPressed: _isSubmitting ? null : _submit,
+                          onPressed: _isBusy ? null : _submit,
                           style: FilledButton.styleFrom(
                             backgroundColor: const Color(0xFFFF7E4D),
                             foregroundColor: Colors.white,
@@ -524,12 +720,24 @@ class _LoginScreenState extends State<LoginScreen> {
                         ],
                       ),
                       const SizedBox(height: 26),
-                      const Row(
+                      Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          AuthSocialButton(child: GoogleMark()),
-                          SizedBox(width: 16),
                           AuthSocialButton(
+                            onPressed: _isBusy ? null : signInWithGoogle,
+                            child: _isGoogleSubmitting
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Color(0xFF2E2521),
+                                    ),
+                                  )
+                                : const GoogleMark(),
+                          ),
+                          const SizedBox(width: 16),
+                          const AuthSocialButton(
                             child: Icon(
                               Icons.apple,
                               color: Colors.black,

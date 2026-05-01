@@ -10,6 +10,23 @@ class AppConfig {
     defaultValue: '',
   );
 
+  /// Google OAuth Web client ID used for ID token issuance.
+  /// Override with:
+  /// flutter run --dart-define=GOOGLE_SERVER_CLIENT_ID=...
+  static const String googleServerClientId = String.fromEnvironment(
+    'GOOGLE_SERVER_CLIENT_ID',
+    defaultValue:
+        '103967878021-8jmkg6po14bdoja73gte66blb6e9ube6.apps.googleusercontent.com',
+  );
+
+  /// Override if your backend uses a different route.
+  /// Example:
+  /// flutter run --dart-define=GOOGLE_AUTH_ENDPOINT=/api/v1/auth/google
+  static const String googleAuthEndpoint = String.fromEnvironment(
+    'GOOGLE_AUTH_ENDPOINT',
+    defaultValue: '/api/auth/google',
+  );
+
   static String get apiBaseUrl {
     final configured = _configuredApiBaseUrl.trim();
     if (configured.isNotEmpty) {
@@ -51,6 +68,14 @@ class AppConfig {
       throw StateError(
         'Release builds require HTTPS API_BASE_URL. '
         'Current value: "$apiBaseUrl".',
+      );
+    }
+
+    final googleEndpoint = googleAuthEndpoint.trim();
+    if (googleEndpoint.isEmpty || !googleEndpoint.startsWith('/')) {
+      throw StateError(
+        'GOOGLE_AUTH_ENDPOINT must be a non-empty path starting with "/". '
+        'Current value: "$googleEndpoint".',
       );
     }
   }
