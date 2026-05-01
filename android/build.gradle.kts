@@ -5,13 +5,10 @@ allprojects {
     }
 }
 
-val localBuildRoot = File(
-    System.getenv("LOCALAPPDATA") ?: System.getProperty("java.io.tmpdir"),
-    "HungerRushMobile/gradle-build",
-)
-val newBuildDir: Directory = rootProject.layout.dir(
-    rootProject.providers.provider { localBuildRoot },
-).get()
+val newBuildDir: Directory =
+    rootProject.layout.buildDirectory
+        .dir("../../build")
+        .get()
 rootProject.layout.buildDirectory.value(newBuildDir)
 
 subprojects {
