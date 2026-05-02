@@ -508,6 +508,17 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
       caption: post.caption,
       followersCountLabel:
           '${_formatCompactCount(post.followersCount)} followers',
+      allowAddToCart: true,
+      onAddToCart: (item) {
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        if (messenger == null) {
+          return;
+        }
+        messenger.hideCurrentSnackBar();
+        messenger.showSnackBar(
+          SnackBar(content: Text('${item.title} added to cart')),
+        );
+      },
     );
   }
 
@@ -2102,24 +2113,26 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
   int? _maximumPriceTierFilter;
 
   List<_DiscoverSpotData> get _filteredPopularSpots {
-    return _DiscoverTabBody._popularSpots.where((spot) {
-      if (_activeCuisineFilters.isNotEmpty &&
-          !_activeCuisineFilters.contains(spot.categoryTitle)) {
-        return false;
-      }
-      if (spot.ratingValue < _minimumRatingFilter) {
-        return false;
-      }
-      if (_maximumDeliveryMinutesFilter != null &&
-          spot.deliveryMinutes > _maximumDeliveryMinutesFilter!) {
-        return false;
-      }
-      if (_maximumPriceTierFilter != null &&
-          spot.priceTier > _maximumPriceTierFilter!) {
-        return false;
-      }
-      return true;
-    }).toList(growable: false);
+    return _DiscoverTabBody._popularSpots
+        .where((spot) {
+          if (_activeCuisineFilters.isNotEmpty &&
+              !_activeCuisineFilters.contains(spot.categoryTitle)) {
+            return false;
+          }
+          if (spot.ratingValue < _minimumRatingFilter) {
+            return false;
+          }
+          if (_maximumDeliveryMinutesFilter != null &&
+              spot.deliveryMinutes > _maximumDeliveryMinutesFilter!) {
+            return false;
+          }
+          if (_maximumPriceTierFilter != null &&
+              spot.priceTier > _maximumPriceTierFilter!) {
+            return false;
+          }
+          return true;
+        })
+        .toList(growable: false);
   }
 
   List<_DiscoverSpotData> _spotsForCuisine(String cuisineTitle) {
@@ -2219,37 +2232,39 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
-                      children: _DiscoverTabBody._categories.map((category) {
-                        final isSelected = selectedCuisines.contains(
-                          category.title,
-                        );
-                        return FilterChip(
-                          label: Text(category.title),
-                          selected: isSelected,
-                          onSelected: (selected) {
-                            setModalState(() {
-                              if (selected) {
-                                selectedCuisines.add(category.title);
-                              } else {
-                                selectedCuisines.remove(category.title);
-                              }
-                            });
-                          },
-                          selectedColor: const Color(0xFFFFE2D0),
-                          showCheckmark: false,
-                          labelStyle: TextStyle(
-                            color: isSelected
-                                ? const Color(0xFFFF7E4D)
-                                : const Color(0xFF725F53),
-                            fontWeight: FontWeight.w700,
-                          ),
-                          side: const BorderSide(color: Color(0xFFEAD9CB)),
-                          backgroundColor: const Color(0xFFFFF8F2),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        );
-                      }).toList(growable: false),
+                      children: _DiscoverTabBody._categories
+                          .map((category) {
+                            final isSelected = selectedCuisines.contains(
+                              category.title,
+                            );
+                            return FilterChip(
+                              label: Text(category.title),
+                              selected: isSelected,
+                              onSelected: (selected) {
+                                setModalState(() {
+                                  if (selected) {
+                                    selectedCuisines.add(category.title);
+                                  } else {
+                                    selectedCuisines.remove(category.title);
+                                  }
+                                });
+                              },
+                              selectedColor: const Color(0xFFFFE2D0),
+                              showCheckmark: false,
+                              labelStyle: TextStyle(
+                                color: isSelected
+                                    ? const Color(0xFFFF7E4D)
+                                    : const Color(0xFF725F53),
+                                fontWeight: FontWeight.w700,
+                              ),
+                              side: const BorderSide(color: Color(0xFFEAD9CB)),
+                              backgroundColor: const Color(0xFFFFF8F2),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            );
+                          })
+                          .toList(growable: false),
                     ),
                     const SizedBox(height: 14),
                     const Text(
@@ -2270,9 +2285,8 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                             ChoiceChip(
                               label: Text(ratingLabelFor(value)),
                               selected: isSelected,
-                              onSelected: (_) => setModalState(
-                                () => minimumRating = value,
-                              ),
+                              onSelected: (_) =>
+                                  setModalState(() => minimumRating = value),
                               selectedColor: const Color(0xFFFFE2D0),
                               labelStyle: TextStyle(
                                 color: isSelected
@@ -2280,9 +2294,7 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                                     : const Color(0xFF725F53),
                                 fontWeight: FontWeight.w700,
                               ),
-                              side: const BorderSide(
-                                color: Color(0xFFEAD9CB),
-                              ),
+                              side: const BorderSide(color: Color(0xFFEAD9CB)),
                               backgroundColor: const Color(0xFFFFF8F2),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(16),
@@ -2290,11 +2302,7 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                             ),
                           );
                         }
-                        return Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: chips,
-                        );
+                        return Wrap(spacing: 8, runSpacing: 8, children: chips);
                       },
                     ),
                     const SizedBox(height: 14),
@@ -2326,9 +2334,7 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                                     : const Color(0xFF725F53),
                                 fontWeight: FontWeight.w700,
                               ),
-                              side: const BorderSide(
-                                color: Color(0xFFEAD9CB),
-                              ),
+                              side: const BorderSide(color: Color(0xFFEAD9CB)),
                               backgroundColor: const Color(0xFFFFF8F2),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(16),
@@ -2336,11 +2342,7 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                             ),
                           );
                         }
-                        return Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: chips,
-                        );
+                        return Wrap(spacing: 8, runSpacing: 8, children: chips);
                       },
                     ),
                     const SizedBox(height: 14),
@@ -2362,9 +2364,8 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                             ChoiceChip(
                               label: Text(priceLabelFor(value)),
                               selected: isSelected,
-                              onSelected: (_) => setModalState(
-                                () => maximumPriceTier = value,
-                              ),
+                              onSelected: (_) =>
+                                  setModalState(() => maximumPriceTier = value),
                               selectedColor: const Color(0xFFFFE2D0),
                               labelStyle: TextStyle(
                                 color: isSelected
@@ -2372,9 +2373,7 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                                     : const Color(0xFF725F53),
                                 fontWeight: FontWeight.w700,
                               ),
-                              side: const BorderSide(
-                                color: Color(0xFFEAD9CB),
-                              ),
+                              side: const BorderSide(color: Color(0xFFEAD9CB)),
                               backgroundColor: const Color(0xFFFFF8F2),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(16),
@@ -2382,11 +2381,7 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                             ),
                           );
                         }
-                        return Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: chips,
-                        );
+                        return Wrap(spacing: 8, runSpacing: 8, children: chips);
                       },
                     ),
                     const SizedBox(height: 8),
@@ -2495,17 +2490,14 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
     BuildContext context,
     _DiscoverSpotData spot,
   ) async {
-    await _openDiscoverRestaurantProfile(
-      context,
-      spot,
-      initialTabIndex: 1,
-    );
+    await _openDiscoverRestaurantProfile(context, spot, initialTabIndex: 1);
   }
 
   Future<void> _openPopularSpotList(BuildContext context) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => _DiscoverPopularSpotsScreen(spots: _filteredPopularSpots),
+        builder: (_) =>
+            _DiscoverPopularSpotsScreen(spots: _filteredPopularSpots),
       ),
     );
   }
@@ -2527,13 +2519,6 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
       isScrollControlled: true,
       builder: (context) => _DiscoverDealDetailsSheet(data: deal),
     );
-  }
-
-  void _startExploring(BuildContext context) {
-    if (_DiscoverTabBody._categories.isEmpty) {
-      return;
-    }
-    _openCuisineDetails(context, _DiscoverTabBody._categories.first);
   }
 
   @override
@@ -2652,18 +2637,6 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              _DiscoverFeatureCard(
-                                metrics: metrics,
-                                onStartExploring: () =>
-                                    _startExploring(context),
-                              ),
-                              SizedBox(
-                                height: _clampDouble(
-                                  24 * metrics.scale,
-                                  18,
-                                  24,
-                                ),
-                              ),
                               _ProfileSectionHeader(
                                 title: 'Browse Cuisines',
                                 actionLabel: 'View Map',
@@ -2685,7 +2658,8 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                                 child: ListView.separated(
                                   scrollDirection: Axis.horizontal,
                                   physics: const BouncingScrollPhysics(),
-                                  itemCount: _DiscoverTabBody._categories.length,
+                                  itemCount:
+                                      _DiscoverTabBody._categories.length,
                                   separatorBuilder: (context, index) =>
                                       SizedBox(
                                         width: _clampDouble(
@@ -2700,8 +2674,10 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                                     return _DiscoverCuisineChip(
                                       data: category,
                                       metrics: metrics,
-                                      onTap: () =>
-                                          _openCuisineDetails(context, category),
+                                      onTap: () => _openCuisineDetails(
+                                        context,
+                                        category,
+                                      ),
                                     );
                                   },
                                 ),
@@ -2716,7 +2692,8 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                               _ProfileSectionHeader(
                                 title: 'Popular Near You',
                                 actionLabel: 'See All',
-                                onActionTap: () => _openPopularSpotList(context),
+                                onActionTap: () =>
+                                    _openPopularSpotList(context),
                               ),
                               SizedBox(
                                 height: _clampDouble(
@@ -2764,16 +2741,12 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                                       return _DiscoverSpotCard(
                                         data: spot,
                                         metrics: metrics,
-                                        isFavorite: _favoriteSpotTitles.contains(
-                                          spot.title,
-                                        ),
+                                        isFavorite: _favoriteSpotTitles
+                                            .contains(spot.title),
                                         onTap: () =>
                                             _openPopularSpot(context, spot),
                                         onViewMenuTap: () =>
-                                            _openPopularSpotMenu(
-                                              context,
-                                              spot,
-                                            ),
+                                            _openPopularSpotMenu(context, spot),
                                         onFavoriteTap: () =>
                                             _toggleSpotFavorite(spot),
                                       );
@@ -2802,8 +2775,8 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                                   children: List.generate(
                                     _DiscoverTabBody._quickCravings.length,
                                     (index) {
-                                      final item =
-                                          _DiscoverTabBody._quickCravings[index];
+                                      final item = _DiscoverTabBody
+                                          ._quickCravings[index];
                                       return Column(
                                         children: [
                                           _DiscoverDealTile(
@@ -2970,6 +2943,24 @@ class _OrdersTabBody extends StatelessWidget {
       status: _OrderStatus.delivered,
       imageUrl:
           'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=900&q=80',
+      reorderItems: [
+        _CartLineItemData(
+          title: 'Angus Burger Combo',
+          subtitle: 'Burger Station - No onions',
+          imageUrl:
+              'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=900&q=80',
+          price: 12.50,
+          quantity: 1,
+        ),
+        _CartLineItemData(
+          title: 'Cajun Fries',
+          subtitle: 'Large - Extra crispy',
+          imageUrl:
+              'https://images.unsplash.com/photo-1573080496219-bb080dd4f877?auto=format&fit=crop&w=900&q=80',
+          price: 4.80,
+          quantity: 1,
+        ),
+      ],
     ),
     _PastOrderEntryData(
       title: 'Napoli Fire',
@@ -2979,6 +2970,16 @@ class _OrdersTabBody extends StatelessWidget {
       status: _OrderStatus.delivered,
       imageUrl:
           'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=900&q=80',
+      reorderItems: [
+        _CartLineItemData(
+          title: 'Pepperoni Feast',
+          subtitle: 'Napoli Fire - Extra mozzarella',
+          imageUrl:
+              'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=900&q=80',
+          price: 14.00,
+          quantity: 1,
+        ),
+      ],
     ),
     _PastOrderEntryData(
       title: 'Bean & Brew',
@@ -2988,39 +2989,186 @@ class _OrdersTabBody extends StatelessWidget {
       status: _OrderStatus.rejected,
       imageUrl:
           'https://images.unsplash.com/photo-1509042239860-f550ce710b93?auto=format&fit=crop&w=900&q=80',
+      reorderItems: [
+        _CartLineItemData(
+          title: 'Iced Latte',
+          subtitle: 'Bean & Brew - Medium',
+          imageUrl:
+              'https://images.unsplash.com/photo-1517701604599-bb29b565090c?auto=format&fit=crop&w=900&q=80',
+          price: 4.20,
+          quantity: 1,
+        ),
+        _CartLineItemData(
+          title: 'Brownie',
+          subtitle: 'Chocolate',
+          imageUrl:
+              'https://images.unsplash.com/photo-1606313564200-e75d5e30476c?auto=format&fit=crop&w=900&q=80',
+          price: 3.10,
+          quantity: 1,
+        ),
+        _CartLineItemData(
+          title: 'Turkey Sandwich',
+          subtitle: 'Whole wheat',
+          imageUrl:
+              'https://images.unsplash.com/photo-1528735602780-2552fd46c7af?auto=format&fit=crop&w=900&q=80',
+          price: 5.50,
+          quantity: 1,
+        ),
+      ],
     ),
   ];
 
-  static List<DemoOrder> _buildOrderHistoryItems() {
-    return List<DemoOrder>.generate(_pastOrders.length, (index) {
-      final item = _pastOrders[index];
-      final completed =
-          item.status == _OrderStatus.delivered ||
-          item.status == _OrderStatus.canceled ||
-          item.status == _OrderStatus.rejected;
-      return DemoOrder(
-        id: '#${4700 - index}',
-        customerName: item.title,
-        itemSummary: item.summary,
-        etaLabel: item.dateLabel,
-        statusLabel: _orderStatusLabel(item.status),
-        channelLabel: 'Delivery',
-        highlighted: false,
-        totalLabel: item.totalLabel,
-        completed: completed,
-      );
-    });
-  }
+  static const List<_OrderReceiptData> _orderReceipts = [
+    _OrderReceiptData(
+      orderId: 'HR-2048',
+      restaurantName: 'Burger Station',
+      summary: '2 items - Angus burger and Cajun fries',
+      placedAtLabel: 'Today, 12:24 PM',
+      status: _OrderStatus.delivered,
+      imageUrl:
+          'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=900&q=80',
+      paymentMethodLabel: 'Paid online',
+      deliveryFee: 2.75,
+      serviceFee: 1.25,
+      discountPercent: 0,
+      loyaltyPointsUsed: 0,
+      loyaltyDiscountUsd: 0,
+      items: [
+        _OrderReceiptLineItemData(
+          title: 'Angus Burger Combo',
+          subtitle: 'No onions',
+          quantity: 1,
+          unitPrice: 12.50,
+        ),
+        _OrderReceiptLineItemData(
+          title: 'Cajun Fries',
+          subtitle: 'Large, extra crispy',
+          quantity: 1,
+          unitPrice: 4.80,
+        ),
+        _OrderReceiptLineItemData(
+          title: 'Cola',
+          subtitle: 'Regular',
+          quantity: 2,
+          unitPrice: 1.60,
+        ),
+      ],
+    ),
+    _OrderReceiptData(
+      orderId: 'HR-2047',
+      restaurantName: 'Napoli Fire',
+      summary: '1 item - Pepperoni feast with extra mozzarella',
+      placedAtLabel: 'Yesterday, 7:18 PM',
+      status: _OrderStatus.delivered,
+      imageUrl:
+          'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=900&q=80',
+      paymentMethodLabel: 'On delivery',
+      deliveryFee: 2.25,
+      serviceFee: 1.15,
+      discountPercent: 0,
+      loyaltyPointsUsed: 0,
+      loyaltyDiscountUsd: 0,
+      items: [
+        _OrderReceiptLineItemData(
+          title: 'Pepperoni Feast',
+          subtitle: 'Extra mozzarella',
+          quantity: 1,
+          unitPrice: 14.00,
+        ),
+        _OrderReceiptLineItemData(
+          title: 'Garlic Bread',
+          subtitle: '4 pieces',
+          quantity: 1,
+          unitPrice: 1.50,
+        ),
+      ],
+    ),
+    _OrderReceiptData(
+      orderId: 'HR-2046',
+      restaurantName: 'Bean & Brew',
+      summary: '3 items - iced latte, brownie, and turkey sandwich',
+      placedAtLabel: 'Apr 25, 9:06 AM',
+      status: _OrderStatus.rejected,
+      imageUrl:
+          'https://images.unsplash.com/photo-1509042239860-f550ce710b93?auto=format&fit=crop&w=900&q=80',
+      paymentMethodLabel: 'Refunded',
+      deliveryFee: 2.30,
+      serviceFee: 1.30,
+      discountPercent: 0,
+      loyaltyPointsUsed: 0,
+      loyaltyDiscountUsd: 0,
+      items: [
+        _OrderReceiptLineItemData(
+          title: 'Iced Latte',
+          subtitle: 'Medium',
+          quantity: 1,
+          unitPrice: 4.20,
+        ),
+        _OrderReceiptLineItemData(
+          title: 'Brownie',
+          subtitle: 'Chocolate',
+          quantity: 1,
+          unitPrice: 3.10,
+        ),
+        _OrderReceiptLineItemData(
+          title: 'Turkey Sandwich',
+          subtitle: 'Whole wheat',
+          quantity: 1,
+          unitPrice: 5.50,
+        ),
+      ],
+    ),
+  ];
+
+  static const List<_CartLineItemData> _cartItems = [
+    _CartLineItemData(
+      title: 'Angus Burger Combo',
+      subtitle: 'Burger Station • No onions',
+      imageUrl:
+          'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=900&q=80',
+      price: 12.50,
+      quantity: 1,
+    ),
+    _CartLineItemData(
+      title: 'Cajun Fries',
+      subtitle: 'Large • Extra crispy',
+      imageUrl:
+          'https://images.unsplash.com/photo-1573080496219-bb080dd4f877?auto=format&fit=crop&w=900&q=80',
+      price: 4.80,
+      quantity: 1,
+    ),
+    _CartLineItemData(
+      title: 'Iced Latte',
+      subtitle: 'Bean & Brew • Medium',
+      imageUrl:
+          'https://images.unsplash.com/photo-1517701604599-bb29b565090c?auto=format&fit=crop&w=900&q=80',
+      price: 5.25,
+      quantity: 2,
+    ),
+  ];
 
   void _openOrderHistory(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => OrderListScreen(
-          title: 'Order History',
-          orders: _buildOrderHistoryItems(),
-        ),
+        builder: (_) => const _OrdersReceiptsScreen(receipts: _orderReceipts),
       ),
     );
+  }
+
+  void _openCart(
+    BuildContext context, {
+    List<_CartLineItemData>? initialItems,
+  }) {
+    final cartItems = initialItems ?? _cartItems;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _OrdersCartScreen(initialItems: cartItems),
+      ),
+    );
+  }
+
+  void _reorderPastOrder(BuildContext context, _PastOrderEntryData order) {
+    _openCart(context, initialItems: order.reorderItems);
   }
 
   @override
@@ -3105,6 +3253,14 @@ class _OrdersTabBody extends StatelessWidget {
                             metrics: metrics,
                             onTap: () => _openOrderHistory(context),
                           ),
+                          SizedBox(
+                            width: _clampDouble(10 * metrics.scale, 8, 10),
+                          ),
+                          _ProfileIconButton(
+                            icon: Icons.shopping_cart_checkout_rounded,
+                            metrics: metrics,
+                            onTap: () => _openCart(context),
+                          ),
                         ],
                       ),
                       SizedBox(
@@ -3118,7 +3274,6 @@ class _OrdersTabBody extends StatelessWidget {
                             children: [
                               _OrdersHeroCard(
                                 metrics: metrics,
-                                greetingName: greetingName,
                                 metricsData: _heroMetrics,
                               ),
                               SizedBox(
@@ -3178,6 +3333,10 @@ class _OrdersTabBody extends StatelessWidget {
                                     child: _PastOrderCard(
                                       data: _pastOrders[index],
                                       metrics: metrics,
+                                      onReorder: () => _reorderPastOrder(
+                                        context,
+                                        _pastOrders[index],
+                                      ),
                                     ),
                                   );
                                 }),
@@ -3189,17 +3348,6 @@ class _OrdersTabBody extends StatelessWidget {
                                   26,
                                 ),
                               ),
-                              const _ProfileSectionHeader(
-                                title: 'Reorder Tonight',
-                              ),
-                              SizedBox(
-                                height: _clampDouble(
-                                  14 * metrics.scale,
-                                  10,
-                                  14,
-                                ),
-                              ),
-                              _OrdersRewardCard(metrics: metrics),
                               SizedBox(
                                 height: _clampDouble(12 * metrics.scale, 8, 12),
                               ),
@@ -3225,6 +3373,2188 @@ class _OrdersTabBody extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+class _OrdersReceiptsScreen extends StatelessWidget {
+  const _OrdersReceiptsScreen({required this.receipts});
+
+  final List<_OrderReceiptData> receipts;
+
+  @override
+  Widget build(BuildContext context) {
+    final viewport = MediaQuery.sizeOf(context);
+    final metrics = _ResponsiveMetrics.from(
+      BoxConstraints(maxWidth: viewport.width, maxHeight: viewport.height),
+    );
+    return Scaffold(
+      backgroundColor: const Color(0xFFFFFBF7),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFFFFBF7),
+        surfaceTintColor: Colors.transparent,
+        title: const Text(
+          'Order Receipts',
+          style: TextStyle(
+            color: Color(0xFF231A16),
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      ),
+      body: SafeArea(
+        child: receipts.isEmpty
+            ? const Center(
+                child: Text(
+                  'No receipts available yet.',
+                  style: TextStyle(
+                    color: Color(0xFF7D6C60),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              )
+            : ListView.separated(
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                itemCount: receipts.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 10),
+                itemBuilder: (context, index) {
+                  final receipt = receipts[index];
+                  return _OrderReceiptListTile(
+                    receipt: receipt,
+                    metrics: metrics,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) =>
+                              _OrderReceiptDetailsScreen(receipt: receipt),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+      ),
+    );
+  }
+}
+
+class _OrderReceiptListTile extends StatelessWidget {
+  const _OrderReceiptListTile({
+    required this.receipt,
+    required this.metrics,
+    required this.onTap,
+  });
+
+  final _OrderReceiptData receipt;
+  final _ResponsiveMetrics metrics;
+  final VoidCallback onTap;
+
+  String _formatUsd(double value) => '\$${value.toStringAsFixed(2)}';
+
+  @override
+  Widget build(BuildContext context) {
+    final imageSize = _clampDouble(76 * metrics.scale, 64, 76);
+    return _ProfilePanel(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(26),
+          child: Padding(
+            padding: EdgeInsets.all(_clampDouble(14 * metrics.scale, 12, 14)),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _FoodThumb(imageUrl: receipt.imageUrl, size: imageSize),
+                SizedBox(width: _clampDouble(12 * metrics.scale, 10, 12)),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        receipt.restaurantName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: const Color(0xFF231A16),
+                          fontSize: _clampDouble(17 * metrics.scale, 14, 17),
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      SizedBox(height: _clampDouble(4 * metrics.scale, 2, 4)),
+                      Text(
+                        '${receipt.orderId} - ${receipt.summary}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: const Color(0xFF7E6D62),
+                          fontSize: _clampDouble(
+                            12.8 * metrics.scale,
+                            11,
+                            12.8,
+                          ),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      SizedBox(height: _clampDouble(10 * metrics.scale, 8, 10)),
+                      Wrap(
+                        spacing: _clampDouble(8 * metrics.scale, 6, 8),
+                        runSpacing: _clampDouble(8 * metrics.scale, 6, 8),
+                        children: [
+                          _OrdersInfoChip(
+                            label: receipt.placedAtLabel,
+                            icon: Icons.schedule_rounded,
+                            metrics: metrics,
+                          ),
+                          _OrderStatusPill(
+                            status: receipt.status,
+                            metrics: metrics,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(width: _clampDouble(8 * metrics.scale, 6, 8)),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      _formatUsd(receipt.totalUsd),
+                      style: TextStyle(
+                        color: const Color(0xFF231A16),
+                        fontSize: _clampDouble(17 * metrics.scale, 14, 17),
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    SizedBox(height: _clampDouble(10 * metrics.scale, 8, 10)),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      color: const Color(0xFFB19D8F),
+                      size: _clampDouble(24 * metrics.scale, 20, 24),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OrderReceiptDetailsScreen extends StatelessWidget {
+  const _OrderReceiptDetailsScreen({required this.receipt});
+
+  static const double _usdToLbpRate = 89500;
+
+  final _OrderReceiptData receipt;
+
+  String _formatUsd(double value) => '\$${value.toStringAsFixed(2)}';
+
+  String _formatLbp(double usdValue) {
+    final lbpValue = (usdValue * _usdToLbpRate).round();
+    final withCommas = lbpValue.toString().replaceAllMapped(
+      RegExp(r'\B(?=(\d{3})+(?!\d))'),
+      (m) => ',',
+    );
+    return '$withCommas LBP';
+  }
+
+  List<_OrderTimelineStepData> _buildStages() {
+    if (receipt.status == _OrderStatus.canceled ||
+        receipt.status == _OrderStatus.rejected) {
+      final steps = List<_OrderTimelineStepData>.generate(
+        _orderStatusFlow.length,
+        (index) {
+          final stepStatus = _orderStatusFlow[index];
+          return _OrderTimelineStepData(
+            status: stepStatus,
+            title: _orderStatusLabel(stepStatus),
+            subtitle: _orderStatusDescription(stepStatus),
+            icon: _orderStatusIcon(stepStatus),
+            isComplete: index == 0,
+            isCurrent: false,
+          );
+        },
+      );
+      steps.add(
+        _OrderTimelineStepData(
+          status: receipt.status,
+          title: _orderStatusLabel(receipt.status),
+          subtitle: _orderStatusDescription(receipt.status),
+          icon: _orderStatusIcon(receipt.status),
+          isComplete: false,
+          isCurrent: true,
+        ),
+      );
+      return steps;
+    }
+
+    final rawIndex = _orderStatusFlow.indexOf(receipt.status);
+    final currentIndex = rawIndex.clamp(0, _orderStatusFlow.length - 1).toInt();
+    return List<_OrderTimelineStepData>.generate(_orderStatusFlow.length, (
+      index,
+    ) {
+      final stepStatus = _orderStatusFlow[index];
+      return _OrderTimelineStepData(
+        status: stepStatus,
+        title: _orderStatusLabel(stepStatus),
+        subtitle: _orderStatusDescription(stepStatus),
+        icon: _orderStatusIcon(stepStatus),
+        isComplete: index < currentIndex,
+        isCurrent: index == currentIndex,
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final viewport = MediaQuery.sizeOf(context);
+    final metrics = _ResponsiveMetrics.from(
+      BoxConstraints(maxWidth: viewport.width, maxHeight: viewport.height),
+    );
+    final stages = _buildStages();
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFFFFBF7),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFFFFBF7),
+        surfaceTintColor: Colors.transparent,
+        title: Text(
+          'Receipt #${receipt.orderId}',
+          style: const TextStyle(
+            color: Color(0xFF231A16),
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      ),
+      body: SafeArea(
+        child: ListView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          children: [
+            _ProfilePanel(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _FoodThumb(
+                      imageUrl: receipt.imageUrl,
+                      size: _clampDouble(82 * metrics.scale, 70, 82),
+                    ),
+                    SizedBox(width: _clampDouble(12 * metrics.scale, 10, 12)),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            receipt.restaurantName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: const Color(0xFF231A16),
+                              fontSize: _clampDouble(
+                                19 * metrics.scale,
+                                16,
+                                19,
+                              ),
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          SizedBox(
+                            height: _clampDouble(4 * metrics.scale, 2, 4),
+                          ),
+                          Text(
+                            receipt.summary,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: const Color(0xFF7D6C60),
+                              fontSize: _clampDouble(
+                                13.5 * metrics.scale,
+                                11,
+                                13.5,
+                              ),
+                              fontWeight: FontWeight.w600,
+                              height: 1.3,
+                            ),
+                          ),
+                          SizedBox(
+                            height: _clampDouble(10 * metrics.scale, 8, 10),
+                          ),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              _OrdersInfoChip(
+                                label: receipt.placedAtLabel,
+                                icon: Icons.schedule_rounded,
+                                metrics: metrics,
+                              ),
+                              _OrdersInfoChip(
+                                label: receipt.paymentMethodLabel,
+                                icon: Icons.payments_rounded,
+                                metrics: metrics,
+                              ),
+                              _OrderStatusPill(
+                                status: receipt.status,
+                                metrics: metrics,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            _CheckoutSectionCard(
+              title: 'Order Stages',
+              child: Column(
+                children: List.generate(stages.length, (index) {
+                  return Padding(
+                    padding: EdgeInsets.only(
+                      bottom: index == stages.length - 1 ? 0 : 10,
+                    ),
+                    child: _OrderTimelineRow(
+                      data: stages[index],
+                      metrics: metrics,
+                    ),
+                  );
+                }),
+              ),
+            ),
+            const SizedBox(height: 12),
+            _CheckoutSectionCard(
+              title: 'Items Ordered (${receipt.totalItems})',
+              child: Column(
+                children: List.generate(receipt.items.length, (index) {
+                  return Padding(
+                    padding: EdgeInsets.only(
+                      bottom: index == receipt.items.length - 1 ? 0 : 8,
+                    ),
+                    child: _OrderReceiptItemTile(item: receipt.items[index]),
+                  );
+                }),
+              ),
+            ),
+            const SizedBox(height: 12),
+            _CheckoutSectionCard(
+              title: 'Receipt Details',
+              child: Column(
+                children: [
+                  _OrdersPriceRow(
+                    label: 'Subtotal',
+                    value: _formatUsd(receipt.subtotalUsd),
+                  ),
+                  const SizedBox(height: 8),
+                  _OrdersPriceRow(
+                    label: 'Delivery fee',
+                    value: _formatUsd(receipt.deliveryFee),
+                  ),
+                  const SizedBox(height: 8),
+                  _OrdersPriceRow(
+                    label: 'Service fee',
+                    value: _formatUsd(receipt.serviceFee),
+                  ),
+                  const SizedBox(height: 8),
+                  _OrdersPriceRow(
+                    label: 'Discount (%)',
+                    value: '${receipt.discountPercent.toStringAsFixed(0)}%',
+                  ),
+                  const SizedBox(height: 8),
+                  _OrdersPriceRow(
+                    label: 'Loyalty points used',
+                    value: '${receipt.loyaltyPointsUsed} pts',
+                  ),
+                  if (receipt.loyaltyDiscountUsd > 0) ...[
+                    const SizedBox(height: 8),
+                    _OrdersPriceRow(
+                      label: 'Loyalty discount',
+                      value: '-${_formatUsd(receipt.loyaltyDiscountUsd)}',
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  const Divider(height: 1, color: Color(0xFFEADBCB)),
+                  const SizedBox(height: 10),
+                  _OrdersPriceRow(
+                    label: 'Total (USD)',
+                    value: _formatUsd(receipt.totalUsd),
+                    highlight: true,
+                  ),
+                  const SizedBox(height: 8),
+                  _OrdersPriceRow(
+                    label: 'Total (LBP)',
+                    value: _formatLbp(receipt.totalUsd),
+                    highlight: true,
+                  ),
+                  const SizedBox(height: 8),
+                  _OrdersPriceRow(
+                    label: 'Payment',
+                    value: receipt.paymentMethodLabel,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OrderReceiptItemTile extends StatelessWidget {
+  const _OrderReceiptItemTile({required this.item});
+
+  final _OrderReceiptLineItemData item;
+
+  String _formatUsd(double value) => '\$${value.toStringAsFixed(2)}';
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8F2),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFF0E2D4)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF231A16),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                if (item.subtitle.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    item.subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF7D6C60),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            'x${item.quantity}',
+            style: const TextStyle(
+              color: Color(0xFF7D6C60),
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Text(
+            _formatUsd(item.totalPrice),
+            style: const TextStyle(
+              color: Color(0xFFFF7E4D),
+              fontSize: 14,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OrdersCartScreen extends StatefulWidget {
+  const _OrdersCartScreen({required this.initialItems});
+
+  final List<_CartLineItemData> initialItems;
+
+  @override
+  State<_OrdersCartScreen> createState() => _OrdersCartScreenState();
+}
+
+class _OrdersCartScreenState extends State<_OrdersCartScreen> {
+  static const double _deliveryFee = 2.75;
+  static const double _serviceFee = 1.35;
+
+  late List<_CartLineItemData> _items;
+
+  @override
+  void initState() {
+    super.initState();
+    _items = widget.initialItems
+        .map(
+          (item) => item.copyWith(
+            title: item.title,
+            subtitle: item.subtitle,
+            imageUrl: item.imageUrl,
+            price: item.price,
+            quantity: item.quantity,
+          ),
+        )
+        .toList();
+  }
+
+  int get _totalItems =>
+      _items.fold<int>(0, (total, item) => total + item.quantity);
+
+  double get _subtotal => _items.fold<double>(
+    0,
+    (total, item) => total + (item.price * item.quantity),
+  );
+
+  double get _total => _subtotal + _deliveryFee + _serviceFee;
+
+  String _formatMoney(double value) => '\$${value.toStringAsFixed(2)}';
+
+  void _increaseQuantity(int index) {
+    setState(() {
+      final item = _items[index];
+      _items[index] = item.copyWith(quantity: item.quantity + 1);
+    });
+  }
+
+  void _decreaseQuantity(int index) {
+    setState(() {
+      final item = _items[index];
+      if (item.quantity <= 1) {
+        _items.removeAt(index);
+        return;
+      }
+      _items[index] = item.copyWith(quantity: item.quantity - 1);
+    });
+  }
+
+  void _removeItem(int index) {
+    setState(() => _items.removeAt(index));
+  }
+
+  Future<void> _checkout() async {
+    if (_items.isEmpty) {
+      return;
+    }
+    final placed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => _OrdersCheckoutScreen(
+          subtotal: _subtotal,
+          deliveryFee: _deliveryFee,
+          serviceFee: _serviceFee,
+          totalItems: _totalItems,
+        ),
+      ),
+    );
+    if (!mounted || placed != true) {
+      return;
+    }
+    final placedTotal = _total;
+    final placedItems = _totalItems;
+    setState(() => _items.clear());
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            'Order placed for ${_formatMoney(placedTotal)} ($placedItems items)',
+          ),
+        ),
+      );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFFFFBF7),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFFFFBF7),
+        surfaceTintColor: Colors.transparent,
+        title: Text(
+          'Cart ($_totalItems)',
+          style: const TextStyle(
+            color: Color(0xFF231A16),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          child: _items.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 78,
+                        height: 78,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFFFF1E6),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.shopping_cart_outlined,
+                          color: Color(0xFFFF7E4D),
+                          size: 38,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Your cart is empty',
+                        style: TextStyle(
+                          color: Color(0xFF231A16),
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Add menu items to continue to checkout.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Color(0xFF7D6C60),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      FilledButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFFFF7E4D),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 18,
+                            vertical: 12,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          'Back to orders',
+                          style: TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : Column(
+                  children: [
+                    Expanded(
+                      child: ListView.separated(
+                        physics: const BouncingScrollPhysics(),
+                        itemCount: _items.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 10),
+                        itemBuilder: (context, index) {
+                          final item = _items[index];
+                          return _OrdersCartItemTile(
+                            item: item,
+                            onIncrease: () => _increaseQuantity(index),
+                            onDecrease: () => _decreaseQuantity(index),
+                            onRemove: () => _removeItem(index),
+                            priceLabel: _formatMoney(
+                              item.price * item.quantity,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEFCFA),
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: const Color(0xFFF0DCCB)),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0x12A7633A),
+                            blurRadius: 20,
+                            offset: Offset(0, 10),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        children: [
+                          _OrdersPriceRow(
+                            label: 'Subtotal',
+                            value: _formatMoney(_subtotal),
+                          ),
+                          const SizedBox(height: 8),
+                          _OrdersPriceRow(
+                            label: 'Delivery fee',
+                            value: _formatMoney(_deliveryFee),
+                          ),
+                          const SizedBox(height: 8),
+                          _OrdersPriceRow(
+                            label: 'Service fee',
+                            value: _formatMoney(_serviceFee),
+                          ),
+                          const SizedBox(height: 10),
+                          const Divider(height: 1, color: Color(0xFFEADBCB)),
+                          const SizedBox(height: 10),
+                          _OrdersPriceRow(
+                            label: 'Total',
+                            value: _formatMoney(_total),
+                            highlight: true,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _checkout,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFFFF7E4D),
+                          minimumSize: const Size.fromHeight(50),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        icon: const Icon(Icons.shopping_bag_rounded),
+                        label: Text(
+                          'Checkout ${_formatMoney(_total)}',
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OrdersCartItemTile extends StatelessWidget {
+  const _OrdersCartItemTile({
+    required this.item,
+    required this.onIncrease,
+    required this.onDecrease,
+    required this.onRemove,
+    required this.priceLabel,
+  });
+
+  final _CartLineItemData item;
+  final VoidCallback onIncrease;
+  final VoidCallback onDecrease;
+  final VoidCallback onRemove;
+  final String priceLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEFCFA),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFF0DCCB)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: SizedBox(
+              width: 74,
+              height: 74,
+              child: Image.network(
+                item.imageUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) {
+                  return const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [Color(0xFFFFD6B4), Color(0xFFFF9C6C)],
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.fastfood_rounded,
+                      color: Colors.white,
+                      size: 34,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF231A16),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  item.subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF7D6C60),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Text(
+                      priceLabel,
+                      style: const TextStyle(
+                        color: Color(0xFFFF7E4D),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const Spacer(),
+                    _OrdersQtyButton(
+                      icon: Icons.remove_rounded,
+                      onTap: onDecrease,
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      child: Text(
+                        '${item.quantity}',
+                        style: const TextStyle(
+                          color: Color(0xFF231A16),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    _OrdersQtyButton(
+                      icon: Icons.add_rounded,
+                      onTap: onIncrease,
+                    ),
+                  ],
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: onRemove,
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFFB66541),
+                      minimumSize: Size.zero,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 2,
+                        vertical: 2,
+                      ),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    icon: const Icon(Icons.delete_outline_rounded, size: 16),
+                    label: const Text(
+                      'Remove',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OrdersQtyButton extends StatelessWidget {
+  const _OrdersQtyButton({required this.icon, required this.onTap});
+
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Ink(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF4EC),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFFF2DCCB)),
+          ),
+          child: Icon(icon, color: const Color(0xFF9D5F3E), size: 18),
+        ),
+      ),
+    );
+  }
+}
+
+class _OrdersPriceRow extends StatelessWidget {
+  const _OrdersPriceRow({
+    required this.label,
+    required this.value,
+    this.highlight = false,
+  });
+
+  final String label;
+  final String value;
+  final bool highlight;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = highlight ? const Color(0xFF231A16) : const Color(0xFF7D6C60);
+    final weight = highlight ? FontWeight.w900 : FontWeight.w700;
+    return Row(
+      children: [
+        Text(
+          label,
+          style: TextStyle(color: color, fontWeight: weight, fontSize: 14),
+        ),
+        const Spacer(),
+        Text(
+          value,
+          style: TextStyle(color: color, fontWeight: weight, fontSize: 14),
+        ),
+      ],
+    );
+  }
+}
+
+enum _CheckoutPaymentMethod { onDelivery, visa, whishMoney }
+
+enum _CheckoutChangeRequest { noNeed, usd50, usd100 }
+
+enum _CheckoutDeliveryMode { now, scheduled }
+
+class _CheckoutScheduledSlot {
+  const _CheckoutScheduledSlot({
+    required this.dayLabel,
+    required this.timeRange,
+  });
+
+  final String dayLabel;
+  final String timeRange;
+}
+
+class _CheckoutDeliverySelection {
+  const _CheckoutDeliverySelection({
+    required this.mode,
+    required this.slotIndex,
+  });
+
+  final _CheckoutDeliveryMode mode;
+  final int slotIndex;
+}
+
+class _CheckoutLocationData {
+  const _CheckoutLocationData({
+    required this.city,
+    required this.street,
+    required this.building,
+    this.floor = '',
+    this.apartment = '',
+    this.landmark = '',
+  });
+
+  final String city;
+  final String street;
+  final String building;
+  final String floor;
+  final String apartment;
+  final String landmark;
+
+  bool get hasRequiredFields =>
+      city.trim().isNotEmpty &&
+      street.trim().isNotEmpty &&
+      building.trim().isNotEmpty;
+
+  bool get hasAnyField =>
+      city.trim().isNotEmpty ||
+      street.trim().isNotEmpty ||
+      building.trim().isNotEmpty ||
+      floor.trim().isNotEmpty ||
+      apartment.trim().isNotEmpty ||
+      landmark.trim().isNotEmpty;
+}
+
+class _OrdersCheckoutScreen extends StatefulWidget {
+  const _OrdersCheckoutScreen({
+    required this.subtotal,
+    required this.deliveryFee,
+    required this.serviceFee,
+    required this.totalItems,
+  });
+
+  final double subtotal;
+  final double deliveryFee;
+  final double serviceFee;
+  final int totalItems;
+
+  @override
+  State<_OrdersCheckoutScreen> createState() => _OrdersCheckoutScreenState();
+}
+
+class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
+  static const double _usdToLbpRate = 89500;
+  static const double _loyaltyDiscountRate = 0.10;
+  static const int _loyaltyPointsPerUsdDiscount = 100;
+  static const List<_CheckoutScheduledSlot> _deliverySlots = [
+    _CheckoutScheduledSlot(dayLabel: 'Today', timeRange: '08:00 AM - 08:15 AM'),
+    _CheckoutScheduledSlot(
+      dayLabel: 'Tomorrow',
+      timeRange: '08:15 AM - 08:30 AM',
+    ),
+    _CheckoutScheduledSlot(
+      dayLabel: 'Monday, May 04',
+      timeRange: '08:30 AM - 08:45 AM',
+    ),
+  ];
+
+  _CheckoutDeliveryMode _deliveryMode = _CheckoutDeliveryMode.now;
+  int _scheduledSlotIndex = 1;
+  _CheckoutLocationData _location = const _CheckoutLocationData(
+    city: '',
+    street: '',
+    building: '',
+  );
+  _CheckoutPaymentMethod _paymentMethod = _CheckoutPaymentMethod.onDelivery;
+  _CheckoutChangeRequest _changeRequest = _CheckoutChangeRequest.noNeed;
+  bool _useLoyalty = false;
+  bool _saveChangeInWallet = false;
+
+  double get _baseTotalUsd =>
+      widget.subtotal + widget.deliveryFee + widget.serviceFee;
+
+  double get _discountPercent => _useLoyalty ? (_loyaltyDiscountRate * 100) : 0;
+
+  double get _loyaltyDiscountUsd =>
+      _useLoyalty ? (_baseTotalUsd * _loyaltyDiscountRate) : 0;
+
+  int get _loyaltyPointsUsed =>
+      (_loyaltyDiscountUsd * _loyaltyPointsPerUsdDiscount).round();
+
+  double get _totalUsd =>
+      (_baseTotalUsd - _loyaltyDiscountUsd).clamp(0, double.infinity);
+
+  int get _earnedPoints => (_totalUsd * 8).round();
+
+  bool get _cashPayment => _paymentMethod == _CheckoutPaymentMethod.onDelivery;
+
+  _CheckoutScheduledSlot get _selectedScheduledSlot {
+    final maxIndex = _deliverySlots.length - 1;
+    final safeIndex = _scheduledSlotIndex.clamp(0, maxIndex).toInt();
+    return _deliverySlots[safeIndex];
+  }
+
+  String _formatUsd(double value) => '\$${value.toStringAsFixed(2)}';
+
+  String _formatLbp(double usdValue) {
+    final lbpValue = (usdValue * _usdToLbpRate).round();
+    final withCommas = lbpValue.toString().replaceAllMapped(
+      RegExp(r'\B(?=(\d{3})+(?!\d))'),
+      (m) => ',',
+    );
+    return '$withCommas LBP';
+  }
+
+  String _paymentMethodLabel(_CheckoutPaymentMethod method) {
+    switch (method) {
+      case _CheckoutPaymentMethod.onDelivery:
+        return 'On Delivery';
+      case _CheckoutPaymentMethod.visa:
+        return 'Visa';
+      case _CheckoutPaymentMethod.whishMoney:
+        return 'Whish Money';
+    }
+  }
+
+  String _changeRequestLabel(_CheckoutChangeRequest request) {
+    switch (request) {
+      case _CheckoutChangeRequest.noNeed:
+        return 'No need';
+      case _CheckoutChangeRequest.usd50:
+        return '\$50.00';
+      case _CheckoutChangeRequest.usd100:
+        return '\$100.00';
+    }
+  }
+
+  String get _deliveryPrimaryLabel {
+    if (_deliveryMode == _CheckoutDeliveryMode.now) {
+      return 'Now';
+    }
+    return 'Schedule for later';
+  }
+
+  String get _deliverySecondaryLabel {
+    if (_deliveryMode == _CheckoutDeliveryMode.now) {
+      return 'Deliver immediately';
+    }
+    final slot = _selectedScheduledSlot;
+    return '${slot.dayLabel} • ${slot.timeRange}';
+  }
+
+  String get _locationPrimaryLabel {
+    if (_location.hasRequiredFields) {
+      return '${_location.city}, ${_location.street}';
+    }
+    return 'Add delivery location';
+  }
+
+  String get _locationSecondaryLabel {
+    if (!_location.hasAnyField) {
+      return 'City, street, building';
+    }
+    final segments = <String>[
+      if (_location.building.trim().isNotEmpty) 'Bldg ${_location.building}',
+      if (_location.floor.trim().isNotEmpty) 'Floor ${_location.floor}',
+      if (_location.apartment.trim().isNotEmpty) 'Apt ${_location.apartment}',
+      if (_location.landmark.trim().isNotEmpty) _location.landmark,
+    ];
+    return segments.isEmpty ? 'City, street, building' : segments.join(', ');
+  }
+
+  void _selectPayment(_CheckoutPaymentMethod method) {
+    setState(() {
+      _paymentMethod = method;
+      if (method != _CheckoutPaymentMethod.onDelivery) {
+        _changeRequest = _CheckoutChangeRequest.noNeed;
+        _saveChangeInWallet = false;
+      }
+    });
+  }
+
+  void _placeOrder() {
+    if (!_location.hasRequiredFields) {
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Please set your city, street, and building before placing the order.',
+            ),
+          ),
+        );
+      _openLocationEditor();
+      return;
+    }
+    Navigator.of(context).pop(true);
+  }
+
+  Future<void> _openDeliveryTimeSelector() async {
+    final selection = await showModalBottomSheet<_CheckoutDeliverySelection>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFFF6F2ED),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+      clipBehavior: Clip.none,
+      builder: (context) => _CheckoutDeliveryTimeSheet(
+        initialMode: _deliveryMode,
+        initialSlotIndex: _scheduledSlotIndex,
+        slots: _deliverySlots,
+      ),
+    );
+    if (!mounted || selection == null) {
+      return;
+    }
+    setState(() {
+      _deliveryMode = selection.mode;
+      final maxIndex = _deliverySlots.length - 1;
+      _scheduledSlotIndex = selection.slotIndex.clamp(0, maxIndex).toInt();
+    });
+  }
+
+  Future<void> _openLocationEditor() async {
+    final location = await showModalBottomSheet<_CheckoutLocationData>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFFF6F2ED),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+      clipBehavior: Clip.none,
+      builder: (context) => _CheckoutLocationSheet(initialValue: _location),
+    );
+    if (!mounted || location == null) {
+      return;
+    }
+    setState(() => _location = location);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFFFFBF7),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFFFFBF7),
+        surfaceTintColor: Colors.transparent,
+        title: const Text(
+          'Checkout',
+          style: TextStyle(
+            color: Color(0xFF231A16),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _CheckoutSectionCard(
+                title: 'Delivery Time',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: _openDeliveryTimeSelector,
+                        borderRadius: BorderRadius.circular(14),
+                        child: Ink(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEFCFA),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: const Color(0xFFE8D8C8)),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 36,
+                                height: 36,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFFFFF1E7),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  _deliveryMode == _CheckoutDeliveryMode.now
+                                      ? Icons.access_time_rounded
+                                      : Icons.calendar_month_rounded,
+                                  color: const Color(0xFFFF7E4D),
+                                  size: 20,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      _deliveryPrimaryLabel,
+                                      style: const TextStyle(
+                                        color: Color(0xFF2D251F),
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      _deliverySecondaryLabel,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Color(0xFF8D7D71),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Icon(
+                                Icons.chevron_right_rounded,
+                                color: Color(0xFFB19D8F),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Default is now. Tap to schedule for later.',
+                      style: TextStyle(
+                        color: Color(0xFF8D7D71),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              _CheckoutSectionCard(
+                title: 'Location',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 36,
+                          height: 36,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFFFF1E7),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.location_on_outlined,
+                            color: Color(0xFFFF7E4D),
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _locationPrimaryLabel,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Color(0xFF2D251F),
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                _locationSecondaryLabel,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Color(0xFF8D7D71),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: _openLocationEditor,
+                          style: TextButton.styleFrom(
+                            foregroundColor: const Color(0xFFFF7E4D),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          child: const Text(
+                            'Change',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Set your city, street, and building details for delivery.',
+                      style: TextStyle(
+                        color: Color(0xFF8D7D71),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              _CheckoutSectionCard(
+                title: 'Payment Method',
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _CheckoutPaymentMethod.values.map((method) {
+                    final selected = _paymentMethod == method;
+                    return ChoiceChip(
+                      label: Text(_paymentMethodLabel(method)),
+                      selected: selected,
+                      onSelected: (value) {
+                        if (!value) {
+                          return;
+                        }
+                        _selectPayment(method);
+                      },
+                      selectedColor: const Color(0xFFFFE4D2),
+                      side: const BorderSide(color: Color(0xFFEFD9C8)),
+                      labelStyle: TextStyle(
+                        color: selected
+                            ? const Color(0xFFB65D37)
+                            : const Color(0xFF7D6C60),
+                        fontWeight: FontWeight.w700,
+                      ),
+                      backgroundColor: const Color(0xFFFEFCFA),
+                    );
+                  }).toList(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              _CheckoutSectionCard(
+                title: 'Request Change',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _CheckoutChangeRequest.values.map((request) {
+                        final selected = _changeRequest == request;
+                        return ChoiceChip(
+                          label: Text(_changeRequestLabel(request)),
+                          selected: selected,
+                          onSelected: !_cashPayment
+                              ? null
+                              : (value) {
+                                  if (!value) {
+                                    return;
+                                  }
+                                  setState(() => _changeRequest = request);
+                                },
+                          selectedColor: const Color(0xFFFFE4D2),
+                          labelStyle: TextStyle(
+                            color: selected
+                                ? const Color(0xFFB65D37)
+                                : const Color(0xFF7D6C60),
+                            fontWeight: FontWeight.w700,
+                          ),
+                          side: const BorderSide(color: Color(0xFFEFD9C8)),
+                          backgroundColor: const Color(0xFFFEFCFA),
+                        );
+                      }).toList(),
+                    ),
+                    if (!_cashPayment) ...[
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Change request is available for cash on delivery only.',
+                        style: TextStyle(
+                          color: Color(0xFF8D7D71),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              _CheckoutSectionCard(
+                title: 'Use Loyalty?',
+                child: Row(
+                  children: [
+                    ChoiceChip(
+                      label: const Text('No'),
+                      selected: !_useLoyalty,
+                      onSelected: (_) => setState(() => _useLoyalty = false),
+                      selectedColor: const Color(0xFFFFE4D2),
+                      side: const BorderSide(color: Color(0xFFEFD9C8)),
+                      labelStyle: TextStyle(
+                        color: !_useLoyalty
+                            ? const Color(0xFFB65D37)
+                            : const Color(0xFF7D6C60),
+                        fontWeight: FontWeight.w700,
+                      ),
+                      backgroundColor: const Color(0xFFFEFCFA),
+                    ),
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      label: const Text('Yes'),
+                      selected: _useLoyalty,
+                      onSelected: (_) => setState(() => _useLoyalty = true),
+                      selectedColor: const Color(0xFFFFE4D2),
+                      side: const BorderSide(color: Color(0xFFEFD9C8)),
+                      labelStyle: TextStyle(
+                        color: _useLoyalty
+                            ? const Color(0xFFB65D37)
+                            : const Color(0xFF7D6C60),
+                        fontWeight: FontWeight.w700,
+                      ),
+                      backgroundColor: const Color(0xFFFEFCFA),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              _CheckoutSectionCard(
+                title: 'Wallet',
+                child: SwitchListTile.adaptive(
+                  value: _saveChangeInWallet,
+                  onChanged: _cashPayment
+                      ? (value) => setState(() => _saveChangeInWallet = value)
+                      : null,
+                  activeThumbColor: const Color(0xFFFF7E4D),
+                  activeTrackColor: const Color(0xFFFFD4BB),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text(
+                    'Save change in my wallet',
+                    style: TextStyle(
+                      color: Color(0xFF2D251F),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  subtitle: const Text(
+                    'Turn on to save your returned cash as wallet credit.',
+                    style: TextStyle(
+                      color: Color(0xFF8D7D71),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              _CheckoutSectionCard(
+                title: 'Receipt Details',
+                child: Column(
+                  children: [
+                    _OrdersPriceRow(
+                      label: 'Subtotal',
+                      value: _formatUsd(widget.subtotal),
+                    ),
+                    const SizedBox(height: 8),
+                    _OrdersPriceRow(
+                      label: 'Delivery fee',
+                      value: _formatUsd(widget.deliveryFee),
+                    ),
+                    const SizedBox(height: 8),
+                    _OrdersPriceRow(
+                      label: 'Service fee',
+                      value: _formatUsd(widget.serviceFee),
+                    ),
+                    const SizedBox(height: 8),
+                    _OrdersPriceRow(
+                      label: 'Loyalty points used',
+                      value: '$_loyaltyPointsUsed pts',
+                    ),
+                    const SizedBox(height: 8),
+                    _OrdersPriceRow(
+                      label: 'Discount (%)',
+                      value: '${_discountPercent.toStringAsFixed(0)}%',
+                    ),
+                    if (_loyaltyDiscountUsd > 0) ...[
+                      const SizedBox(height: 8),
+                      _OrdersPriceRow(
+                        label: 'Loyalty discount',
+                        value: '-${_formatUsd(_loyaltyDiscountUsd)}',
+                      ),
+                    ],
+                    const SizedBox(height: 10),
+                    const Divider(height: 1, color: Color(0xFFEADBCB)),
+                    const SizedBox(height: 10),
+                    _OrdersPriceRow(
+                      label: 'Total (USD)',
+                      value: _formatUsd(_totalUsd),
+                      highlight: true,
+                    ),
+                    const SizedBox(height: 8),
+                    _OrdersPriceRow(
+                      label: 'Total (LBP)',
+                      value: _formatLbp(_totalUsd),
+                      highlight: true,
+                    ),
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: RichText(
+                        text: TextSpan(
+                          style: const TextStyle(
+                            color: Color(0xFF6E5E53),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          children: [
+                            const TextSpan(text: 'You earned '),
+                            TextSpan(
+                              text: '$_earnedPoints',
+                              style: const TextStyle(
+                                color: Color(0xFFFF7E4D),
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            const TextSpan(text: ' points'),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _placeOrder,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF7E4D),
+                    minimumSize: const Size.fromHeight(52),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  icon: const Icon(Icons.check_circle_outline_rounded),
+                  label: Text(
+                    'Place Order (${widget.totalItems} items)',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CheckoutLocationSheet extends StatefulWidget {
+  const _CheckoutLocationSheet({required this.initialValue});
+
+  final _CheckoutLocationData initialValue;
+
+  @override
+  State<_CheckoutLocationSheet> createState() => _CheckoutLocationSheetState();
+}
+
+class _CheckoutLocationSheetState extends State<_CheckoutLocationSheet> {
+  late final TextEditingController _cityController;
+  late final TextEditingController _streetController;
+  late final TextEditingController _buildingController;
+  late final TextEditingController _floorController;
+  late final TextEditingController _apartmentController;
+  late final TextEditingController _landmarkController;
+  bool _showRequiredError = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _cityController = TextEditingController(text: widget.initialValue.city);
+    _streetController = TextEditingController(text: widget.initialValue.street);
+    _buildingController = TextEditingController(
+      text: widget.initialValue.building,
+    );
+    _floorController = TextEditingController(text: widget.initialValue.floor);
+    _apartmentController = TextEditingController(
+      text: widget.initialValue.apartment,
+    );
+    _landmarkController = TextEditingController(
+      text: widget.initialValue.landmark,
+    );
+  }
+
+  @override
+  void dispose() {
+    _cityController.dispose();
+    _streetController.dispose();
+    _buildingController.dispose();
+    _floorController.dispose();
+    _apartmentController.dispose();
+    _landmarkController.dispose();
+    super.dispose();
+  }
+
+  InputDecoration _fieldDecoration({
+    required String label,
+    required String hint,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      hintText: hint,
+      filled: true,
+      fillColor: const Color(0xFFFEFCFA),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFFE8D8C8)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFFE8D8C8)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFFFFB893)),
+      ),
+      labelStyle: const TextStyle(
+        color: Color(0xFF7D6C60),
+        fontWeight: FontWeight.w600,
+      ),
+      hintStyle: const TextStyle(
+        color: Color(0xFFB3A295),
+        fontWeight: FontWeight.w600,
+      ),
+    );
+  }
+
+  void _save() {
+    final city = _cityController.text.trim();
+    final street = _streetController.text.trim();
+    final building = _buildingController.text.trim();
+    if (city.isEmpty || street.isEmpty || building.isEmpty) {
+      setState(() => _showRequiredError = true);
+      return;
+    }
+    Navigator.of(context).pop(
+      _CheckoutLocationData(
+        city: city,
+        street: street,
+        building: building,
+        floor: _floorController.text.trim(),
+        apartment: _apartmentController.text.trim(),
+        landmark: _landmarkController.text.trim(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    return ColoredBox(
+      color: const Color(0xFFF6F2ED),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: bottomInset),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 54,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFD9D5D1),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Delivery location',
+                  style: TextStyle(
+                    color: Color(0xFF1F1B19),
+                    fontSize: 19,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: _cityController,
+                  textInputAction: TextInputAction.next,
+                  decoration: _fieldDecoration(label: 'City *', hint: 'Beirut'),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _streetController,
+                  textInputAction: TextInputAction.next,
+                  decoration: _fieldDecoration(
+                    label: 'Street *',
+                    hint: 'Hamra Main Street',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _buildingController,
+                  textInputAction: TextInputAction.next,
+                  decoration: _fieldDecoration(
+                    label: 'Building *',
+                    hint: 'Building name or number',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _floorController,
+                        textInputAction: TextInputAction.next,
+                        decoration: _fieldDecoration(label: 'Floor', hint: '3'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: _apartmentController,
+                        textInputAction: TextInputAction.next,
+                        decoration: _fieldDecoration(
+                          label: 'Apartment',
+                          hint: 'A12',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _landmarkController,
+                  textInputAction: TextInputAction.done,
+                  decoration: _fieldDecoration(
+                    label: 'Landmark',
+                    hint: 'Near the pharmacy',
+                  ),
+                ),
+                if (_showRequiredError) ...[
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Please fill city, street, and building.',
+                    style: TextStyle(
+                      color: Color(0xFFB7372B),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: _save,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF7E4D),
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(52),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: const Text(
+                      'Save location',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CheckoutDeliveryTimeSheet extends StatefulWidget {
+  const _CheckoutDeliveryTimeSheet({
+    required this.initialMode,
+    required this.initialSlotIndex,
+    required this.slots,
+  });
+
+  final _CheckoutDeliveryMode initialMode;
+  final int initialSlotIndex;
+  final List<_CheckoutScheduledSlot> slots;
+
+  @override
+  State<_CheckoutDeliveryTimeSheet> createState() =>
+      _CheckoutDeliveryTimeSheetState();
+}
+
+class _CheckoutDeliveryTimeSheetState
+    extends State<_CheckoutDeliveryTimeSheet> {
+  late _CheckoutDeliveryMode _mode;
+  late int _slotIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _mode = widget.initialMode;
+    final maxIndex = widget.slots.length - 1;
+    _slotIndex = widget.initialSlotIndex.clamp(0, maxIndex).toInt();
+  }
+
+  void _confirm() {
+    Navigator.of(
+      context,
+    ).pop(_CheckoutDeliverySelection(mode: _mode, slotIndex: _slotIndex));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    return ColoredBox(
+      color: const Color(0xFFF6F2ED),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: bottomInset),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 54,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFD9D5D1),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Delivery time',
+                  style: TextStyle(
+                    color: Color(0xFF1F1B19),
+                    fontSize: 34 * 0.56,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                _CheckoutDeliveryModeTile(
+                  title: 'Now',
+                  icon: Icons.access_time_rounded,
+                  selected: _mode == _CheckoutDeliveryMode.now,
+                  onTap: () =>
+                      setState(() => _mode = _CheckoutDeliveryMode.now),
+                ),
+                const SizedBox(height: 10),
+                _CheckoutDeliveryModeTile(
+                  title: 'Schedule For Later',
+                  icon: Icons.calendar_month_rounded,
+                  selected: _mode == _CheckoutDeliveryMode.scheduled,
+                  onTap: () =>
+                      setState(() => _mode = _CheckoutDeliveryMode.scheduled),
+                ),
+                if (_mode == _CheckoutDeliveryMode.scheduled) ...[
+                  const SizedBox(height: 14),
+                  ...List<Widget>.generate(widget.slots.length, (index) {
+                    final slot = widget.slots[index];
+                    final selected = index == _slotIndex;
+                    return Padding(
+                      padding: EdgeInsets.only(
+                        bottom: index == widget.slots.length - 1 ? 0 : 8,
+                      ),
+                      child: _CheckoutScheduleSlotTile(
+                        dayLabel: slot.dayLabel,
+                        timeRange: slot.timeRange,
+                        selected: selected,
+                        onTap: () => setState(() => _slotIndex = index),
+                      ),
+                    );
+                  }),
+                ],
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: _confirm,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF7E4D),
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(52),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: const Text(
+                      'Confirm delivery time',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CheckoutDeliveryModeTile extends StatelessWidget {
+  const _CheckoutDeliveryModeTile({
+    required this.title,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String title;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          decoration: BoxDecoration(
+            color: selected ? const Color(0xFFFFEFE4) : const Color(0xFFFEFCFA),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: selected
+                  ? const Color(0xFFFFC5A8)
+                  : const Color(0xFFE8D8C8),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                icon,
+                color: selected
+                    ? const Color(0xFFFF7E4D)
+                    : const Color(0xFF8D7D71),
+                size: 28,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: const Color(0xFF2D251F),
+                    fontSize: 18,
+                    fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
+                  ),
+                ),
+              ),
+              Icon(
+                selected
+                    ? Icons.check_circle_rounded
+                    : Icons.radio_button_unchecked_rounded,
+                color: selected
+                    ? const Color(0xFFFF7E4D)
+                    : const Color(0xFFB7A89B),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CheckoutScheduleSlotTile extends StatelessWidget {
+  const _CheckoutScheduleSlotTile({
+    required this.dayLabel,
+    required this.timeRange,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String dayLabel;
+  final String timeRange;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final textColor = selected
+        ? const Color(0xFF1F1B19)
+        : const Color(0xFF9A8C82);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            color: selected ? const Color(0xFFF2ECE6) : const Color(0xFFFEFCFA),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: selected
+                  ? const Color(0xFFE8D8C8)
+                  : const Color(0xFFF0E6DC),
+            ),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  dayLabel,
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 16,
+                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                timeRange,
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 16,
+                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CheckoutSectionCard extends StatelessWidget {
+  const _CheckoutSectionCard({required this.title, required this.child});
+
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEFCFA),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFF0DCCB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              color: Color(0xFF231A16),
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 10),
+          child,
+        ],
+      ),
     );
   }
 }
@@ -3295,14 +5625,9 @@ class _OrdersBackground extends StatelessWidget {
 }
 
 class _OrdersHeroCard extends StatelessWidget {
-  const _OrdersHeroCard({
-    required this.metrics,
-    required this.greetingName,
-    required this.metricsData,
-  });
+  const _OrdersHeroCard({required this.metrics, required this.metricsData});
 
   final _ResponsiveMetrics metrics;
-  final String greetingName;
   final List<_OrdersMetricData> metricsData;
 
   @override
@@ -3332,71 +5657,17 @@ class _OrdersHeroCard extends StatelessWidget {
           final tileWidth = compactGrid
               ? (constraints.maxWidth - gap) / 2
               : (constraints.maxWidth - (gap * 2)) / 3;
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Everything on track for $greetingName',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: const Color(0xFF231A16),
-                        fontSize: _clampDouble(24 * metrics.scale, 19, 24),
-                        fontWeight: FontWeight.w900,
-                        height: 1.05,
-                      ),
-                    ),
+          return Wrap(
+            spacing: gap,
+            runSpacing: gap,
+            children: metricsData
+                .map(
+                  (data) => SizedBox(
+                    width: tileWidth,
+                    child: _OrdersMetricCard(data: data, metrics: metrics),
                   ),
-                  SizedBox(width: _clampDouble(10 * metrics.scale, 8, 10)),
-                  Container(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: _clampDouble(12 * metrics.scale, 10, 12),
-                      vertical: _clampDouble(8 * metrics.scale, 6, 8),
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFEFCFA),
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: Text(
-                      'Gold perks',
-                      style: TextStyle(
-                        color: const Color(0xFFFF7E4D),
-                        fontSize: _clampDouble(13 * metrics.scale, 11, 13),
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: _clampDouble(10 * metrics.scale, 8, 10)),
-              Text(
-                'One live delivery, fresh order history, and bonus points waiting on your next reorder.',
-                maxLines: metrics.compact ? 3 : 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: const Color(0xFF745F52),
-                  fontSize: _clampDouble(14 * metrics.scale, 11, 14),
-                  fontWeight: FontWeight.w600,
-                  height: 1.35,
-                ),
-              ),
-              SizedBox(height: _clampDouble(18 * metrics.scale, 14, 18)),
-              Wrap(
-                spacing: gap,
-                runSpacing: gap,
-                children: metricsData
-                    .map(
-                      (data) => SizedBox(
-                        width: tileWidth,
-                        child: _OrdersMetricCard(data: data, metrics: metrics),
-                      ),
-                    )
-                    .toList(),
-              ),
-            ],
+                )
+                .toList(),
           );
         },
       ),
@@ -3834,10 +6105,15 @@ class _OrderTimelineRow extends StatelessWidget {
 }
 
 class _PastOrderCard extends StatelessWidget {
-  const _PastOrderCard({required this.data, required this.metrics});
+  const _PastOrderCard({
+    required this.data,
+    required this.metrics,
+    this.onReorder,
+  });
 
   final _PastOrderEntryData data;
   final _ResponsiveMetrics metrics;
+  final VoidCallback? onReorder;
 
   @override
   Widget build(BuildContext context) {
@@ -3847,7 +6123,21 @@ class _PastOrderCard extends StatelessWidget {
         padding: EdgeInsets.all(_clampDouble(16 * metrics.scale, 12, 16)),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final compact = constraints.maxWidth < 330;
+            final imageToDetailsGap = _clampDouble(14 * metrics.scale, 10, 14);
+            final detailsToActionsGap = _clampDouble(
+              12 * metrics.scale,
+              10,
+              12,
+            );
+            final minDetailsWidth = _clampDouble(172 * metrics.scale, 156, 184);
+            final minActionsWidth = _clampDouble(106 * metrics.scale, 98, 112);
+            final minWidthForSideBySide =
+                imageSize +
+                imageToDetailsGap +
+                minDetailsWidth +
+                detailsToActionsGap +
+                minActionsWidth;
+            final compact = constraints.maxWidth < minWidthForSideBySide;
             final details = Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -3908,6 +6198,7 @@ class _PastOrderCard extends StatelessWidget {
                       : 'Reorder',
                   filled: false,
                   metrics: metrics,
+                  onTap: onReorder,
                 ),
               ],
             );
@@ -3932,9 +6223,9 @@ class _PastOrderCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _FoodThumb(imageUrl: data.imageUrl, size: imageSize),
-                SizedBox(width: _clampDouble(14 * metrics.scale, 10, 14)),
+                SizedBox(width: imageToDetailsGap),
                 Expanded(child: details),
-                SizedBox(width: _clampDouble(12 * metrics.scale, 10, 12)),
+                SizedBox(width: detailsToActionsGap),
                 actions,
               ],
             );
@@ -3983,77 +6274,6 @@ class _OrdersActionPill extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _OrdersRewardCard extends StatelessWidget {
-  const _OrdersRewardCard({required this.metrics});
-
-  final _ResponsiveMetrics metrics;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.all(_clampDouble(20 * metrics.scale, 16, 20)),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFFFF8F2), Color(0xFFFFE2CC)],
-        ),
-        borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: const Color(0xFFF3DFCF)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x10A7633A),
-            blurRadius: 22,
-            offset: Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Repeat your best combo',
-            style: TextStyle(
-              color: const Color(0xFF231A16),
-              fontSize: _clampDouble(22 * metrics.scale, 17, 22),
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          SizedBox(height: _clampDouble(8 * metrics.scale, 6, 8)),
-          Text(
-            'Reorder Burger Station tonight and unlock 120 bonus points toward your next free delivery.',
-            maxLines: metrics.compact ? 3 : 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: const Color(0xFF755F52),
-              fontSize: _clampDouble(14 * metrics.scale, 11, 14),
-              fontWeight: FontWeight.w600,
-              height: 1.35,
-            ),
-          ),
-          SizedBox(height: _clampDouble(16 * metrics.scale, 12, 16)),
-          Wrap(
-            spacing: _clampDouble(10 * metrics.scale, 8, 10),
-            runSpacing: _clampDouble(10 * metrics.scale, 8, 10),
-            children: [
-              _OrdersActionPill(
-                label: 'Reorder combo',
-                filled: true,
-                metrics: metrics,
-              ),
-              _OrdersActionPill(
-                label: 'Use points',
-                filled: false,
-                metrics: metrics,
-              ),
-            ],
-          ),
-        ],
       ),
     );
   }
@@ -4362,7 +6582,10 @@ class _OrderTrackingTimelineTile extends StatelessWidget {
           Container(
             width: 38,
             height: 38,
-            decoration: BoxDecoration(color: badgeColor, shape: BoxShape.circle),
+            decoration: BoxDecoration(
+              color: badgeColor,
+              shape: BoxShape.circle,
+            ),
             child: Icon(step.icon, color: Colors.white, size: 20),
           ),
           const SizedBox(width: 10),
@@ -4870,181 +7093,6 @@ class _DiscoverSearchBar extends StatelessWidget {
   }
 }
 
-class _DiscoverFeatureCard extends StatelessWidget {
-  const _DiscoverFeatureCard({
-    required this.metrics,
-    required this.onStartExploring,
-  });
-
-  static const _featureImage =
-      'https://images.unsplash.com/photo-1473093295043-cdd812d0e601?auto=format&fit=crop&w=900&q=80';
-
-  final _ResponsiveMetrics metrics;
-  final VoidCallback onStartExploring;
-
-  @override
-  Widget build(BuildContext context) {
-    final useStackedLayout = metrics.compact;
-    final content = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: EdgeInsets.symmetric(
-            horizontal: _clampDouble(12 * metrics.scale, 10, 12),
-            vertical: _clampDouble(7 * metrics.scale, 5, 7),
-          ),
-          decoration: BoxDecoration(
-            color: const Color(0xFFFEFCFA),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Text(
-            'Editor\'s Pick',
-            style: TextStyle(
-              color: const Color(0xFFFF7E4D),
-              fontSize: _clampDouble(13 * metrics.scale, 11, 13),
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ),
-        SizedBox(height: _clampDouble(14 * metrics.scale, 10, 14)),
-        Text(
-          'Dinner plans made easy',
-          maxLines: useStackedLayout ? 2 : 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: const Color(0xFF231A16),
-            fontSize: _clampDouble(24 * metrics.scale, 18, 24),
-            fontWeight: FontWeight.w900,
-            height: 1.05,
-          ),
-        ),
-        SizedBox(height: _clampDouble(10 * metrics.scale, 8, 10)),
-        Text(
-          'Tap into cozy pasta bars, sizzling grills, and quick comfort food near you.',
-          maxLines: useStackedLayout ? 4 : 3,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: const Color(0xFF745F52),
-            fontSize: _clampDouble(14 * metrics.scale, 11, 14),
-            fontWeight: FontWeight.w600,
-            height: 1.35,
-          ),
-        ),
-        SizedBox(height: _clampDouble(16 * metrics.scale, 12, 16)),
-        Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onStartExploring,
-            borderRadius: BorderRadius.circular(18),
-            child: Ink(
-              padding: EdgeInsets.symmetric(
-                horizontal: _clampDouble(16 * metrics.scale, 12, 16),
-                vertical: _clampDouble(10 * metrics.scale, 8, 10),
-              ),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFF7E4D),
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Text(
-                'Start exploring',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: _clampDouble(14 * metrics.scale, 11, 14),
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-
-    final preview = ClipRRect(
-      borderRadius: BorderRadius.circular(26),
-      child: SizedBox(
-        width: useStackedLayout
-            ? double.infinity
-            : _clampDouble(108 * metrics.scale, 92, 108),
-        height: useStackedLayout
-            ? _clampDouble(132 * metrics.scale, 112, 132)
-            : _clampDouble(160 * metrics.scale, 132, 160),
-        child: Image.network(
-          _featureImage,
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) {
-            return DecoratedBox(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFFFFD6B4), Color(0xFFFF9C6C)],
-                ),
-              ),
-              child: Icon(
-                Icons.restaurant_menu_rounded,
-                color: Colors.white,
-                size: _clampDouble(42 * metrics.scale, 34, 42),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-
-    return Container(
-      padding: EdgeInsets.all(_clampDouble(20 * metrics.scale, 16, 20)),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFFFF2E5), Color(0xFFFFD8BB)],
-        ),
-        borderRadius: BorderRadius.circular(32),
-        border: Border.all(color: const Color(0xFFF2D9C4)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x14B56A45),
-            blurRadius: 24,
-            offset: Offset(0, 12),
-          ),
-        ],
-      ),
-      child: Stack(
-        children: [
-          Positioned(
-            top: -24,
-            right: -18,
-            child: Container(
-              width: _clampDouble(118 * metrics.scale, 96, 118),
-              height: _clampDouble(118 * metrics.scale, 96, 118),
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                color: Color(0x24FFFFFF),
-              ),
-            ),
-          ),
-          useStackedLayout
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    content,
-                    SizedBox(height: _clampDouble(14 * metrics.scale, 10, 14)),
-                    preview,
-                  ],
-                )
-              : Row(
-                  children: [
-                    Expanded(child: content),
-                    SizedBox(width: _clampDouble(14 * metrics.scale, 10, 14)),
-                    preview,
-                  ],
-                ),
-        ],
-      ),
-    );
-  }
-}
-
 class _DiscoverCuisineChip extends StatelessWidget {
   const _DiscoverCuisineChip({
     required this.data,
@@ -5310,7 +7358,11 @@ class _DiscoverSpotCard extends StatelessWidget {
                         children: [
                           Container(
                             padding: EdgeInsets.symmetric(
-                              horizontal: _clampDouble(12 * metrics.scale, 9, 12),
+                              horizontal: _clampDouble(
+                                12 * metrics.scale,
+                                9,
+                                12,
+                              ),
                               vertical: _clampDouble(7 * metrics.scale, 5, 7),
                             ),
                             decoration: BoxDecoration(
@@ -5321,7 +7373,11 @@ class _DiscoverSpotCard extends StatelessWidget {
                               data.deliveryLabel,
                               style: TextStyle(
                                 color: const Color(0xFFFF7E4D),
-                                fontSize: _clampDouble(12 * metrics.scale, 10, 12),
+                                fontSize: _clampDouble(
+                                  12 * metrics.scale,
+                                  10,
+                                  12,
+                                ),
                                 fontWeight: FontWeight.w800,
                               ),
                             ),
@@ -5332,12 +7388,18 @@ class _DiscoverSpotCard extends StatelessWidget {
                             color: const Color(0xFFF5B63F),
                             size: _clampDouble(18 * metrics.scale, 14, 18),
                           ),
-                          SizedBox(width: _clampDouble(4 * metrics.scale, 2, 4)),
+                          SizedBox(
+                            width: _clampDouble(4 * metrics.scale, 2, 4),
+                          ),
                           Text(
                             data.ratingLabel,
                             style: TextStyle(
                               color: const Color(0xFF5A4A40),
-                              fontSize: _clampDouble(14 * metrics.scale, 11, 14),
+                              fontSize: _clampDouble(
+                                14 * metrics.scale,
+                                11,
+                                14,
+                              ),
                               fontWeight: FontWeight.w800,
                             ),
                           ),
@@ -5351,7 +7413,11 @@ class _DiscoverSpotCard extends StatelessWidget {
                           borderRadius: BorderRadius.circular(16),
                           child: Ink(
                             padding: EdgeInsets.symmetric(
-                              horizontal: _clampDouble(13 * metrics.scale, 10, 13),
+                              horizontal: _clampDouble(
+                                13 * metrics.scale,
+                                10,
+                                13,
+                              ),
                               vertical: _clampDouble(8 * metrics.scale, 6, 8),
                             ),
                             decoration: BoxDecoration(
@@ -5529,8 +7595,7 @@ Future<void> _openDiscoverRestaurantProfile(
   BuildContext context,
   _DiscoverSpotData spot, {
   int initialTabIndex = 0,
-}
-) {
+}) {
   return showRestaurantProfilePopup(
     context,
     restaurantName: spot.title,
@@ -5540,6 +7605,17 @@ Future<void> _openDiscoverRestaurantProfile(
     initialTabIndex: initialTabIndex,
     followersCountLabel:
         '${_formatCompactCount(8400 + (spot.deliveryMinutes * 28))} followers',
+    allowAddToCart: true,
+    onAddToCart: (item) {
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      if (messenger == null) {
+        return;
+      }
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(content: Text('${item.title} added to cart')),
+      );
+    },
   );
 }
 
@@ -5691,7 +7767,9 @@ class _DiscoverMapPreviewScreen extends StatelessWidget {
                 child: LayoutBuilder(
                   builder: (context, constraints) {
                     return Stack(
-                      children: List.generate(spots.length.clamp(0, 4), (index) {
+                      children: List.generate(spots.length.clamp(0, 4), (
+                        index,
+                      ) {
                         final pinPosition = pinOffsets[index];
                         final spot = spots[index];
                         return Positioned(
@@ -5858,10 +7936,7 @@ class _DiscoverSpotPreviewTile extends StatelessWidget {
                   ],
                 ),
               ),
-              const Icon(
-                Icons.chevron_right_rounded,
-                color: Color(0xFF9E8A7E),
-              ),
+              const Icon(Icons.chevron_right_rounded, color: Color(0xFF9E8A7E)),
             ],
           ),
         ),
@@ -8332,6 +10407,7 @@ class _PastOrderEntryData {
     required this.totalLabel,
     required this.status,
     required this.imageUrl,
+    required this.reorderItems,
   });
 
   final String title;
@@ -8340,6 +10416,102 @@ class _PastOrderEntryData {
   final String totalLabel;
   final _OrderStatus status;
   final String imageUrl;
+  final List<_CartLineItemData> reorderItems;
+}
+
+class _OrderReceiptData {
+  const _OrderReceiptData({
+    required this.orderId,
+    required this.restaurantName,
+    required this.summary,
+    required this.placedAtLabel,
+    required this.status,
+    required this.imageUrl,
+    required this.paymentMethodLabel,
+    required this.deliveryFee,
+    required this.serviceFee,
+    required this.discountPercent,
+    required this.loyaltyPointsUsed,
+    required this.loyaltyDiscountUsd,
+    required this.items,
+  });
+
+  final String orderId;
+  final String restaurantName;
+  final String summary;
+  final String placedAtLabel;
+  final _OrderStatus status;
+  final String imageUrl;
+  final String paymentMethodLabel;
+  final double deliveryFee;
+  final double serviceFee;
+  final double discountPercent;
+  final int loyaltyPointsUsed;
+  final double loyaltyDiscountUsd;
+  final List<_OrderReceiptLineItemData> items;
+
+  int get totalItems =>
+      items.fold<int>(0, (total, item) => total + item.quantity);
+
+  double get subtotalUsd =>
+      items.fold<double>(0, (total, item) => total + item.totalPrice);
+
+  double get _baseTotalUsd => subtotalUsd + deliveryFee + serviceFee;
+
+  double get _percentDiscountUsd => _baseTotalUsd * (discountPercent / 100);
+
+  double get totalDiscountUsd => _percentDiscountUsd + loyaltyDiscountUsd;
+
+  double get totalUsd =>
+      (_baseTotalUsd - totalDiscountUsd).clamp(0, double.infinity);
+}
+
+class _OrderReceiptLineItemData {
+  const _OrderReceiptLineItemData({
+    required this.title,
+    this.subtitle = '',
+    required this.quantity,
+    required this.unitPrice,
+  });
+
+  final String title;
+  final String subtitle;
+  final int quantity;
+  final double unitPrice;
+
+  double get totalPrice => quantity * unitPrice;
+}
+
+class _CartLineItemData {
+  const _CartLineItemData({
+    required this.title,
+    required this.subtitle,
+    required this.imageUrl,
+    required this.price,
+    required this.quantity,
+  });
+
+  final String title;
+  final String subtitle;
+  final String imageUrl;
+  final double price;
+  final int quantity;
+
+  _CartLineItemData copyWith({
+    String? title,
+    String? subtitle,
+    String? imageUrl,
+    double? price,
+    int? quantity,
+  }) {
+    return _CartLineItemData(
+      title: title ?? this.title,
+      subtitle: subtitle ?? this.subtitle,
+      imageUrl: imageUrl ?? this.imageUrl,
+      price: price ?? this.price,
+      quantity: quantity ?? this.quantity,
+    );
+  }
 }
 
 class _DiscoverCategoryData {

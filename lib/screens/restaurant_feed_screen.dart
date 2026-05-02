@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:video_player/video_player.dart';
@@ -174,6 +176,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   late final List<VideoPlayerController> _videoControllers;
   late final List<bool> _videoErrorLogged;
   int _currentVideoIndex = 0;
+  int _videoPlaybackSyncVersion = 0;
   int _nextLikeBurstId = 0;
 
   late _RestaurantProfileInfo _profileInfo;
@@ -215,7 +218,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
               return;
             }
             setState(() {});
-            _syncVideoPlayback();
+            unawaited(_syncVideoPlayback());
           })
           .catchError((error) {
             debugPrint(
@@ -556,10 +559,14 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     );
   }
 
+  void _openMenuItemDetails(RestaurantMenuItem item) {
+    showRestaurantMenuItemDetailsPopup(context, item: item);
+  }
+
   void _onBottomNavSelected(int index) {
     setState(() => _selectedBottomIndex = index);
     if (index == 0) {
-      _syncVideoPlayback();
+      unawaited(_syncVideoPlayback());
     } else {
       _pauseAllFeedVideos();
     }
@@ -579,24 +586,45 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
   void _handleVideoPageChanged(int index) {
     _currentVideoIndex = index;
-    _syncVideoPlayback();
+    unawaited(
+      _syncVideoPlayback(
+        resetCurrentToStart: true,
+        resetInactiveToStart: true,
+      ),
+    );
   }
 
-  void _syncVideoPlayback() {
+  Future<void> _syncVideoPlayback({
+    bool resetCurrentToStart = false,
+    bool resetInactiveToStart = false,
+  }) async {
+    final syncVersion = ++_videoPlaybackSyncVersion;
     for (var i = 0; i < _videoControllers.length; i++) {
+      if (!mounted || syncVersion != _videoPlaybackSyncVersion) {
+        return;
+      }
       final controller = _videoControllers[i];
       if (!controller.value.isInitialized) {
         continue;
       }
-      if (i == _currentVideoIndex) {
-        controller.play();
-      } else {
-        controller.pause();
+      final isCurrentVideo = i == _currentVideoIndex;
+      await controller.pause();
+      if (isCurrentVideo && resetCurrentToStart) {
+        await controller.seekTo(Duration.zero);
+      } else if (!isCurrentVideo && resetInactiveToStart) {
+        await controller.seekTo(Duration.zero);
+      }
+      if (!mounted || syncVersion != _videoPlaybackSyncVersion) {
+        return;
+      }
+      if (isCurrentVideo) {
+        await controller.play();
       }
     }
   }
 
   void _pauseAllFeedVideos() {
+    _videoPlaybackSyncVersion++;
     for (final controller in _videoControllers) {
       if (!controller.value.isInitialized) {
         continue;
@@ -986,6 +1014,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                       profileSyncError: _profileSyncError,
                       onRetryProfileSync: _refreshRestaurantProfile,
                       onManageFullMenu: _openMenuSection,
+                      onOpenMenuItemDetails: _openMenuItemDetails,
                       onOpenFollowers: _openFollowersList,
                       onOpenSettings: _openProfileSettingsDrawer,
                       selectedTabIndex: _selectedProfileTabIndex,
@@ -1079,6 +1108,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                             isLoading: _isRefreshingMenu,
                             errorMessage: _menuSyncError,
                             onRetry: () => _refreshRestaurantMenu(force: true),
+                            onItemTap: _openMenuItemDetails,
                           ),
                         ),
                       ],
@@ -3564,6 +3594,7 @@ class _ProfileSection extends StatelessWidget {
     required this.profileSyncError,
     required this.onRetryProfileSync,
     required this.onManageFullMenu,
+    required this.onOpenMenuItemDetails,
     required this.onOpenFollowers,
     required this.onOpenSettings,
     required this.selectedTabIndex,
@@ -3577,6 +3608,7 @@ class _ProfileSection extends StatelessWidget {
   final String? profileSyncError;
   final VoidCallback onRetryProfileSync;
   final VoidCallback onManageFullMenu;
+  final ValueChanged<RestaurantMenuItem> onOpenMenuItemDetails;
   final VoidCallback onOpenFollowers;
   final VoidCallback onOpenSettings;
   final int selectedTabIndex;
@@ -3739,9 +3771,12 @@ class _ProfileSection extends StatelessWidget {
           itemCount: _popularItems.length,
           separatorBuilder: (_, index) => SizedBox(width: itemGap),
           itemBuilder: (context, index) {
+            final popularItem = _popularItems[index];
             return _PopularMenuCard(
               metrics: metrics,
-              item: _popularItems[index],
+              item: popularItem,
+              onTap: () =>
+                  onOpenMenuItemDetails(popularItem.toRestaurantMenuItem(index)),
             );
           },
         ),
@@ -4450,6 +4485,7 @@ class _MenuSection extends StatelessWidget {
     required this.isLoading,
     required this.errorMessage,
     required this.onRetry,
+    required this.onItemTap,
   });
 
   final _ResponsiveMetrics metrics;
@@ -4457,6 +4493,7 @@ class _MenuSection extends StatelessWidget {
   final bool isLoading;
   final String? errorMessage;
   final Future<void> Function() onRetry;
+  final ValueChanged<RestaurantMenuItem> onItemTap;
 
   @override
   Widget build(BuildContext context) {
@@ -4493,9 +4530,11 @@ class _MenuSection extends StatelessWidget {
                       height: _clampDouble(10 * metrics.scale, 8, 10),
                     ),
                     itemBuilder: (context, index) {
+                      final item = items[index];
                       return _ManagedMenuItemCard(
                         metrics: metrics,
-                        item: items[index],
+                        item: item,
+                        onTap: () => onItemTap(item),
                       );
                     },
                   ),
@@ -4624,147 +4663,161 @@ class _EmptyMenuState extends StatelessWidget {
 }
 
 class _ManagedMenuItemCard extends StatelessWidget {
-  const _ManagedMenuItemCard({required this.metrics, required this.item});
+  const _ManagedMenuItemCard({
+    required this.metrics,
+    required this.item,
+    required this.onTap,
+  });
 
   final _ResponsiveMetrics metrics;
   final RestaurantMenuItem item;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final thumbnailSize = _clampDouble(90 * metrics.scale, 72, 90);
-    return Container(
-      padding: EdgeInsets.all(_clampDouble(12 * metrics.scale, 10, 12)),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF4F1ED),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(
           _clampDouble(22 * metrics.scale, 18, 22),
         ),
-        border: Border.all(color: const Color(0xFFE4D9CF)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: SizedBox(
-              width: thumbnailSize,
-              height: thumbnailSize,
-              child: Image.network(
-                item.imageUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) {
-                  return const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [Color(0xFFE7D9CC), Color(0xFFD9C8B8)],
-                      ),
-                    ),
-                    child: Center(
-                      child: Icon(
-                        Icons.fastfood_rounded,
-                        color: Color(0xFF816B5B),
-                        size: 30,
-                      ),
-                    ),
-                  );
-                },
-              ),
+        child: Container(
+          padding: EdgeInsets.all(_clampDouble(12 * metrics.scale, 10, 12)),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF4F1ED),
+            borderRadius: BorderRadius.circular(
+              _clampDouble(22 * metrics.scale, 18, 22),
             ),
+            border: Border.all(color: const Color(0xFFE4D9CF)),
           ),
-          SizedBox(width: _clampDouble(12 * metrics.scale, 8, 12)),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: SizedBox(
+                  width: thumbnailSize,
+                  height: thumbnailSize,
+                  child: Image.network(
+                    item.imageUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return const DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [Color(0xFFE7D9CC), Color(0xFFD9C8B8)],
+                          ),
+                        ),
+                        child: Center(
+                          child: Icon(
+                            Icons.fastfood_rounded,
+                            color: Color(0xFF816B5B),
+                            size: 30,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+              SizedBox(width: _clampDouble(12 * metrics.scale, 8, 12)),
+              Expanded(
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        item.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            item.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: const Color(0xFF1F1B19),
+                              fontSize: _clampDouble(18 * metrics.scale, 14, 18),
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        SizedBox(width: _clampDouble(8 * metrics.scale, 6, 8)),
+                        Text(
+                          _formatUsd(item.price),
+                          style: TextStyle(
+                            color: const Color(0xFFFF7E4D),
+                            fontSize: _clampDouble(16 * metrics.scale, 12, 16),
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: _clampDouble(5 * metrics.scale, 3, 5)),
+                    Text(
+                      item.description,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: const Color(0xFF8C7D71),
+                        fontSize: _clampDouble(13 * metrics.scale, 10, 13),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    SizedBox(height: _clampDouble(8 * metrics.scale, 6, 8)),
+                    Wrap(
+                      spacing: _clampDouble(6 * metrics.scale, 4, 6),
+                      runSpacing: _clampDouble(5 * metrics.scale, 3, 5),
+                      children: [
+                        _MenuBadge(
+                          metrics: metrics,
+                          label: item.category,
+                          backgroundColor: const Color(0xFFEFE8E1),
+                          textColor: const Color(0xFF786658),
+                        ),
+                        _MenuBadge(
+                          metrics: metrics,
+                          label: item.isAvailable ? 'Available' : 'Paused',
+                          backgroundColor: item.isAvailable
+                              ? const Color(0xFFE1F5E8)
+                              : const Color(0xFFFDE4E2),
+                          textColor: item.isAvailable
+                              ? const Color(0xFF2E9B57)
+                              : const Color(0xFFC6463E),
+                        ),
+                        if (item.isPopular)
+                          _MenuBadge(
+                            metrics: metrics,
+                            label: 'Popular',
+                            backgroundColor: const Color(0xFFE8EFF7),
+                            textColor: const Color(0xFF43739C),
+                          ),
+                        if (item.rating != null)
+                          _MenuBadge(
+                            metrics: metrics,
+                            label: '${item.rating!.toStringAsFixed(1)}*',
+                            backgroundColor: const Color(0xFFFFF1CC),
+                            textColor: const Color(0xFFB07800),
+                          ),
+                      ],
+                    ),
+                    if (item.ordersCount != null) ...[
+                      SizedBox(height: _clampDouble(7 * metrics.scale, 5, 7)),
+                      Text(
+                        '${item.ordersCount} orders',
                         style: TextStyle(
-                          color: const Color(0xFF1F1B19),
-                          fontSize: _clampDouble(18 * metrics.scale, 14, 18),
-                          fontWeight: FontWeight.w800,
+                          color: const Color(0xFF9A8A7E),
+                          fontSize: _clampDouble(12 * metrics.scale, 9, 12),
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                    ),
-                    SizedBox(width: _clampDouble(8 * metrics.scale, 6, 8)),
-                    Text(
-                      _formatUsd(item.price),
-                      style: TextStyle(
-                        color: const Color(0xFFFF7E4D),
-                        fontSize: _clampDouble(16 * metrics.scale, 12, 16),
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
+                    ],
                   ],
                 ),
-                SizedBox(height: _clampDouble(5 * metrics.scale, 3, 5)),
-                Text(
-                  item.description,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: const Color(0xFF8C7D71),
-                    fontSize: _clampDouble(13 * metrics.scale, 10, 13),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                SizedBox(height: _clampDouble(8 * metrics.scale, 6, 8)),
-                Wrap(
-                  spacing: _clampDouble(6 * metrics.scale, 4, 6),
-                  runSpacing: _clampDouble(5 * metrics.scale, 3, 5),
-                  children: [
-                    _MenuBadge(
-                      metrics: metrics,
-                      label: item.category,
-                      backgroundColor: const Color(0xFFEFE8E1),
-                      textColor: const Color(0xFF786658),
-                    ),
-                    _MenuBadge(
-                      metrics: metrics,
-                      label: item.isAvailable ? 'Available' : 'Paused',
-                      backgroundColor: item.isAvailable
-                          ? const Color(0xFFE1F5E8)
-                          : const Color(0xFFFDE4E2),
-                      textColor: item.isAvailable
-                          ? const Color(0xFF2E9B57)
-                          : const Color(0xFFC6463E),
-                    ),
-                    if (item.isPopular)
-                      _MenuBadge(
-                        metrics: metrics,
-                        label: 'Popular',
-                        backgroundColor: const Color(0xFFE8EFF7),
-                        textColor: const Color(0xFF43739C),
-                      ),
-                    if (item.rating != null)
-                      _MenuBadge(
-                        metrics: metrics,
-                        label: '${item.rating!.toStringAsFixed(1)}*',
-                        backgroundColor: const Color(0xFFFFF1CC),
-                        textColor: const Color(0xFFB07800),
-                      ),
-                  ],
-                ),
-                if (item.ordersCount != null) ...[
-                  SizedBox(height: _clampDouble(7 * metrics.scale, 5, 7)),
-                  Text(
-                    '${item.ordersCount} orders',
-                    style: TextStyle(
-                      color: const Color(0xFF9A8A7E),
-                      fontSize: _clampDouble(12 * metrics.scale, 9, 12),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -6128,105 +6181,120 @@ class _ProfileSectionTabs extends StatelessWidget {
 }
 
 class _PopularMenuCard extends StatelessWidget {
-  const _PopularMenuCard({required this.metrics, required this.item});
+  const _PopularMenuCard({
+    required this.metrics,
+    required this.item,
+    required this.onTap,
+  });
 
   final _ResponsiveMetrics metrics;
   final _PopularMenuItemData item;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final cardWidth = _clampDouble(198 * metrics.scale, 156, 198);
     return SizedBox(
       width: cardWidth,
-      child: Container(
-        padding: EdgeInsets.all(_clampDouble(12 * metrics.scale, 9, 12)),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF4F1ED),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: const Color(0xFFE4D9CF)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              height: _clampDouble(120 * metrics.scale, 98, 120),
-              child: Stack(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(18),
-                    child: SizedBox.expand(
-                      child: Image.network(
-                        item.imageUrl,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return const DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [Color(0xFFF3C1A8), Color(0xFFEFB18E)],
-                              ),
-                            ),
-                            child: Center(
-                              child: Icon(
-                                Icons.fastfood_rounded,
-                                color: Colors.white,
-                                size: 30,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    top: _clampDouble(8 * metrics.scale, 6, 8),
-                    right: _clampDouble(8 * metrics.scale, 6, 8),
-                    child: Container(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: _clampDouble(9 * metrics.scale, 6, 9),
-                        vertical: _clampDouble(5 * metrics.scale, 3, 5),
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF8F3ED),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xD8E8DED5)),
-                      ),
-                      child: Text(
-                        item.price,
-                        style: TextStyle(
-                          color: const Color(0xFF2D251F),
-                          fontSize: _clampDouble(12 * metrics.scale, 9, 12),
-                          fontWeight: FontWeight.w700,
+          child: Container(
+            padding: EdgeInsets.all(_clampDouble(12 * metrics.scale, 9, 12)),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF4F1ED),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: const Color(0xFFE4D9CF)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  height: _clampDouble(120 * metrics.scale, 98, 120),
+                  child: Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(18),
+                        child: SizedBox.expand(
+                          child: Image.network(
+                            item.imageUrl,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) {
+                              return const DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      Color(0xFFF3C1A8),
+                                      Color(0xFFEFB18E),
+                                    ],
+                                  ),
+                                ),
+                                child: Center(
+                                  child: Icon(
+                                    Icons.fastfood_rounded,
+                                    color: Colors.white,
+                                    size: 30,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
                         ),
                       ),
-                    ),
+                      Positioned(
+                        top: _clampDouble(8 * metrics.scale, 6, 8),
+                        right: _clampDouble(8 * metrics.scale, 6, 8),
+                        child: Container(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: _clampDouble(9 * metrics.scale, 6, 9),
+                            vertical: _clampDouble(5 * metrics.scale, 3, 5),
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF8F3ED),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xD8E8DED5)),
+                          ),
+                          child: Text(
+                            item.price,
+                            style: TextStyle(
+                              color: const Color(0xFF2D251F),
+                              fontSize: _clampDouble(12 * metrics.scale, 9, 12),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+                SizedBox(height: _clampDouble(10 * metrics.scale, 7, 10)),
+                Text(
+                  item.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: const Color(0xFF1F1B19),
+                    fontSize: _clampDouble(28 * metrics.scale, 20, 28) * 0.56,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                SizedBox(height: _clampDouble(5 * metrics.scale, 3, 5)),
+                Text(
+                  item.subtitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: const Color(0xFF8F7F73),
+                    fontSize: _clampDouble(14 * metrics.scale, 10, 14),
+                    fontWeight: FontWeight.w600,
+                    height: 1.2,
+                  ),
+                ),
+              ],
             ),
-            SizedBox(height: _clampDouble(10 * metrics.scale, 7, 10)),
-            Text(
-              item.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: const Color(0xFF1F1B19),
-                fontSize: _clampDouble(28 * metrics.scale, 20, 28) * 0.56,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            SizedBox(height: _clampDouble(5 * metrics.scale, 3, 5)),
-            Text(
-              item.subtitle,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: const Color(0xFF8F7F73),
-                fontSize: _clampDouble(14 * metrics.scale, 10, 14),
-                fontWeight: FontWeight.w600,
-                height: 1.2,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -6245,6 +6313,27 @@ class _PopularMenuItemData {
   final String subtitle;
   final String price;
   final String imageUrl;
+
+  RestaurantMenuItem toRestaurantMenuItem(int index) {
+    final parsedPrice = double.tryParse(
+      price.replaceAll(RegExp(r'[^0-9.]'), ''),
+    );
+    final normalizedId = title
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+        .replaceAll(RegExp(r'^-+|-+$'), '');
+    return RestaurantMenuItem(
+      id: 'popular-$index-$normalizedId',
+      title: title,
+      description: subtitle,
+      price: parsedPrice,
+      imageUrl: imageUrl,
+      category: 'Popular',
+      isAvailable: true,
+      isPopular: true,
+    );
+  }
 }
 
 class _RestaurantProfileInfo {
