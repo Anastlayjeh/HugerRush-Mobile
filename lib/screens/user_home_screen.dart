@@ -517,6 +517,7 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
   late final List<bool> _videoErrorLogged;
   int _currentVideoIndex = 0;
   int _nextLikeBurstId = 0;
+  bool _isVideoHoldActive = false;
 
   @override
   void initState() {
@@ -835,6 +836,7 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
   void _handleVideoPageChanged(int index) {
     final previousIndex = _currentVideoIndex;
     _currentVideoIndex = index;
+    _isVideoHoldActive = false;
     if (previousIndex != index &&
         previousIndex >= 0 &&
         previousIndex < _isOrderNowVisibleByVideoIndex.length &&
@@ -853,12 +855,32 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
       if (!controller.value.isInitialized) {
         continue;
       }
-      if (i == _currentVideoIndex) {
+      if (i == _currentVideoIndex && !_isVideoHoldActive) {
         controller.play();
       } else {
         controller.pause();
       }
     }
+  }
+
+  void _handleVideoLongPressStart(int index) {
+    if (_isVideoHoldActive || index != _currentVideoIndex) {
+      return;
+    }
+    final controller = _videoControllers[index];
+    if (!controller.value.isInitialized) {
+      return;
+    }
+    setState(() => _isVideoHoldActive = true);
+    controller.pause();
+  }
+
+  void _handleVideoLongPressEnd() {
+    if (!_isVideoHoldActive) {
+      return;
+    }
+    setState(() => _isVideoHoldActive = false);
+    _syncVideoPlayback();
   }
 
   @override
@@ -918,6 +940,8 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
                   final likeBursts = _likeBurstsForPost(post.id);
                   return GestureDetector(
                     behavior: HitTestBehavior.translucent,
+                    onLongPressStart: (_) => _handleVideoLongPressStart(index),
+                    onLongPressEnd: (_) => _handleVideoLongPressEnd(),
                     onDoubleTapDown: (details) =>
                         _rememberDoubleTapPosition(post.id, details),
                     onDoubleTap: () => _handleFeedDoubleTapLike(post, itemSize),

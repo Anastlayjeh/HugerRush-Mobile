@@ -9071,6 +9071,18 @@ class _BottomNavBar extends StatelessWidget {
       (icon: Icons.person_outline_rounded, label: 'Profile'),
     ];
     final navScale = metrics.navScaleFactor;
+    // Keep restaurant nav sizing in lockstep with customer nav sizing.
+    final customerNavIconSize = _clampDouble(
+      30 * metrics.scale * 0.82,
+      18,
+      24,
+    );
+    final customerNavLabelSize = _clampDouble(
+      12.5 * metrics.scale * 0.6,
+      9 * 0.6,
+      12.5 * 0.6,
+    );
+    final customerNavHeight = _clampDouble(96 * metrics.scale * 0.6, 72 * 0.6, 96 * 0.6);
     final horizontalPadding = fullWidth
         ? _clampDouble((metrics.compact ? 10 : 14) * navScale, 4, 14)
         : _clampDouble((metrics.compact ? 6 : 10) * navScale, 3, 10);
@@ -9084,7 +9096,7 @@ class _BottomNavBar extends StatelessWidget {
     final bottomPadding = verticalPadding + insetPadding;
 
     return Container(
-      height: metrics.navHeight + (fullWidth ? bottomInset : 0),
+      height: customerNavHeight + (fullWidth ? bottomInset : 0),
       padding: EdgeInsets.fromLTRB(
         horizontalPadding,
         topPadding,
@@ -9104,6 +9116,8 @@ class _BottomNavBar extends StatelessWidget {
               label: item.label,
               selected: index == selectedIndex,
               metrics: metrics,
+              iconSize: customerNavIconSize,
+              labelSize: customerNavLabelSize,
               onTap: () => onSelected(index),
             ),
           );
@@ -9119,6 +9133,8 @@ class _BottomNavItem extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.metrics,
+    required this.iconSize,
+    required this.labelSize,
     required this.onTap,
   });
 
@@ -9126,6 +9142,8 @@ class _BottomNavItem extends StatelessWidget {
   final String label;
   final bool selected;
   final _ResponsiveMetrics metrics;
+  final double iconSize;
+  final double labelSize;
   final VoidCallback onTap;
 
   @override
@@ -9138,7 +9156,7 @@ class _BottomNavItem extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: color, size: metrics.navIconSize),
+          Icon(icon, color: color, size: iconSize),
           SizedBox(height: _clampDouble(6 * metrics.scale * navScale, 1.5, 6)),
           Text(
             label,
@@ -9146,7 +9164,7 @@ class _BottomNavItem extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: color,
-              fontSize: metrics.navLabelSize,
+              fontSize: labelSize,
               fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
             ),
           ),
