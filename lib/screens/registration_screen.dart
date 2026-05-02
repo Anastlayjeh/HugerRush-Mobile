@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../services/auth_api_service.dart';
 import '../widgets/auth_social_buttons.dart';
+import 'frontend_placeholder_screen.dart';
 
 enum RegistrationType { hungryUser, restaurant }
 
@@ -62,6 +63,15 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
 
   bool _isValidEmail(String value) {
     return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value.trim());
+  }
+
+  void _openPlaceholderPage({required String title, required String message}) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            FrontendPlaceholderScreen(title: title, message: message),
+      ),
+    );
   }
 
   Future<void> _submitRegistration() async {
@@ -168,9 +178,9 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result.message)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(result.message)));
       Navigator.of(context).pop();
     } on AuthApiException catch (e) {
       if (!mounted) {
@@ -250,13 +260,29 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                               const SizedBox(height: 16),
                               const _DividerText(text: 'OR SIGN UP WITH'),
                               const SizedBox(height: 14),
-                              const Row(
+                              Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  AuthSocialButton(child: GoogleMark()),
-                                  SizedBox(width: 16),
                                   AuthSocialButton(
-                                    child: Icon(
+                                    onPressed: _isSubmitting
+                                        ? null
+                                        : () => _openPlaceholderPage(
+                                            title: 'Google Sign Up',
+                                            message:
+                                                'Google sign-up is not connected yet. Please use the registration form.',
+                                          ),
+                                    child: const GoogleMark(),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  AuthSocialButton(
+                                    onPressed: _isSubmitting
+                                        ? null
+                                        : () => _openPlaceholderPage(
+                                            title: 'Apple Sign Up',
+                                            message:
+                                                'Apple sign-up is not connected yet. Please use the registration form.',
+                                          ),
+                                    child: const Icon(
                                       Icons.apple,
                                       color: Colors.black,
                                       size: 24,
@@ -279,7 +305,8 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                                     ),
                                   ),
                                   TextButton(
-                                    onPressed: () => Navigator.of(context).pop(),
+                                    onPressed: () =>
+                                        Navigator.of(context).pop(),
                                     style: TextButton.styleFrom(
                                       foregroundColor: const Color(0xFFF68B1F),
                                       padding: EdgeInsets.zero,
@@ -354,9 +381,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
         obscureText: _obscureConfirmPassword,
         suffix: _EyeButton(
           onPressed: () {
-            setState(
-              () => _obscureConfirmPassword = !_obscureConfirmPassword,
-            );
+            setState(() => _obscureConfirmPassword = !_obscureConfirmPassword);
           },
           visible: !_obscureConfirmPassword,
         ),
@@ -385,9 +410,14 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
         keyboardType: TextInputType.emailAddress,
       ),
       const SizedBox(height: 12),
-      const _FieldLabelWithAction(
+      _FieldLabelWithAction(
         label: 'Phone Numbers',
         actionLabel: 'Add another',
+        onPressed: () => _openPlaceholderPage(
+          title: 'Add Another Phone Number',
+          message:
+              'Adding multiple phone numbers is not connected yet. Use the main phone field for now.',
+        ),
       ),
       const SizedBox(height: 8),
       _InlinePhoneRow(
@@ -454,9 +484,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
         obscureText: _obscureConfirmPassword,
         suffix: _EyeButton(
           onPressed: () {
-            setState(
-              () => _obscureConfirmPassword = !_obscureConfirmPassword,
-            );
+            setState(() => _obscureConfirmPassword = !_obscureConfirmPassword);
           },
           visible: !_obscureConfirmPassword,
         ),
@@ -483,9 +511,8 @@ class _HeroHeader extends StatelessWidget {
             Image.network(
               'https://images.unsplash.com/photo-1604382355076-af4b0eb60143?auto=format&fit=crop&w=1200&q=80',
               fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => const ColoredBox(
-                color: Color(0xFF8D5A32),
-              ),
+              errorBuilder: (context, error, stackTrace) =>
+                  const ColoredBox(color: Color(0xFF8D5A32)),
             ),
             const DecoratedBox(
               decoration: BoxDecoration(
@@ -572,10 +599,7 @@ class _RewardBanner extends StatelessWidget {
 }
 
 class _AccountTypeTabs extends StatelessWidget {
-  const _AccountTypeTabs({
-    required this.type,
-    required this.onChanged,
-  });
+  const _AccountTypeTabs({required this.type, required this.onChanged});
 
   final RegistrationType type;
   final ValueChanged<RegistrationType> onChanged;
@@ -640,7 +664,9 @@ class _TypeTabButton extends StatelessWidget {
           child: Text(
             text,
             style: TextStyle(
-              color: selected ? const Color(0xFFF68B1F) : const Color(0xFF8E7E72),
+              color: selected
+                  ? const Color(0xFFF68B1F)
+                  : const Color(0xFF8E7E72),
               fontSize: 14,
               fontWeight: FontWeight.w700,
             ),
@@ -741,9 +767,15 @@ class _RoundedTextInput extends StatelessWidget {
             fontSize: 15,
             fontWeight: FontWeight.w600,
           ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 11),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 15,
+            vertical: 11,
+          ),
           suffixIcon: suffix,
-          suffixIconConstraints: const BoxConstraints(minWidth: 42, minHeight: 42),
+          suffixIconConstraints: const BoxConstraints(
+            minWidth: 42,
+            minHeight: 42,
+          ),
         ),
         style: const TextStyle(
           color: Color(0xFF2D201A),
@@ -756,10 +788,7 @@ class _RoundedTextInput extends StatelessWidget {
 }
 
 class _EyeButton extends StatelessWidget {
-  const _EyeButton({
-    required this.onPressed,
-    required this.visible,
-  });
+  const _EyeButton({required this.onPressed, required this.visible});
 
   final VoidCallback onPressed;
   final bool visible;
@@ -847,10 +876,12 @@ class _FieldLabelWithAction extends StatelessWidget {
   const _FieldLabelWithAction({
     required this.label,
     required this.actionLabel,
+    this.onPressed,
   });
 
   final String label;
   final String actionLabel;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -859,7 +890,7 @@ class _FieldLabelWithAction extends StatelessWidget {
         _FieldLabel(label),
         const Spacer(),
         TextButton.icon(
-          onPressed: () {},
+          onPressed: onPressed,
           icon: const Icon(Icons.add_circle_outline, size: 14),
           label: Text(actionLabel),
           style: TextButton.styleFrom(
@@ -971,10 +1002,7 @@ class _SectionTitle extends StatelessWidget {
 }
 
 class _TermsRow extends StatelessWidget {
-  const _TermsRow({
-    required this.accepted,
-    required this.onTap,
-  });
+  const _TermsRow({required this.accepted, required this.onTap});
 
   final bool accepted;
   final VoidCallback onTap;
@@ -1058,10 +1086,7 @@ class _PrimaryActionButton extends StatelessWidget {
           backgroundColor: const Color(0xFFF68B1F),
           foregroundColor: Colors.white,
           shape: const StadiumBorder(),
-          textStyle: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w800,
-          ),
+          textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
           elevation: 3,
           shadowColor: const Color(0x40C26300),
         ),
@@ -1100,11 +1125,7 @@ class _DividerText extends StatelessWidget {
     return Row(
       children: [
         const Expanded(
-          child: Divider(
-            color: Color(0xFFE2D7CB),
-            thickness: 1,
-            height: 1,
-          ),
+          child: Divider(color: Color(0xFFE2D7CB), thickness: 1, height: 1),
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -1119,11 +1140,7 @@ class _DividerText extends StatelessWidget {
           ),
         ),
         const Expanded(
-          child: Divider(
-            color: Color(0xFFE2D7CB),
-            thickness: 1,
-            height: 1,
-          ),
+          child: Divider(color: Color(0xFFE2D7CB), thickness: 1, height: 1),
         ),
       ],
     );

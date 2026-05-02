@@ -1,3 +1,6 @@
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
@@ -164,6 +167,15 @@ List<DemoFeedPost> _followingRestaurantsFromPosts(List<DemoFeedPost> posts) {
   return items;
 }
 
+const Map<String, String> _customerRestaurantNamesByThreadId = <String, String>{
+  't1': 'Bella Italia',
+  't2': 'Smash House',
+  't3': 'Cedars Kitchen',
+  't4': 'Levant Grill',
+  't5': 'Green Bowl',
+  't6': 'Falafel Spot',
+};
+
 String _savedPlaceKey({required String title, required String handle}) {
   final normalizedHandle = handle.trim().toLowerCase();
   if (normalizedHandle.isNotEmpty) {
@@ -256,16 +268,6 @@ List<_SavedPlaceData> _savedPlacesFromHeartedRestaurants({
   final items = savedByKey.values.toList()
     ..sort((a, b) => a.title.compareTo(b.title));
   return items;
-}
-
-void _showFeatureComingSoonSnackBar(BuildContext context, String buttonName) {
-  final messenger = ScaffoldMessenger.maybeOf(context);
-  if (messenger == null) {
-    return;
-  }
-  messenger
-    ..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(content: Text('Feature Coming Soon: $buttonName')));
 }
 
 enum _OrderStatus {
@@ -479,9 +481,16 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
   int _selectedTopTab = 1;
   int _selectedBottomIndex = 0;
   final Set<String> _favoriteDiscoverSpotTitles = <String>{};
+  late _EditableCustomerProfileData _customerProfileData;
+
+  @override
+  void initState() {
+    super.initState();
+    _customerProfileData = _EditableCustomerProfileData.fromUserHome(widget);
+  }
 
   String get _userHandle {
-    final cleaned = widget.userName.trim();
+    final cleaned = _customerProfileData.fullName.trim();
     if (cleaned.isEmpty) {
       return 'FoodExplorer';
     }
@@ -490,6 +499,33 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
 
   void _openProfileMenu() {
     _scaffoldKey.currentState?.openEndDrawer();
+  }
+
+  Future<void> _openCustomerEditProfile() async {
+    final updatedData = await Navigator.of(context)
+        .push<_EditableCustomerProfileData>(
+          MaterialPageRoute<_EditableCustomerProfileData>(
+            builder: (_) =>
+                _CustomerEditProfileScreen(initialData: _customerProfileData),
+          ),
+        );
+
+    if (!mounted ||
+        updatedData == null ||
+        updatedData.matches(_customerProfileData)) {
+      return;
+    }
+
+    setState(() {
+      _customerProfileData = updatedData;
+    });
+
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(content: Text('Profile updated successfully.')),
+      );
   }
 
   void _setDiscoverSpotFavorite(_DiscoverSpotData spot, bool isFavorite) {
@@ -524,17 +560,20 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
           ? const Color(0xFFF8EFE5)
           : const Color(0xFF0A2230),
       endDrawer: _UserProfileMenuDrawer(
-        userName: widget.userName,
-        userEmail: widget.userEmail,
-        userAvatarUrl: widget.userAvatarUrl,
+        userName: _customerProfileData.fullName,
+        userEmail: _customerProfileData.nullableEmail,
+        userAvatarUrl: _customerProfileData.nullableAvatarUrl,
+        userAvatarBytes: _customerProfileData.profilePhotoBytes,
+        onEditProfile: _openCustomerEditProfile,
       ),
       body: showProfile
           ? _ProfileTabBody(
-              userName: widget.userName,
+              userName: _customerProfileData.fullName,
               userHandle: _userHandle,
-              userEmail: widget.userEmail,
-              userAvatarUrl: widget.userAvatarUrl,
-              accountLabel: widget.accountLabel,
+              userEmail: _customerProfileData.nullableEmail,
+              userAvatarUrl: _customerProfileData.nullableAvatarUrl,
+              userAvatarBytes: _customerProfileData.profilePhotoBytes,
+              accountLabel: _customerProfileData.resolvedAccountLabel,
               savedPlaces: savedPlaces,
               selectedBottomIndex: _selectedBottomIndex,
               onOpenMenu: _openProfileMenu,
@@ -675,7 +714,7 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
         _handleOrderNowTriggerByVideoProgress(i);
       });
       controller.setLooping(true);
-      controller.setVolume(0);
+      controller.setVolume(1.0);
       controller
           .initialize()
           .then((_) {
@@ -709,15 +748,39 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
     return _feedPostsById[video.postId] ?? _loadPostForId(video.postId);
   }
 
+  void _pauseFeedPlayback() {
+    for (final controller in _videoControllers) {
+      if (!controller.value.isInitialized) {
+        continue;
+      }
+      controller.pause();
+    }
+  }
+
+  Future<T?> _withFeedPlaybackPaused<T>(Future<T?> Function() action) async {
+    _pauseFeedPlayback();
+    try {
+      return await action();
+    } finally {
+      if (mounted && widget.selectedBottomIndex == 0) {
+        _syncVideoPlayback();
+      }
+    }
+  }
+
   Future<void> _openSearch() async {
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const SearchScreen()));
+    await _withFeedPlaybackPaused<void>(
+      () => Navigator.of(
+        context,
+      ).push(MaterialPageRoute<void>(builder: (_) => const SearchScreen())),
+    );
   }
 
   Future<void> _openNotifications() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
+    await _withFeedPlaybackPaused<void>(
+      () => Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
+      ),
     );
   }
 
@@ -726,40 +789,42 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
       comments: _demoRepository.getComments(post.id),
       baseRating: post.rating,
     );
-    await showRestaurantProfilePopup(
-      context,
-      restaurantName: post.restaurantName,
-      handle: post.restaurantHandle,
-      rating: post.rating,
-      caption: post.caption,
-      followersCountLabel:
-          '${_formatCompactCount(post.followersCount)} followers',
-      allowAddToCart: true,
-      showFollowButton: true,
-      showSaveButton: true,
-      initiallyFollowing: post.isFollowing,
-      onToggleFollow: () {
-        _toggleFollow(post);
-      },
-      reviews: reviewPreviews,
-      onOpenReviews: () {
-        openRestaurantReviewsPage(
-          context,
-          restaurantName: post.restaurantName,
-          rating: post.rating,
-          reviews: reviewPreviews,
-        );
-      },
-      onAddToCart: (item) {
-        final messenger = ScaffoldMessenger.maybeOf(context);
-        if (messenger == null) {
-          return;
-        }
-        messenger.hideCurrentSnackBar();
-        messenger.showSnackBar(
-          SnackBar(content: Text('${item.title} added to cart')),
-        );
-      },
+    await _withFeedPlaybackPaused<void>(
+      () => showRestaurantProfilePopup(
+        context,
+        restaurantName: post.restaurantName,
+        handle: post.restaurantHandle,
+        rating: post.rating,
+        caption: post.caption,
+        followersCountLabel:
+            '${_formatCompactCount(post.followersCount)} followers',
+        allowAddToCart: true,
+        showFollowButton: true,
+        showSaveButton: true,
+        initiallyFollowing: post.isFollowing,
+        onToggleFollow: () {
+          _toggleFollow(post);
+        },
+        reviews: reviewPreviews,
+        onOpenReviews: () {
+          openRestaurantReviewsPage(
+            context,
+            restaurantName: post.restaurantName,
+            rating: post.rating,
+            reviews: reviewPreviews,
+          );
+        },
+        onAddToCart: (item) {
+          final messenger = ScaffoldMessenger.maybeOf(context);
+          if (messenger == null) {
+            return;
+          }
+          messenger.hideCurrentSnackBar();
+          messenger.showSnackBar(
+            SnackBar(content: Text('${item.title} added to cart')),
+          );
+        },
+      ),
     );
   }
 
@@ -775,28 +840,32 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
           )
         : reviewPreviews;
     var shouldOpenFullReviewsPage = false;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) => _FeedReviewsBottomSheet(
-        restaurantName: post.restaurantName,
-        rating: post.rating,
-        reviews: resolvedReviews,
-        onViewAllReviews: () {
-          shouldOpenFullReviewsPage = true;
-          Navigator.of(sheetContext).pop();
-        },
+    await _withFeedPlaybackPaused<void>(
+      () => showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (sheetContext) => _FeedReviewsBottomSheet(
+          restaurantName: post.restaurantName,
+          rating: post.rating,
+          reviews: resolvedReviews,
+          onViewAllReviews: () {
+            shouldOpenFullReviewsPage = true;
+            Navigator.of(sheetContext).pop();
+          },
+        ),
       ),
     );
     if (!mounted || !shouldOpenFullReviewsPage) {
       return;
     }
-    await openRestaurantReviewsPage(
-      context,
-      restaurantName: post.restaurantName,
-      rating: post.rating,
-      reviews: resolvedReviews,
+    await _withFeedPlaybackPaused<void>(
+      () => openRestaurantReviewsPage(
+        context,
+        restaurantName: post.restaurantName,
+        rating: post.rating,
+        reviews: resolvedReviews,
+      ),
     );
   }
 
@@ -929,24 +998,28 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
       quantity: 1,
       restaurantName: post.restaurantName,
     );
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => _OrdersCartScreen(
-          initialItems: [item],
-          restaurantName: post.restaurantName,
+    await _withFeedPlaybackPaused<void>(
+      () => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => _OrdersCartScreen(
+            initialItems: [item],
+            restaurantName: post.restaurantName,
+          ),
         ),
       ),
     );
   }
 
   Future<void> _openComments(DemoFeedPost post) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _FeedCommentsBottomSheet(
-        postId: post.id,
-        postTitle: post.restaurantName,
+    await _withFeedPlaybackPaused<void>(
+      () => showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => _FeedCommentsBottomSheet(
+          postId: post.id,
+          postTitle: post.restaurantName,
+        ),
       ),
     );
     if (!mounted) {
@@ -956,20 +1029,24 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
   }
 
   Future<void> _sharePromo(DemoFeedPost post) async {
-    await showShareFallbackDialog(
-      context,
-      title: post.restaurantName,
-      body: post.caption,
+    await _withFeedPlaybackPaused<void>(
+      () => showShareFallbackDialog(
+        context,
+        title: post.restaurantName,
+        body: post.caption,
+      ),
     );
   }
 
   Future<void> _openPromoDetails(DemoFeedPost post) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => PromoDetailsScreen(
-          title: post.restaurantName,
-          caption: post.caption,
-          audioLabel: post.audioLabel,
+    await _withFeedPlaybackPaused<void>(
+      () => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => PromoDetailsScreen(
+            title: post.restaurantName,
+            caption: post.caption,
+            audioLabel: post.audioLabel,
+          ),
         ),
       ),
     );
@@ -1023,6 +1100,15 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
     }
     setState(() => _isVideoHoldActive = false);
     _syncVideoPlayback();
+  }
+
+  void _onBottomNavSelected(int index) {
+    if (index != 0) {
+      _pauseFeedPlayback();
+    } else {
+      _syncVideoPlayback();
+    }
+    widget.onBottomNavSelected(index);
   }
 
   @override
@@ -1228,7 +1314,7 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
               child: _BottomNavBar(
                 metrics: metrics,
                 selectedIndex: widget.selectedBottomIndex,
-                onSelected: widget.onBottomNavSelected,
+                onSelected: _onBottomNavSelected,
                 fullWidth: true,
                 bottomInset: navBarBottomInset,
               ),
@@ -1382,16 +1468,6 @@ class _CustomerMessagesSection extends StatefulWidget {
 class _CustomerMessagesSectionState extends State<_CustomerMessagesSection> {
   final _repository = DemoAppRepository.instance;
 
-  static const Map<String, String> _restaurantNamesByThreadId =
-      <String, String>{
-        't1': 'Bella Italia',
-        't2': 'Smash House',
-        't3': 'Cedars Kitchen',
-        't4': 'Levant Grill',
-        't5': 'Green Bowl',
-        't6': 'Falafel Spot',
-      };
-
   List<DemoConversationThread> _threads = const <DemoConversationThread>[];
   MessageFilterType _selectedFilter = MessageFilterType.all;
   String? _selectedThreadId;
@@ -1415,7 +1491,7 @@ class _CustomerMessagesSectionState extends State<_CustomerMessagesSection> {
   }
 
   String _counterpartyName(DemoConversationThread thread) {
-    return _restaurantNamesByThreadId[thread.id] ?? thread.customerName;
+    return _customerRestaurantNamesByThreadId[thread.id] ?? thread.customerName;
   }
 
   String get _senderName {
@@ -2315,10 +2391,6 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
     ).push(MaterialPageRoute<void>(builder: (_) => const SearchScreen()));
   }
 
-  void _openVoiceSearch(BuildContext context) {
-    _showFeatureComingSoonSnackBar(context, 'Voice Search');
-  }
-
   Future<void> _openDiscoverFilters(BuildContext context) async {
     final result = await showModalBottomSheet<_DiscoverFiltersState>(
       context: context,
@@ -2902,7 +2974,6 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                             child: _DiscoverSearchBar(
                               metrics: metrics,
                               onTapSearch: () => _openDiscoverSearch(context),
-                              onTapVoiceSearch: () => _openVoiceSearch(context),
                             ),
                           ),
                           SizedBox(
@@ -6890,6 +6961,78 @@ class _OrderTrackingScreen extends StatelessWidget {
     return '$hour12:$minute $meridiem';
   }
 
+  String _normalizedName(String value) {
+    return value
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  Future<void> _openRestaurantDirectMessage(BuildContext context) async {
+    final repository = DemoAppRepository.instance;
+    final threads = await repository.getThreads();
+    if (!context.mounted) {
+      return;
+    }
+    if (threads.isEmpty) {
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('No messages available yet for this restaurant.'),
+          ),
+        );
+      return;
+    }
+
+    final targetName = _normalizedName(restaurantName);
+    DemoConversationThread? matchedThread;
+
+    for (final thread in threads) {
+      final mappedName =
+          _customerRestaurantNamesByThreadId[thread.id] ?? thread.customerName;
+      if (_normalizedName(mappedName) == targetName) {
+        matchedThread = thread;
+        break;
+      }
+    }
+
+    if (matchedThread == null) {
+      for (final thread in threads) {
+        final mappedName =
+            _customerRestaurantNamesByThreadId[thread.id] ??
+            thread.customerName;
+        final normalizedMapped = _normalizedName(mappedName);
+        if (normalizedMapped.contains(targetName) ||
+            targetName.contains(normalizedMapped)) {
+          matchedThread = thread;
+          break;
+        }
+      }
+    }
+
+    if (matchedThread == null) {
+      final fallbackOrderThread = threads.firstWhere(
+        (thread) => thread.type == MessageThreadType.order,
+        orElse: () => threads.first,
+      );
+      matchedThread = fallbackOrderThread;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ConversationScreen(
+          threadId: matchedThread!.id,
+          restaurantName: 'You',
+          openComposerOnStart: true,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
@@ -7068,18 +7211,16 @@ class _OrderTrackingScreen extends StatelessWidget {
                           label: 'Contact restaurant',
                           filled: false,
                           metrics: trackingMetrics,
-                          onTap: () => _showFeatureComingSoonSnackBar(
-                            context,
-                            'Contact Restaurant',
-                          ),
+                          onTap: () => _openRestaurantDirectMessage(context),
                         ),
                         _OrdersActionPill(
                           label: 'Support chat',
                           filled: true,
                           metrics: trackingMetrics,
-                          onTap: () => _showFeatureComingSoonSnackBar(
-                            context,
-                            'Support Chat',
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => _CustomerHelpSupportScreen(),
+                            ),
                           ),
                         ),
                       ],
@@ -7241,6 +7382,7 @@ class _ProfileTabBody extends StatelessWidget {
     required this.userHandle,
     this.userEmail,
     this.userAvatarUrl,
+    this.userAvatarBytes,
     this.accountLabel,
     required this.savedPlaces,
     required this.selectedBottomIndex,
@@ -7252,6 +7394,7 @@ class _ProfileTabBody extends StatelessWidget {
   final String userHandle;
   final String? userEmail;
   final String? userAvatarUrl;
+  final Uint8List? userAvatarBytes;
   final String? accountLabel;
   final List<_SavedPlaceData> savedPlaces;
   final int selectedBottomIndex;
@@ -7417,6 +7560,7 @@ class _ProfileTabBody extends StatelessWidget {
                                 userHandle: userHandle,
                                 userEmail: userEmail,
                                 userAvatarUrl: userAvatarUrl,
+                                userAvatarBytes: userAvatarBytes,
                                 accountLabel: accountLabel,
                                 followingCountLabel: _formatCompactCount(
                                   followedRestaurants.length,
@@ -8031,15 +8175,10 @@ class _ProfileBackground extends StatelessWidget {
 }
 
 class _DiscoverSearchBar extends StatelessWidget {
-  const _DiscoverSearchBar({
-    required this.metrics,
-    required this.onTapSearch,
-    required this.onTapVoiceSearch,
-  });
+  const _DiscoverSearchBar({required this.metrics, required this.onTapSearch});
 
   final _ResponsiveMetrics metrics;
   final VoidCallback onTapSearch;
-  final VoidCallback onTapVoiceSearch;
 
   @override
   Widget build(BuildContext context) {
@@ -8082,18 +8221,6 @@ class _DiscoverSearchBar extends StatelessWidget {
                     color: const Color(0xFF9D8A7D),
                     fontSize: _clampDouble(15 * metrics.scale, 12, 15),
                     fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              GestureDetector(
-                onTap: onTapVoiceSearch,
-                behavior: HitTestBehavior.opaque,
-                child: Padding(
-                  padding: const EdgeInsets.all(2),
-                  child: Icon(
-                    Icons.mic_none_rounded,
-                    color: const Color(0xFFB9A596),
-                    size: _clampDouble(22 * metrics.scale, 18, 22),
                   ),
                 ),
               ),
@@ -11277,15 +11404,24 @@ class _ProfileIconButton extends StatelessWidget {
 class _UserProfileMenuDrawer extends StatelessWidget {
   const _UserProfileMenuDrawer({
     required this.userName,
+    required this.onEditProfile,
     this.userEmail,
     this.userAvatarUrl,
+    this.userAvatarBytes,
   });
 
   final String userName;
+  final VoidCallback onEditProfile;
   final String? userEmail;
   final String? userAvatarUrl;
+  final Uint8List? userAvatarBytes;
 
   static const List<_ProfileSettingsItemData> _settingsItems = [
+    _ProfileSettingsItemData(
+      title: 'Edit Profile',
+      icon: Icons.edit_rounded,
+      destination: _ProfileSettingsDestination.editProfile,
+    ),
     _ProfileSettingsItemData(
       title: 'Notifications',
       icon: Icons.notifications_none_rounded,
@@ -11315,6 +11451,9 @@ class _UserProfileMenuDrawer extends StatelessWidget {
     final navigator = Navigator.of(context);
     navigator.pop();
     switch (destination) {
+      case _ProfileSettingsDestination.editProfile:
+        onEditProfile();
+        return;
       case _ProfileSettingsDestination.notifications:
         navigator.push(
           MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
@@ -11359,6 +11498,9 @@ class _UserProfileMenuDrawer extends StatelessWidget {
               handle: displayName.replaceAll(RegExp(r'\s+'), ''),
               email: userEmail,
             );
+            final avatarBytes = userAvatarBytes;
+            final hasAvatarBytes =
+                avatarBytes != null && avatarBytes.isNotEmpty;
             final avatarUrl = userAvatarUrl?.trim();
             final hasAvatarUrl = _looksLikeHttpUrl(avatarUrl);
             return Padding(
@@ -11415,7 +11557,22 @@ class _UserProfileMenuDrawer extends StatelessWidget {
                             ),
                           ),
                           child: ClipOval(
-                            child: hasAvatarUrl
+                            child: hasAvatarBytes
+                                ? Image.memory(
+                                    avatarBytes,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, error, stackTrace) =>
+                                        Icon(
+                                          Icons.person_rounded,
+                                          color: const Color(0xFF8B5C41),
+                                          size: _clampDouble(
+                                            28 * metrics.scale,
+                                            22,
+                                            28,
+                                          ),
+                                        ),
+                                  )
+                                : hasAvatarUrl
                                 ? Image.network(
                                     avatarUrl!,
                                     fit: BoxFit.cover,
@@ -12390,6 +12547,7 @@ class _ProfileHeroCard extends StatelessWidget {
     required this.userHandle,
     this.userEmail,
     this.userAvatarUrl,
+    this.userAvatarBytes,
     this.accountLabel,
     required this.followingCountLabel,
     this.onOpenFollowing,
@@ -12400,6 +12558,7 @@ class _ProfileHeroCard extends StatelessWidget {
   final String userHandle;
   final String? userEmail;
   final String? userAvatarUrl;
+  final Uint8List? userAvatarBytes;
   final String? accountLabel;
   final String followingCountLabel;
   final VoidCallback? onOpenFollowing;
@@ -12415,9 +12574,15 @@ class _ProfileHeroCard extends StatelessWidget {
         ? _clampDouble(20 * metrics.scale, 15, 20)
         : _clampDouble(24 * metrics.scale, 18, 24);
     final displayEmail = _profileEmail(handle: userHandle, email: userEmail);
+    final avatarBytes = userAvatarBytes;
+    final hasAvatarBytes = avatarBytes != null && avatarBytes.isNotEmpty;
     final avatarUrl = userAvatarUrl?.trim();
     final hasAvatarUrl = _looksLikeHttpUrl(avatarUrl);
-    const displayAccountLabel = 'Hungry Account';
+    final normalizedAccountLabel = accountLabel?.trim();
+    final displayAccountLabel =
+        normalizedAccountLabel != null && normalizedAccountLabel.isNotEmpty
+        ? normalizedAccountLabel
+        : 'Hungry Account';
     return Container(
       padding: EdgeInsets.all(_clampDouble(20 * metrics.scale, 16, 20)),
       decoration: BoxDecoration(
@@ -12460,7 +12625,17 @@ class _ProfileHeroCard extends StatelessWidget {
                       ],
                     ),
                     child: ClipOval(
-                      child: hasAvatarUrl
+                      child: hasAvatarBytes
+                          ? Image.memory(
+                              avatarBytes,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, error, stackTrace) => Icon(
+                                Icons.person_rounded,
+                                color: const Color(0xFF8B5C41),
+                                size: avatarSize * 0.56,
+                              ),
+                            )
+                          : hasAvatarUrl
                           ? Image.network(
                               avatarUrl!,
                               fit: BoxFit.cover,
@@ -13600,7 +13775,685 @@ class _DiscoverFiltersState {
   final int? maximumPriceTier;
 }
 
+class _EditableCustomerProfileData {
+  const _EditableCustomerProfileData({
+    required this.fullName,
+    required this.email,
+    required this.phone,
+    required this.country,
+    required this.city,
+    required this.streetAddress,
+    required this.accountLabel,
+    required this.avatarUrl,
+    this.profilePhotoBytes,
+  });
+
+  final String fullName;
+  final String email;
+  final String phone;
+  final String country;
+  final String city;
+  final String streetAddress;
+  final String accountLabel;
+  final String avatarUrl;
+  final Uint8List? profilePhotoBytes;
+
+  factory _EditableCustomerProfileData.fromUserHome(UserHomeScreen source) {
+    final initialAccountLabel = source.accountLabel?.trim();
+    return _EditableCustomerProfileData(
+      fullName: source.userName,
+      email: source.userEmail?.trim() ?? '',
+      phone: '',
+      country: '',
+      city: '',
+      streetAddress: '',
+      accountLabel: initialAccountLabel == null || initialAccountLabel.isEmpty
+          ? 'Hungry Account'
+          : initialAccountLabel,
+      avatarUrl: source.userAvatarUrl?.trim() ?? '',
+      profilePhotoBytes: null,
+    );
+  }
+
+  bool matches(_EditableCustomerProfileData other) {
+    return _normalized(fullName) == _normalized(other.fullName) &&
+        _normalized(email) == _normalized(other.email) &&
+        _normalized(phone) == _normalized(other.phone) &&
+        _normalized(country) == _normalized(other.country) &&
+        _normalized(city) == _normalized(other.city) &&
+        _normalized(streetAddress) == _normalized(other.streetAddress) &&
+        _normalized(accountLabel) == _normalized(other.accountLabel) &&
+        _normalized(avatarUrl) == _normalized(other.avatarUrl) &&
+        _bytesEqual(profilePhotoBytes, other.profilePhotoBytes);
+  }
+
+  String _normalized(String value) => value.trim();
+
+  bool _bytesEqual(Uint8List? first, Uint8List? second) {
+    if (identical(first, second)) {
+      return true;
+    }
+    if (first == null || second == null || first.length != second.length) {
+      return false;
+    }
+    for (var index = 0; index < first.length; index++) {
+      if (first[index] != second[index]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  String? get nullableEmail {
+    final normalized = email.trim();
+    return normalized.isEmpty ? null : normalized;
+  }
+
+  String? get nullableAvatarUrl {
+    final normalized = avatarUrl.trim();
+    return normalized.isEmpty ? null : normalized;
+  }
+
+  String get resolvedAccountLabel {
+    final normalized = accountLabel.trim();
+    return normalized.isEmpty ? 'Hungry Account' : normalized;
+  }
+}
+
+class _CustomerEditProfileScreen extends StatefulWidget {
+  const _CustomerEditProfileScreen({required this.initialData});
+
+  final _EditableCustomerProfileData initialData;
+
+  @override
+  State<_CustomerEditProfileScreen> createState() =>
+      _CustomerEditProfileScreenState();
+}
+
+class _CustomerEditProfileScreenState
+    extends State<_CustomerEditProfileScreen> {
+  late final TextEditingController _fullNameController;
+  late final TextEditingController _emailController;
+  late final TextEditingController _phoneController;
+  late final TextEditingController _countryController;
+  late final TextEditingController _cityController;
+  late final TextEditingController _streetController;
+  Uint8List? _selectedProfilePhotoBytes;
+  bool _isPickingProfilePhoto = false;
+  bool _hasChanges = false;
+
+  List<TextEditingController> get _controllers => [
+    _fullNameController,
+    _emailController,
+    _phoneController,
+    _countryController,
+    _cityController,
+    _streetController,
+  ];
+
+  _EditableCustomerProfileData get _currentData => _EditableCustomerProfileData(
+    fullName: _fullNameController.text.trim(),
+    email: _emailController.text.trim(),
+    phone: _phoneController.text.trim(),
+    country: _countryController.text.trim(),
+    city: _cityController.text.trim(),
+    streetAddress: _streetController.text.trim(),
+    accountLabel: widget.initialData.accountLabel,
+    avatarUrl: widget.initialData.avatarUrl,
+    profilePhotoBytes: _selectedProfilePhotoBytes,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _fullNameController = TextEditingController(
+      text: widget.initialData.fullName,
+    );
+    _emailController = TextEditingController(text: widget.initialData.email);
+    _phoneController = TextEditingController(text: widget.initialData.phone);
+    _countryController = TextEditingController(
+      text: widget.initialData.country,
+    );
+    _cityController = TextEditingController(text: widget.initialData.city);
+    _streetController = TextEditingController(
+      text: widget.initialData.streetAddress,
+    );
+    _selectedProfilePhotoBytes = widget.initialData.profilePhotoBytes;
+
+    for (final controller in _controllers) {
+      controller.addListener(_handleFormChanged);
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _controllers) {
+      controller.removeListener(_handleFormChanged);
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  bool _isValidEmail(String value) {
+    if (value.trim().isEmpty) {
+      return true;
+    }
+    return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value.trim());
+  }
+
+  void _handleFormChanged() {
+    final hasChanges = !_currentData.matches(widget.initialData);
+    if (hasChanges == _hasChanges) {
+      return;
+    }
+    setState(() {
+      _hasChanges = hasChanges;
+    });
+  }
+
+  Future<void> _pickProfilePhoto() async {
+    if (_isPickingProfilePhoto) {
+      return;
+    }
+
+    setState(() => _isPickingProfilePhoto = true);
+    try {
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+        withData: true,
+      );
+      if (!mounted || picked == null || picked.files.isEmpty) {
+        return;
+      }
+      final bytes = picked.files.first.bytes;
+      if (bytes == null || bytes.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Unable to load the selected photo. Try another one.',
+            ),
+            backgroundColor: Color(0xFFB7372B),
+          ),
+        );
+        return;
+      }
+      setState(() {
+        _selectedProfilePhotoBytes = bytes;
+      });
+      _handleFormChanged();
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to pick a photo right now. Please try again.'),
+          backgroundColor: Color(0xFFB7372B),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isPickingProfilePhoto = false);
+      }
+    }
+  }
+
+  void _saveChanges() {
+    final data = _currentData;
+    if (data.fullName.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please add your full name.'),
+          backgroundColor: Color(0xFFB7372B),
+        ),
+      );
+      return;
+    }
+    if (!_isValidEmail(data.email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a valid email address.'),
+          backgroundColor: Color(0xFFB7372B),
+        ),
+      );
+      return;
+    }
+    Navigator.of(context).pop(data);
+  }
+
+  Widget _buildSaveActionBar() {
+    return Container(
+      key: const ValueKey('customer-save-action-bar'),
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFFE2D2), Color(0xFFFFF7F1)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFFFC8AF)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x33FF7E4D),
+            blurRadius: 22,
+            offset: Offset(0, 12),
+          ),
+        ],
+      ),
+      child: SizedBox(
+        width: double.infinity,
+        height: 46,
+        child: FilledButton(
+          onPressed: _saveChanges,
+          style: FilledButton.styleFrom(
+            elevation: 0,
+            backgroundColor: const Color(0xFFFF7E4D),
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+          ),
+          child: const Text(
+            'Save Changes',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8EFE8),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFF8EFE8),
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        title: const Text(
+          'Edit Profile',
+          style: TextStyle(
+            color: Color(0xFF2E2521),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(18, 12, 18, 24),
+          child: Column(
+            children: [
+              _CustomerProfilePhotoPicker(
+                photoBytes: _selectedProfilePhotoBytes,
+                avatarUrl: widget.initialData.nullableAvatarUrl,
+                onPickPhoto: _pickProfilePhoto,
+                isPicking: _isPickingProfilePhoto,
+              ),
+              const SizedBox(height: 12),
+              _CustomerReadonlyProfileField(
+                label: 'Account Label',
+                value: widget.initialData.resolvedAccountLabel,
+              ),
+              const SizedBox(height: 12),
+              _CustomerEditProfileField(
+                label: 'Full Name',
+                hint: 'Jane Doe',
+                controller: _fullNameController,
+                textCapitalization: TextCapitalization.words,
+              ),
+              const SizedBox(height: 12),
+              _CustomerEditProfileField(
+                label: 'Email',
+                hint: 'jane@email.com',
+                keyboardType: TextInputType.emailAddress,
+                controller: _emailController,
+              ),
+              const SizedBox(height: 12),
+              _CustomerEditProfileField(
+                label: 'Phone Number',
+                hint: '+961 03 123 456',
+                keyboardType: TextInputType.phone,
+                controller: _phoneController,
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: _CustomerEditProfileField(
+                      label: 'Country',
+                      hint: 'Lebanon',
+                      controller: _countryController,
+                      textCapitalization: TextCapitalization.words,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _CustomerEditProfileField(
+                      label: 'City',
+                      hint: 'Beirut',
+                      controller: _cityController,
+                      textCapitalization: TextCapitalization.words,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _CustomerEditProfileField(
+                label: 'Street Address',
+                hint: 'Hamra St, Building 12',
+                controller: _streetController,
+                textCapitalization: TextCapitalization.words,
+              ),
+            ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        bottom: _hasChanges,
+        child: AnimatedSize(
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(18, _hasChanges ? 8 : 0, 18, 18),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 420),
+              switchInCurve: Curves.easeOutBack,
+              switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (child, animation) {
+                final slideAnimation =
+                    Tween<Offset>(
+                      begin: const Offset(0, 0.28),
+                      end: Offset.zero,
+                    ).animate(
+                      CurvedAnimation(
+                        parent: animation,
+                        curve: Curves.easeOutBack,
+                        reverseCurve: Curves.easeInCubic,
+                      ),
+                    );
+                final scaleAnimation = Tween<double>(begin: 0.94, end: 1)
+                    .animate(
+                      CurvedAnimation(
+                        parent: animation,
+                        curve: Curves.easeOutBack,
+                        reverseCurve: Curves.easeInCubic,
+                      ),
+                    );
+                return FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: slideAnimation,
+                    child: ScaleTransition(scale: scaleAnimation, child: child),
+                  ),
+                );
+              },
+              child: _hasChanges
+                  ? _buildSaveActionBar()
+                  : const SizedBox.shrink(
+                      key: ValueKey('customer-save-action-empty'),
+                    ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CustomerProfilePhotoPicker extends StatelessWidget {
+  const _CustomerProfilePhotoPicker({
+    required this.photoBytes,
+    this.avatarUrl,
+    required this.onPickPhoto,
+    required this.isPicking,
+  });
+
+  final Uint8List? photoBytes;
+  final String? avatarUrl;
+  final VoidCallback onPickPhoto;
+  final bool isPicking;
+
+  @override
+  Widget build(BuildContext context) {
+    final normalizedAvatarUrl = avatarUrl?.trim();
+    final hasAvatarUrl = _looksLikeHttpUrl(normalizedAvatarUrl);
+    final hasPhoto = photoBytes != null && photoBytes!.isNotEmpty;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF2EEEA),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2D5C8)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 58,
+            height: 58,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFFFFE7C7), Color(0xFFFFC79A)],
+              ),
+              border: Border.all(color: Colors.white, width: 2.4),
+            ),
+            child: ClipOval(
+              child: hasPhoto
+                  ? Image.memory(
+                      photoBytes!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, error, stackTrace) => const Icon(
+                        Icons.person_rounded,
+                        color: Color(0xFF8B5C41),
+                        size: 30,
+                      ),
+                    )
+                  : hasAvatarUrl
+                  ? Image.network(
+                      normalizedAvatarUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, error, stackTrace) => const Icon(
+                        Icons.person_rounded,
+                        color: Color(0xFF8B5C41),
+                        size: 30,
+                      ),
+                    )
+                  : const Icon(
+                      Icons.person_rounded,
+                      color: Color(0xFF8B5C41),
+                      size: 30,
+                    ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Profile Photo',
+                  style: TextStyle(
+                    color: Color(0xFF2D201A),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  hasPhoto
+                      ? 'Photo selected from your device.'
+                      : 'Choose a photo from your phone.',
+                  style: const TextStyle(
+                    color: Color(0xFF77665A),
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          FilledButton(
+            onPressed: isPicking ? null : onPickPhoto,
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFFF7E4D),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: isPicking
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Text(
+                    'Change',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CustomerReadonlyProfileField extends StatelessWidget {
+  const _CustomerReadonlyProfileField({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: Color(0xFF46372D),
+            fontSize: 13,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          height: 48,
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 15),
+          decoration: BoxDecoration(
+            color: const Color(0xFFEDE8E3),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFE2D5C8)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF6C5B4F),
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const Icon(
+                Icons.lock_outline_rounded,
+                color: Color(0xFF9F8D80),
+                size: 18,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CustomerEditProfileField extends StatelessWidget {
+  const _CustomerEditProfileField({
+    required this.label,
+    required this.hint,
+    required this.controller,
+    this.keyboardType,
+    this.textCapitalization = TextCapitalization.none,
+  });
+
+  final String label;
+  final String hint;
+  final TextEditingController controller;
+  final TextInputType? keyboardType;
+  final TextCapitalization textCapitalization;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: Color(0xFF46372D),
+            fontSize: 13,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          height: 48,
+          decoration: BoxDecoration(
+            color: const Color(0xFFF2EEEA),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFE2D5C8)),
+          ),
+          child: TextField(
+            controller: controller,
+            keyboardType: keyboardType,
+            textCapitalization: textCapitalization,
+            decoration: InputDecoration(
+              border: InputBorder.none,
+              hintText: hint,
+              hintStyle: const TextStyle(
+                color: Color(0xFFC0B1A4),
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 15,
+                vertical: 12,
+              ),
+            ),
+            style: const TextStyle(
+              color: Color(0xFF2D201A),
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 enum _ProfileSettingsDestination {
+  editProfile,
   notifications,
   paymentMethods,
   privacySecurity,

@@ -218,7 +218,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         }
       });
       controller.setLooping(true);
-      controller.setVolume(0);
+      controller.setVolume(1.0);
       controller
           .initialize()
           .then((_) {
@@ -273,6 +273,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
           primary: payload,
           secondary: widget.initialUserData,
           fallbackName: widget.restaurantName,
+          localProfileImagePath: _profileInfo.localProfileImagePath,
         );
         _isRefreshingProfile = false;
       });
@@ -334,6 +335,29 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
   DemoFeedPost _postForVideo(_FeedVideoPostData video) {
     return _feedPostsById[video.postId] ?? _loadPostForId(video.postId);
+  }
+
+  void _pauseFeedPlaybackForNavigation() {
+    for (final controller in _videoControllers) {
+      if (!controller.value.isInitialized) {
+        continue;
+      }
+      controller.pause();
+    }
+  }
+
+  Future<T?> _withFeedPlaybackPaused<T>(Future<T?> Function() action) async {
+    final shouldPauseFeed = _selectedBottomIndex == 0;
+    if (shouldPauseFeed) {
+      _pauseFeedPlaybackForNavigation();
+    }
+    try {
+      return await action();
+    } finally {
+      if (mounted && shouldPauseFeed && _selectedBottomIndex == 0) {
+        unawaited(_syncVideoPlayback());
+      }
+    }
   }
 
   void _rememberDoubleTapPosition(String postId, TapDownDetails details) {
@@ -403,16 +427,20 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   }
 
   Future<void> _openSearch() async {
-    await Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute<void>(
-        builder: (_) => const SearchScreen(includeCustomers: false),
+    await _withFeedPlaybackPaused<void>(
+      () => Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute<void>(
+          builder: (_) => const SearchScreen(includeCustomers: false),
+        ),
       ),
     );
   }
 
   Future<void> _openNotifications() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
+    await _withFeedPlaybackPaused<void>(
+      () => Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
+      ),
     );
   }
 
@@ -444,22 +472,25 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       );
     }).toList();
 
-    await showRestaurantProfilePopup(
-      context,
-      restaurantName: targetPost.restaurantName,
-      handle: targetPost.restaurantHandle,
-      rating: targetPost.rating,
-      caption: targetPost.caption,
-      cuisineSummary: _profileInfo.cuisineSummary,
-      phoneLabel: _profileInfo.phoneLabel,
-      locationLabel: _profileInfo.locationLabel,
-      followersCountLabel: _profileInfo.followersCountLabel,
-      onOpenFollowers: () =>
-          _openFollowersList(restaurantName: targetPost.restaurantName),
-      profileImageUrl: _profileInfo.coverImageUrl,
-      menuItems: _menuItemsForDisplay,
-      uploadedVideos: videoPreviews,
-      reviews: reviewPreviews,
+    await _withFeedPlaybackPaused<void>(
+      () => showRestaurantProfilePopup(
+        context,
+        restaurantName: targetPost.restaurantName,
+        handle: targetPost.restaurantHandle,
+        rating: targetPost.rating,
+        caption: targetPost.caption,
+        cuisineSummary: _profileInfo.cuisineSummary,
+        phoneLabel: _profileInfo.phoneLabel,
+        locationLabel: _profileInfo.locationLabel,
+        followersCountLabel: _profileInfo.followersCountLabel,
+        onOpenFollowers: () =>
+            _openFollowersList(restaurantName: targetPost.restaurantName),
+        profileImageUrl: _profileInfo.coverImageUrl,
+        menuItems: _menuItemsForDisplay,
+        uploadedVideos: videoPreviews,
+        reviews: reviewPreviews,
+        showMenuCategoryFilter: true,
+      ),
     );
   }
 
@@ -533,13 +564,15 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
   Future<void> _openVendorComments([DemoFeedPost? post]) async {
     final targetPost = post ?? _activeFeedPost;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _FeedCommentsBottomSheet(
-        postId: targetPost.id,
-        postTitle: targetPost.restaurantName,
+    await _withFeedPlaybackPaused<void>(
+      () => showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => _FeedCommentsBottomSheet(
+          postId: targetPost.id,
+          postTitle: targetPost.restaurantName,
+        ),
       ),
     );
     if (!mounted) {
@@ -552,21 +585,25 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
   Future<void> _shareVendorPromo([DemoFeedPost? post]) async {
     final targetPost = post ?? _activeFeedPost;
-    await showShareFallbackDialog(
-      context,
-      title: targetPost.restaurantName,
-      body: targetPost.caption,
+    await _withFeedPlaybackPaused<void>(
+      () => showShareFallbackDialog(
+        context,
+        title: targetPost.restaurantName,
+        body: targetPost.caption,
+      ),
     );
   }
 
   Future<void> _openVendorPromoDetails([DemoFeedPost? post]) async {
     final targetPost = post ?? _activeFeedPost;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => PromoDetailsScreen(
-          title: targetPost.restaurantName,
-          caption: targetPost.caption,
-          audioLabel: targetPost.audioLabel,
+    await _withFeedPlaybackPaused<void>(
+      () => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => PromoDetailsScreen(
+            title: targetPost.restaurantName,
+            caption: targetPost.caption,
+            audioLabel: targetPost.audioLabel,
+          ),
         ),
       ),
     );
@@ -1163,6 +1200,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       endDrawer: _ProfileSettingsDrawer(
         restaurantName: _profileInfo.name,
         restaurantHandle: _profileInfo.handle,
+        profileImagePath: _profileInfo.localProfileImagePath,
         onEditProfile: _openEditProfile,
         onManageMenu: _openMenuSection,
         onOpenFollowers: () =>
@@ -5526,38 +5564,6 @@ class _MenuScreenHeader extends StatelessWidget {
               ),
             ],
           ),
-          SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
-          Container(
-            width: double.infinity,
-            padding: EdgeInsets.symmetric(
-              horizontal: _clampDouble(12 * metrics.scale, 10, 12),
-              vertical: _clampDouble(9 * metrics.scale, 7, 9),
-            ),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF8EFE8),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.storage_rounded,
-                  color: const Color(0xFFFF7E4D),
-                  size: _clampDouble(18 * metrics.scale, 14, 18),
-                ),
-                SizedBox(width: _clampDouble(8 * metrics.scale, 6, 8)),
-                Expanded(
-                  child: Text(
-                    'Menu data is synced from your SQL-backed backend API.',
-                    style: TextStyle(
-                      color: const Color(0xFF7D6D61),
-                      fontSize: _clampDouble(13 * metrics.scale, 10, 13),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
         ],
       ),
     );
@@ -6336,6 +6342,11 @@ class _OwnerProfileHero extends StatelessWidget {
     final avatarSize = _clampDouble(92 * metrics.scale, 72, 92);
     final totalHeight = cardTop + cardHeight;
     final avatarTop = cardTop - (avatarSize / 2);
+    final localProfileImagePath =
+        profileInfo.localProfileImagePath?.trim() ?? '';
+    final hasLocalProfileImage =
+        localProfileImagePath.isNotEmpty &&
+        File(localProfileImagePath).existsSync();
 
     return SizedBox(
       height: totalHeight,
@@ -6517,32 +6528,59 @@ class _OwnerProfileHero extends StatelessWidget {
                   ],
                 ),
                 alignment: Alignment.center,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      _initials(profileInfo.name),
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize:
-                            _clampDouble(26 * metrics.scale, 18, 26) * 0.55,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.4,
+                child: hasLocalProfileImage
+                    ? ClipOval(
+                        child: SizedBox(
+                          width: avatarSize,
+                          height: avatarSize,
+                          child: Image.file(
+                            File(localProfileImagePath),
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) {
+                              return const ColoredBox(
+                                color: Color(0xFF0F5A3C),
+                                child: Center(
+                                  child: Icon(
+                                    Icons.storefront_rounded,
+                                    color: Colors.white,
+                                    size: 28,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      )
+                    : Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            _initials(profileInfo.name),
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize:
+                                  _clampDouble(26 * metrics.scale, 18, 26) *
+                                  0.55,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                          SizedBox(
+                            height: _clampDouble(2 * metrics.scale, 1, 2),
+                          ),
+                          Text(
+                            '@${profileInfo.handle}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: const Color(0xE0FFFFFF),
+                              fontSize:
+                                  _clampDouble(11 * metrics.scale, 8, 11) * 0.7,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                    SizedBox(height: _clampDouble(2 * metrics.scale, 1, 2)),
-                    Text(
-                      '@${profileInfo.handle}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: const Color(0xE0FFFFFF),
-                        fontSize: _clampDouble(11 * metrics.scale, 8, 11) * 0.7,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
               ),
             ),
           ),
@@ -6594,6 +6632,7 @@ class _ProfileSettingsDrawer extends StatelessWidget {
   const _ProfileSettingsDrawer({
     required this.restaurantName,
     required this.restaurantHandle,
+    this.profileImagePath,
     required this.onEditProfile,
     required this.onManageMenu,
     required this.onOpenFollowers,
@@ -6602,6 +6641,7 @@ class _ProfileSettingsDrawer extends StatelessWidget {
 
   final String restaurantName;
   final String restaurantHandle;
+  final String? profileImagePath;
   final VoidCallback onEditProfile;
   final VoidCallback onManageMenu;
   final VoidCallback onOpenFollowers;
@@ -6617,6 +6657,10 @@ class _ProfileSettingsDrawer extends StatelessWidget {
     final subtitle = normalizedHandle.isEmpty
         ? 'Business shortcuts and account tools'
         : '@$normalizedHandle - Business shortcuts and account tools';
+    final normalizedProfilePath = profileImagePath?.trim() ?? '';
+    final hasProfileImage =
+        normalizedProfilePath.isNotEmpty &&
+        File(normalizedProfilePath).existsSync();
 
     final settingsItems = <_ProfileSettingsItemData>[
       _ProfileSettingsItemData(
@@ -6716,10 +6760,31 @@ class _ProfileSettingsDrawer extends StatelessWidget {
                               colors: [Color(0xFFFFE4C0), Color(0xFFFFC18E)],
                             ),
                           ),
-                          child: Icon(
-                            Icons.storefront_rounded,
-                            color: const Color(0xFF8B5C41),
-                            size: _clampDouble(28 * metrics.scale, 22, 28),
+                          child: ClipOval(
+                            child: hasProfileImage
+                                ? Image.file(
+                                    File(normalizedProfilePath),
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, error, stackTrace) =>
+                                        Icon(
+                                          Icons.storefront_rounded,
+                                          color: const Color(0xFF8B5C41),
+                                          size: _clampDouble(
+                                            28 * metrics.scale,
+                                            22,
+                                            28,
+                                          ),
+                                        ),
+                                  )
+                                : Icon(
+                                    Icons.storefront_rounded,
+                                    color: const Color(0xFF8B5C41),
+                                    size: _clampDouble(
+                                      28 * metrics.scale,
+                                      22,
+                                      28,
+                                    ),
+                                  ),
                           ),
                         ),
                         SizedBox(
@@ -7255,6 +7320,7 @@ class _EditableProfileData {
     required this.city,
     required this.street,
     required this.postalCode,
+    required this.localProfileImagePath,
   });
 
   final String restaurantName;
@@ -7265,6 +7331,7 @@ class _EditableProfileData {
   final String city;
   final String street;
   final String postalCode;
+  final String localProfileImagePath;
 
   factory _EditableProfileData.fromProfile(_RestaurantProfileInfo profile) {
     return _EditableProfileData(
@@ -7276,6 +7343,7 @@ class _EditableProfileData {
       city: profile.city ?? '',
       street: profile.street ?? '',
       postalCode: profile.postalCode ?? '',
+      localProfileImagePath: profile.localProfileImagePath ?? '',
     );
   }
 
@@ -7287,7 +7355,9 @@ class _EditableProfileData {
         _normalized(country) == _normalized(other.country) &&
         _normalized(city) == _normalized(other.city) &&
         _normalized(street) == _normalized(other.street) &&
-        _normalized(postalCode) == _normalized(other.postalCode);
+        _normalized(postalCode) == _normalized(other.postalCode) &&
+        _normalized(localProfileImagePath) ==
+            _normalized(other.localProfileImagePath);
   }
 
   String _normalized(String value) => value.trim();
@@ -7311,6 +7381,8 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
   late final TextEditingController _cityController;
   late final TextEditingController _streetController;
   late final TextEditingController _postalCodeController;
+  late String _localProfileImagePath;
+  bool _isPickingProfilePhoto = false;
   bool _hasChanges = false;
 
   List<TextEditingController> get _controllers => [
@@ -7333,6 +7405,7 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
     city: _cityController.text.trim(),
     street: _streetController.text.trim(),
     postalCode: _postalCodeController.text.trim(),
+    localProfileImagePath: _localProfileImagePath.trim(),
   );
 
   @override
@@ -7354,6 +7427,7 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
     _postalCodeController = TextEditingController(
       text: widget.initialData.postalCode,
     );
+    _localProfileImagePath = widget.initialData.localProfileImagePath;
 
     for (final controller in _controllers) {
       controller.addListener(_handleFormChanged);
@@ -7382,6 +7456,51 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
     setState(() {
       _hasChanges = hasChanges;
     });
+  }
+
+  Future<void> _pickProfilePhoto() async {
+    if (_isPickingProfilePhoto) {
+      return;
+    }
+
+    setState(() => _isPickingProfilePhoto = true);
+    try {
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+      );
+      if (!mounted || picked == null || picked.files.isEmpty) {
+        return;
+      }
+      final path = picked.files.first.path?.trim();
+      if (path == null || path.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Unable to access the selected image file.'),
+            backgroundColor: Color(0xFFB7372B),
+          ),
+        );
+        return;
+      }
+      setState(() {
+        _localProfileImagePath = path;
+      });
+      _handleFormChanged();
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to pick a photo right now. Please try again.'),
+          backgroundColor: Color(0xFFB7372B),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isPickingProfilePhoto = false);
+      }
+    }
   }
 
   void _saveChanges() {
@@ -7480,6 +7599,12 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
           padding: const EdgeInsets.fromLTRB(18, 12, 18, 24),
           child: Column(
             children: [
+              _EditProfilePhotoPicker(
+                imagePath: _localProfileImagePath,
+                onPickPhoto: _pickProfilePhoto,
+                isPicking: _isPickingProfilePhoto,
+              ),
+              const SizedBox(height: 12),
               _EditProfileField(
                 label: 'Restaurant Name',
                 hint: 'The Pizza Hub',
@@ -7588,6 +7713,119 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _EditProfilePhotoPicker extends StatelessWidget {
+  const _EditProfilePhotoPicker({
+    required this.imagePath,
+    required this.onPickPhoto,
+    required this.isPicking,
+  });
+
+  final String imagePath;
+  final VoidCallback onPickPhoto;
+  final bool isPicking;
+
+  @override
+  Widget build(BuildContext context) {
+    final normalizedPath = imagePath.trim();
+    final hasPhoto =
+        normalizedPath.isNotEmpty && File(normalizedPath).existsSync();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF2EEEA),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2D5C8)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 58,
+            height: 58,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFFFFE7C7), Color(0xFFFFC79A)],
+              ),
+              border: Border.all(color: Colors.white, width: 2.4),
+            ),
+            child: ClipOval(
+              child: hasPhoto
+                  ? Image.file(
+                      File(normalizedPath),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, error, stackTrace) => const Icon(
+                        Icons.storefront_rounded,
+                        color: Color(0xFF8B5C41),
+                        size: 30,
+                      ),
+                    )
+                  : const Icon(
+                      Icons.storefront_rounded,
+                      color: Color(0xFF8B5C41),
+                      size: 30,
+                    ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Profile Photo',
+                  style: TextStyle(
+                    color: Color(0xFF2D201A),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  hasPhoto
+                      ? 'Photo selected from your device.'
+                      : 'Choose a photo from your phone.',
+                  style: const TextStyle(
+                    color: Color(0xFF77665A),
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          FilledButton(
+            onPressed: isPicking ? null : onPickPhoto,
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFFF7E4D),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: isPicking
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Text(
+                    'Change',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+          ),
+        ],
       ),
     );
   }
@@ -7999,6 +8237,7 @@ class _RestaurantProfileInfo {
     required this.locationLabel,
     required this.followersCountLabel,
     required this.coverImageUrl,
+    this.localProfileImagePath,
     this.cuisine,
     this.email,
     this.phone,
@@ -8020,6 +8259,7 @@ class _RestaurantProfileInfo {
   final String locationLabel;
   final String followersCountLabel;
   final String coverImageUrl;
+  final String? localProfileImagePath;
   final String? cuisine;
   final String? email;
   final String? phone;
@@ -8032,6 +8272,7 @@ class _RestaurantProfileInfo {
     required String fallbackName,
     Map<String, dynamic>? primary,
     Map<String, dynamic>? secondary,
+    String? localProfileImagePath,
   }) {
     final allMaps = _collectMaps([primary, secondary]);
     final sanitizedFallback = fallbackName.trim();
@@ -8148,6 +8389,7 @@ class _RestaurantProfileInfo {
       ),
       followersCountLabel: _buildConnectionCountLabel(followersCount),
       coverImageUrl: coverImageUrl,
+      localProfileImagePath: localProfileImagePath,
       cuisine: cuisine,
       email: email,
       phone: phone,
@@ -8169,6 +8411,7 @@ class _RestaurantProfileInfo {
     final nextCity = _nullable(data.city);
     final nextStreet = _nullable(data.street);
     final nextPostalCode = _nullable(data.postalCode);
+    final nextLocalProfileImagePath = _nullable(data.localProfileImagePath);
 
     return _RestaurantProfileInfo(
       id: id,
@@ -8188,6 +8431,7 @@ class _RestaurantProfileInfo {
       ),
       followersCountLabel: followersCountLabel,
       coverImageUrl: coverImageUrl,
+      localProfileImagePath: nextLocalProfileImagePath,
       cuisine: nextCuisine,
       email: nextEmail,
       phone: nextPhone,

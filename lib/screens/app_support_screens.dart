@@ -133,6 +133,7 @@ Future<void> showRestaurantProfilePopup(
   bool initiallySaved = false,
   ValueChanged<bool>? onToggleSave,
   VoidCallback? onOpenReviews,
+  bool showMenuCategoryFilter = false,
 }) {
   final resolvedInitiallySaved =
       showSaveButton &&
@@ -182,6 +183,7 @@ Future<void> showRestaurantProfilePopup(
         initiallySaved: resolvedInitiallySaved,
         onToggleSave: handleToggleSave,
         onOpenReviews: onOpenReviews,
+        showMenuCategoryFilter: showMenuCategoryFilter,
       );
     },
   );
@@ -557,6 +559,7 @@ class _RestaurantProfilePopup extends StatelessWidget {
     this.initiallySaved = false,
     this.onToggleSave,
     this.onOpenReviews,
+    this.showMenuCategoryFilter = false,
   });
 
   final String restaurantName;
@@ -582,6 +585,7 @@ class _RestaurantProfilePopup extends StatelessWidget {
   final bool initiallySaved;
   final ValueChanged<bool>? onToggleSave;
   final VoidCallback? onOpenReviews;
+  final bool showMenuCategoryFilter;
 
   static const String _defaultProfileImage =
       'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=600&q=80';
@@ -878,6 +882,7 @@ class _RestaurantProfilePopup extends StatelessWidget {
                                 menuList: menuList,
                                 allowAddToCart: allowAddToCart,
                                 onAddToCart: onAddToCart,
+                                showCategoryFilter: showMenuCategoryFilter,
                               ),
                               _RestaurantProfileReviewsTabPanel(
                                 reviews: reviewsList,
@@ -1526,6 +1531,7 @@ class _RestaurantProfileMenuTabPanel extends StatefulWidget {
     required this.menuList,
     required this.allowAddToCart,
     required this.onAddToCart,
+    this.showCategoryFilter = true,
   });
 
   final String restaurantName;
@@ -1533,6 +1539,7 @@ class _RestaurantProfileMenuTabPanel extends StatefulWidget {
   final List<RestaurantMenuItem> menuList;
   final bool allowAddToCart;
   final ValueChanged<RestaurantMenuItem>? onAddToCart;
+  final bool showCategoryFilter;
 
   @override
   State<_RestaurantProfileMenuTabPanel> createState() =>
@@ -1569,6 +1576,9 @@ class _RestaurantProfileMenuTabPanelState
   }
 
   List<RestaurantMenuItem> _filterItems(List<RestaurantMenuItem> source) {
+    if (!widget.showCategoryFilter) {
+      return source;
+    }
     if (_selectedCategory == _allCategory) {
       return source;
     }
@@ -1599,7 +1609,9 @@ class _RestaurantProfileMenuTabPanelState
     if (filteredPopular.isEmpty) {
       menuChildren.add(
         _MenuCategoryEmptyNote(
-          message: 'No popular items in "$_selectedCategory".',
+          message: widget.showCategoryFilter
+              ? 'No popular items in "$_selectedCategory".'
+              : 'No popular items yet.',
         ),
       );
     } else {
@@ -1628,7 +1640,9 @@ class _RestaurantProfileMenuTabPanelState
       if (filteredMenu.isEmpty) {
         menuChildren.add(
           _MenuCategoryEmptyNote(
-            message: 'No full-menu items in "$_selectedCategory".',
+            message: widget.showCategoryFilter
+                ? 'No full-menu items in "$_selectedCategory".'
+                : 'No full-menu items yet.',
           ),
         );
       } else {
@@ -1655,7 +1669,7 @@ class _RestaurantProfileMenuTabPanelState
       ),
       child: Column(
         children: [
-          if (categories.length > 1) ...[
+          if (widget.showCategoryFilter && categories.length > 1) ...[
             SizedBox(
               height: 34,
               child: ListView.separated(
