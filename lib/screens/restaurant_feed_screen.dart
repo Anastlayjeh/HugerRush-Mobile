@@ -6646,7 +6646,14 @@ class _ProfileSettingsDrawer extends StatelessWidget {
       _ProfileSettingsItemData(
         title: 'Help & Support',
         icon: Icons.help_outline_rounded,
-        onTap: () => Navigator.of(context).pop(),
+        onTap: () {
+          Navigator.of(context).pop();
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => const _RestaurantHelpSupportScreen(),
+            ),
+          );
+        },
       ),
     ];
 
@@ -6910,6 +6917,332 @@ class _ProfileSettingsItemData {
   final String title;
   final IconData icon;
   final VoidCallback? onTap;
+}
+
+class _RestaurantHelpSupportScreen extends StatefulWidget {
+  const _RestaurantHelpSupportScreen();
+
+  @override
+  State<_RestaurantHelpSupportScreen> createState() =>
+      _RestaurantHelpSupportScreenState();
+}
+
+class _RestaurantHelpSupportScreenState
+    extends State<_RestaurantHelpSupportScreen> {
+  static const List<_SupportFaqItemData> _faqs = [
+    _SupportFaqItemData(
+      question: 'How can I track my order?',
+      answer:
+          'Open Orders and tap your live order card. You can view every stage from pending to delivered.',
+    ),
+    _SupportFaqItemData(
+      question: 'How do loyalty points work?',
+      answer:
+          'Points are added after successful orders. You can apply available points during checkout for a discount.',
+    ),
+    _SupportFaqItemData(
+      question: 'Can I change delivery time after placing an order?',
+      answer:
+          'If the restaurant has not started preparing, support may help update delivery timing.',
+    ),
+  ];
+
+  Future<void> _openSupportRequestSheet(String channel) async {
+    final detailsController = TextEditingController();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFFFFFBF7),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) {
+        final bottomInset = MediaQuery.viewInsetsOf(sheetContext).bottom;
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(16, 14, 16, bottomInset + 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Contact support via $channel',
+                  style: const TextStyle(
+                    color: Color(0xFF231A16),
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Share your issue and our team will reply shortly.',
+                  style: TextStyle(
+                    color: Color(0xFF7D6C60),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: detailsController,
+                  maxLines: 4,
+                  decoration: InputDecoration(
+                    hintText: 'Describe your issue',
+                    filled: true,
+                    fillColor: const Color(0xFFFEFCFA),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: Color(0xFFEADBCB)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: Color(0xFFEADBCB)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () {
+                      final details = detailsController.text.trim();
+                      if (details.isEmpty) {
+                        final messenger = ScaffoldMessenger.maybeOf(context);
+                        messenger
+                          ?..hideCurrentSnackBar()
+                          ..showSnackBar(
+                            const SnackBar(
+                              content: Text('Please add issue details first.'),
+                            ),
+                          );
+                        return;
+                      }
+                      Navigator.of(sheetContext).pop();
+                      final messenger = ScaffoldMessenger.maybeOf(context);
+                      messenger
+                        ?..hideCurrentSnackBar()
+                        ..showSnackBar(
+                          SnackBar(
+                            content: Text('Support request sent via $channel.'),
+                          ),
+                        );
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF7E4D),
+                      minimumSize: const Size.fromHeight(46),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: const Text(
+                      'Send Request',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    detailsController.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFFFFBF7),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFFFFBF7),
+        surfaceTintColor: Colors.transparent,
+        title: const Text(
+          'Help & Support',
+          style: TextStyle(
+            color: Color(0xFF231A16),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          children: [
+            const Text(
+              'Need help? Choose a support channel or browse quick answers.',
+              style: TextStyle(
+                color: Color(0xFF7D6C60),
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _ProfilePanel(
+              child: Column(
+                children: [
+                  _SupportActionTile(
+                    icon: Icons.email_outlined,
+                    title: 'Email support',
+                    subtitle: 'support@hungerrush.app',
+                    onTap: () => _openSupportRequestSheet('Email'),
+                  ),
+                  const Divider(height: 1, color: Color(0xFFF0E2D3)),
+                  _SupportActionTile(
+                    icon: Icons.call_rounded,
+                    title: 'Call support',
+                    subtitle: '+961 1 234 567',
+                    onTap: () {
+                      final messenger = ScaffoldMessenger.maybeOf(context);
+                      messenger
+                        ?..hideCurrentSnackBar()
+                        ..showSnackBar(
+                          const SnackBar(
+                            content: Text('Dialing support: +961 1 234 567'),
+                          ),
+                        );
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'Frequently Asked Questions',
+              style: TextStyle(
+                color: Color(0xFF231A16),
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 8),
+            _ProfilePanel(
+              child: Column(
+                children: List.generate(_faqs.length, (index) {
+                  final item = _faqs[index];
+                  return Column(
+                    children: [
+                      ExpansionTile(
+                        tilePadding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 2,
+                        ),
+                        childrenPadding: const EdgeInsets.fromLTRB(
+                          14,
+                          0,
+                          14,
+                          14,
+                        ),
+                        iconColor: const Color(0xFFFF7E4D),
+                        collapsedIconColor: const Color(0xFF8A7A70),
+                        title: Text(
+                          item.question,
+                          style: const TextStyle(
+                            color: Color(0xFF231A16),
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        children: [
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              item.answer,
+                              style: const TextStyle(
+                                color: Color(0xFF7D6C60),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                height: 1.35,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (index != _faqs.length - 1)
+                        const Divider(height: 1, color: Color(0xFFF0E2D3)),
+                    ],
+                  );
+                }),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SupportActionTile extends StatelessWidget {
+  const _SupportActionTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF1E6),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: const Color(0xFFFF7E4D)),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: Color(0xFF231A16),
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        color: Color(0xFF7D6C60),
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded, color: Color(0xFFAE9B8D)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SupportFaqItemData {
+  const _SupportFaqItemData({required this.question, required this.answer});
+
+  final String question;
+  final String answer;
 }
 
 class _EditableProfileData {
@@ -9072,17 +9405,17 @@ class _BottomNavBar extends StatelessWidget {
     ];
     final navScale = metrics.navScaleFactor;
     // Keep restaurant nav sizing in lockstep with customer nav sizing.
-    final customerNavIconSize = _clampDouble(
-      30 * metrics.scale * 0.82,
-      18,
-      24,
-    );
+    final customerNavIconSize = _clampDouble(30 * metrics.scale * 0.82, 18, 24);
     final customerNavLabelSize = _clampDouble(
       12.5 * metrics.scale * 0.6,
       9 * 0.6,
       12.5 * 0.6,
     );
-    final customerNavHeight = _clampDouble(96 * metrics.scale * 0.6, 72 * 0.6, 96 * 0.6);
+    final customerNavHeight = _clampDouble(
+      96 * metrics.scale * 0.6,
+      72 * 0.6,
+      96 * 0.6,
+    );
     final horizontalPadding = fullWidth
         ? _clampDouble((metrics.compact ? 10 : 14) * navScale, 4, 14)
         : _clampDouble((metrics.compact ? 6 : 10) * navScale, 3, 10);

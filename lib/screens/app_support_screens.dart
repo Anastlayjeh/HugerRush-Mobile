@@ -30,6 +30,16 @@ bool _isCustomerRestaurantSaved({
   );
 }
 
+bool isCustomerRestaurantSaved({
+  required String restaurantName,
+  required String handle,
+}) {
+  return _isCustomerRestaurantSaved(
+    restaurantName: restaurantName,
+    handle: handle,
+  );
+}
+
 void _setCustomerRestaurantSaved({
   required String restaurantName,
   required String handle,
@@ -44,6 +54,18 @@ void _setCustomerRestaurantSaved({
   } else {
     _customerSavedRestaurantKeys.remove(key);
   }
+}
+
+void setCustomerRestaurantSaved({
+  required String restaurantName,
+  required String handle,
+  required bool isSaved,
+}) {
+  _setCustomerRestaurantSaved(
+    restaurantName: restaurantName,
+    handle: handle,
+    isSaved: isSaved,
+  );
 }
 
 Future<void> showShareFallbackDialog(
@@ -3636,6 +3658,7 @@ class _RestaurantProfileReviewTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasComment = review.comment.trim().isNotEmpty;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -3699,16 +3722,18 @@ class _RestaurantProfileReviewTile extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 7),
-          Text(
-            review.comment,
-            style: const TextStyle(
-              color: Color(0xFF58493C),
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              height: 1.3,
+          if (hasComment) ...[
+            const SizedBox(height: 7),
+            Text(
+              review.comment,
+              style: const TextStyle(
+                color: Color(0xFF58493C),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                height: 1.3,
+              ),
             ),
-          ),
+          ],
           const SizedBox(height: 6),
           Text(
             '${review.orderLabel} • ${review.timeLabel}',
@@ -3805,7 +3830,7 @@ class _RestaurantReviewPageActionTile extends StatelessWidget {
   }
 }
 
-class _RestaurantReviewsPage extends StatelessWidget {
+class _RestaurantReviewsPage extends StatefulWidget {
   const _RestaurantReviewsPage({
     required this.restaurantName,
     required this.rating,
@@ -3816,17 +3841,77 @@ class _RestaurantReviewsPage extends StatelessWidget {
   final double rating;
   final List<RestaurantProfileReviewPreview> reviews;
 
+  @override
+  State<_RestaurantReviewsPage> createState() => _RestaurantReviewsPageState();
+}
+
+class _RestaurantReviewsPageState extends State<_RestaurantReviewsPage> {
+  late final TextEditingController _feedbackController;
+  late List<RestaurantProfileReviewPreview> _reviews;
+  double _selectedRating = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _feedbackController = TextEditingController();
+    _reviews = List<RestaurantProfileReviewPreview>.from(widget.reviews);
+  }
+
+  @override
+  void dispose() {
+    _feedbackController.dispose();
+    super.dispose();
+  }
+
   double get _averageRating {
-    if (reviews.isEmpty) {
-      return rating;
+    if (_reviews.isEmpty) {
+      return widget.rating;
     }
-    final total = reviews.fold<double>(0, (sum, review) => sum + review.rating);
-    return total / reviews.length;
+    final total = _reviews.fold<double>(
+      0,
+      (sum, review) => sum + review.rating,
+    );
+    return total / _reviews.length;
+  }
+
+  bool get _canSubmitReview => _selectedRating > 0;
+
+  void _submitReview() {
+    final feedback = _feedbackController.text.trim();
+    if (_selectedRating <= 0) {
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Please select stars first.')),
+        );
+      return;
+    }
+
+    final newReview = RestaurantProfileReviewPreview(
+      customerName: 'You',
+      rating: _selectedRating,
+      comment: feedback,
+      timeLabel: 'Now',
+      orderLabel: '#NEW',
+    );
+
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _reviews = <RestaurantProfileReviewPreview>[newReview, ..._reviews];
+      _selectedRating = 0;
+      _feedbackController.clear();
+    });
+
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(content: Text('Thanks for your review.')));
   }
 
   @override
   Widget build(BuildContext context) {
-    final reviewCount = reviews.length;
+    final reviewCount = _reviews.length;
     final average = _averageRating;
     return Scaffold(
       backgroundColor: const Color(0xFFF6F2ED),
@@ -3835,7 +3920,7 @@ class _RestaurantReviewsPage extends StatelessWidget {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         title: Text(
-          '$restaurantName Reviews',
+          '${widget.restaurantName} Reviews',
           style: const TextStyle(
             color: Color(0xFF221B17),
             fontSize: 20,
@@ -3903,7 +3988,100 @@ class _RestaurantReviewsPage extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 10),
-            if (reviews.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: const Color(0xFFE5DACF)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Leave a Review',
+                    style: TextStyle(
+                      color: Color(0xFF2B211B),
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: List.generate(5, (index) {
+                      final starNumber = index + 1;
+                      final isSelected = _selectedRating >= starNumber;
+                      return IconButton(
+                        onPressed: () {
+                          setState(
+                            () => _selectedRating = starNumber.toDouble(),
+                          );
+                        },
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints.tightFor(
+                          width: 36,
+                          height: 36,
+                        ),
+                        splashRadius: 20,
+                        icon: Icon(
+                          isSelected
+                              ? Icons.star_rounded
+                              : Icons.star_border_rounded,
+                          color: isSelected
+                              ? const Color(0xFFF5B63F)
+                              : const Color(0xFFC5B8AB),
+                          size: 28,
+                        ),
+                      );
+                    }),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _feedbackController,
+                    maxLines: 4,
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      hintText: 'Share your feedback (optional)',
+                      filled: true,
+                      fillColor: const Color(0xFFFEFCFA),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: Color(0xFFEADBCB)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: Color(0xFFEADBCB)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: Color(0xFFFF9E70)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _canSubmitReview ? _submitReview : null,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFFF7E4D),
+                        minimumSize: const Size.fromHeight(46),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      icon: const Icon(Icons.rate_review_rounded),
+                      label: const Text(
+                        'Submit Review',
+                        style: TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            if (_reviews.isEmpty)
               const _PopupEmptyState(
                 icon: Icons.rate_review_rounded,
                 title: 'No Reviews Yet',
@@ -3911,7 +4089,7 @@ class _RestaurantReviewsPage extends StatelessWidget {
                     'Customers have not left feedback for this restaurant yet.',
               )
             else
-              ...reviews.map(
+              ..._reviews.map(
                 (review) => Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: _RestaurantProfileReviewTile(review: review),

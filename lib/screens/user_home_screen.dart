@@ -164,6 +164,100 @@ List<DemoFeedPost> _followingRestaurantsFromPosts(List<DemoFeedPost> posts) {
   return items;
 }
 
+String _savedPlaceKey({required String title, required String handle}) {
+  final normalizedHandle = handle.trim().toLowerCase();
+  if (normalizedHandle.isNotEmpty) {
+    return normalizedHandle;
+  }
+  return title.trim().toLowerCase();
+}
+
+IconData _discoverSpotIcon(String categoryTitle) {
+  switch (categoryTitle.trim().toLowerCase()) {
+    case 'pizza':
+      return Icons.local_pizza_rounded;
+    case 'burgers':
+      return Icons.lunch_dining_rounded;
+    case 'sushi':
+      return Icons.set_meal_rounded;
+    case 'desserts':
+      return Icons.icecream_rounded;
+    default:
+      return Icons.restaurant_rounded;
+  }
+}
+
+_SavedPlaceData _savedPlaceFromDiscoverSpot(_DiscoverSpotData spot) {
+  return _SavedPlaceData(
+    title: spot.title,
+    subtitle: '${spot.categoryTitle} - ${spot.deliveryLabel}',
+    handle: spot.handle,
+    rating: spot.ratingValue,
+    caption: spot.subtitle,
+    cuisineSummary: '${spot.categoryTitle} Kitchen',
+    phoneLabel: '+961 1 554 100',
+    locationLabel: 'Nearby you',
+    followersCount: 8400 + (spot.deliveryMinutes * 28),
+    icon: _discoverSpotIcon(spot.categoryTitle),
+  );
+}
+
+_SavedPlaceData _savedPlaceFromFeedPost(DemoFeedPost post) {
+  return _SavedPlaceData(
+    title: post.restaurantName,
+    subtitle: 'Saved from profile - @${post.restaurantHandle}',
+    handle: post.restaurantHandle,
+    rating: post.rating,
+    caption: post.caption,
+    cuisineSummary: 'Trending Restaurant',
+    phoneLabel: '+961 1 554 100',
+    locationLabel: 'Saved from feed',
+    followersCount: post.followersCount,
+    icon: Icons.restaurant_rounded,
+  );
+}
+
+List<_SavedPlaceData> _savedPlacesFromHeartedRestaurants({
+  required DemoAppRepository repository,
+  required Set<String> favoriteSpotTitles,
+}) {
+  final savedByKey = <String, _SavedPlaceData>{};
+  final normalizedFavoriteTitles = favoriteSpotTitles
+      .map((title) => title.trim().toLowerCase())
+      .toSet();
+
+  for (final spot in _DiscoverTabBody._popularSpots) {
+    final key = spot.title.trim().toLowerCase();
+    final savedFromDiscoverHeart = normalizedFavoriteTitles.contains(key);
+    final savedFromProfileHeart = isCustomerRestaurantSaved(
+      restaurantName: spot.title,
+      handle: spot.handle,
+    );
+    if (!savedFromDiscoverHeart && !savedFromProfileHeart) {
+      continue;
+    }
+    final saved = _savedPlaceFromDiscoverSpot(spot);
+    savedByKey[_savedPlaceKey(title: saved.title, handle: saved.handle)] =
+        saved;
+  }
+
+  for (final post in _customerFeedPostsSnapshot(repository)) {
+    if (!isCustomerRestaurantSaved(
+      restaurantName: post.restaurantName,
+      handle: post.restaurantHandle,
+    )) {
+      continue;
+    }
+    final saved = _savedPlaceFromFeedPost(post);
+    savedByKey[_savedPlaceKey(title: saved.title, handle: saved.handle)] =
+        saved;
+  }
+
+  final items = savedByKey.values.toList()
+    ..sort((a, b) => a.title.compareTo(b.title));
+  return items;
+}
+
 void _showFeatureComingSoonSnackBar(BuildContext context, String buttonName) {
   final messenger = ScaffoldMessenger.maybeOf(context);
   if (messenger == null) {
@@ -384,6 +478,7 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   int _selectedTopTab = 1;
   int _selectedBottomIndex = 0;
+  final Set<String> _favoriteDiscoverSpotTitles = <String>{};
 
   String get _userHandle {
     final cleaned = widget.userName.trim();
@@ -397,12 +492,32 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
     _scaffoldKey.currentState?.openEndDrawer();
   }
 
+  void _setDiscoverSpotFavorite(_DiscoverSpotData spot, bool isFavorite) {
+    setCustomerRestaurantSaved(
+      restaurantName: spot.title,
+      handle: spot.handle,
+      isSaved: isFavorite,
+    );
+    setState(() {
+      final key = spot.title.trim();
+      if (isFavorite) {
+        _favoriteDiscoverSpotTitles.add(key);
+      } else {
+        _favoriteDiscoverSpotTitles.remove(key);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final showDiscover = _selectedBottomIndex == 1;
     final showOrders = _selectedBottomIndex == 2;
     final showMessages = _selectedBottomIndex == 3;
     final showProfile = _selectedBottomIndex == 4;
+    final savedPlaces = _savedPlacesFromHeartedRestaurants(
+      repository: DemoAppRepository.instance,
+      favoriteSpotTitles: _favoriteDiscoverSpotTitles,
+    );
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: showProfile || showDiscover || showOrders || showMessages
@@ -420,6 +535,7 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
               userEmail: widget.userEmail,
               userAvatarUrl: widget.userAvatarUrl,
               accountLabel: widget.accountLabel,
+              savedPlaces: savedPlaces,
               selectedBottomIndex: _selectedBottomIndex,
               onOpenMenu: _openProfileMenu,
               onBottomNavSelected: (index) {
@@ -429,6 +545,8 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
           : showDiscover
           ? _DiscoverTabBody(
               userName: widget.userName,
+              favoriteSpotTitles: _favoriteDiscoverSpotTitles,
+              onSetSpotFavorite: _setDiscoverSpotFavorite,
               selectedBottomIndex: _selectedBottomIndex,
               onBottomNavSelected: (index) {
                 setState(() => _selectedBottomIndex = index);
@@ -650,11 +768,35 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
       comments: _demoRepository.getComments(post.id),
       baseRating: post.rating,
     );
+    final resolvedReviews = reviewPreviews.isEmpty
+        ? _buildDemoRestaurantReviews(
+            restaurantName: post.restaurantName,
+            rating: post.rating,
+          )
+        : reviewPreviews;
+    var shouldOpenFullReviewsPage = false;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => _FeedReviewsBottomSheet(
+        restaurantName: post.restaurantName,
+        rating: post.rating,
+        reviews: resolvedReviews,
+        onViewAllReviews: () {
+          shouldOpenFullReviewsPage = true;
+          Navigator.of(sheetContext).pop();
+        },
+      ),
+    );
+    if (!mounted || !shouldOpenFullReviewsPage) {
+      return;
+    }
     await openRestaurantReviewsPage(
       context,
       restaurantName: post.restaurantName,
       rating: post.rating,
-      reviews: reviewPreviews,
+      reviews: resolvedReviews,
     );
   }
 
@@ -952,108 +1094,129 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
                             controller: _videoControllers[index],
                           ),
                         ),
-                        Positioned.fill(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [
-                                  const Color(0x08000000),
-                                  const Color(0x6B000000),
-                                  const Color(0xD100131A),
-                                ],
-                                stops: const [0.0, 0.6, 1.0],
+                        if (!_isVideoHoldActive) ...[
+                          Positioned.fill(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    const Color(0x08000000),
+                                    const Color(0x6B000000),
+                                    const Color(0xD100131A),
+                                  ],
+                                  stops: const [0.0, 0.6, 1.0],
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        SafeArea(
-                          bottom: false,
-                          child: Padding(
-                            padding: EdgeInsets.fromLTRB(
-                              metrics.horizontalPadding,
-                              metrics.topPadding,
-                              metrics.horizontalPadding,
-                              0,
-                            ),
-                            child: Column(
-                              children: [
-                                SizedBox(height: topOverlayReservedHeight),
-                                Expanded(
-                                  child: Align(
-                                    alignment: Alignment.bottomCenter,
-                                    child: Row(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.end,
-                                      children: [
-                                        Expanded(
-                                          child: _FeedDetails(
-                                            post: post,
+                          SafeArea(
+                            bottom: false,
+                            child: Padding(
+                              padding: EdgeInsets.fromLTRB(
+                                metrics.horizontalPadding,
+                                metrics.topPadding,
+                                metrics.horizontalPadding,
+                                0,
+                              ),
+                              child: Column(
+                                children: [
+                                  SizedBox(height: topOverlayReservedHeight),
+                                  Expanded(
+                                    child: Align(
+                                      alignment: Alignment.bottomCenter,
+                                      child: Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.end,
+                                        children: [
+                                          Expanded(
+                                            child: _FeedDetails(
+                                              post: post,
+                                              metrics: metrics,
+                                              onOpenRestaurant: () =>
+                                                  _openRestaurantDetails(post),
+                                              onOpenReviews: () =>
+                                                  _openRestaurantReviews(post),
+                                              onOpenAudio: () =>
+                                                  _openPromoDetails(post),
+                                              showOrderNow: showOrderNow,
+                                              orderNowPriceLabel:
+                                                  video.priceLabel,
+                                              onDismissOrderNow: () =>
+                                                  _dismissOrderNowForVideoIndex(
+                                                    index,
+                                                  ),
+                                              onOrderNowTap: () =>
+                                                  _openOrderNowCart(
+                                                    post,
+                                                    video,
+                                                    videoIndex: index,
+                                                  ),
+                                            ),
+                                          ),
+                                          SizedBox(width: metrics.railGap),
+                                          _ActionRail(
                                             metrics: metrics,
+                                            post: post,
                                             onOpenRestaurant: () =>
                                                 _openRestaurantDetails(post),
-                                            onOpenReviews: () =>
-                                                _openRestaurantReviews(post),
-                                            onOpenAudio: () =>
-                                                _openPromoDetails(post),
-                                            showOrderNow: showOrderNow,
-                                            orderNowPriceLabel:
-                                                video.priceLabel,
-                                            onDismissOrderNow: () =>
-                                                _dismissOrderNowForVideoIndex(
-                                                  index,
-                                                ),
-                                            onOrderNowTap: () =>
-                                                _openOrderNowCart(
-                                                  post,
-                                                  video,
-                                                  videoIndex: index,
-                                                ),
+                                            onToggleFollow: () =>
+                                                _toggleFollow(post),
+                                            onToggleLike: () =>
+                                                _toggleLike(post),
+                                            onOpenComments: () =>
+                                                _openComments(post),
+                                            onShare: () => _sharePromo(post),
                                           ),
-                                        ),
-                                        SizedBox(width: metrics.railGap),
-                                        _ActionRail(
-                                          metrics: metrics,
-                                          post: post,
-                                          onOpenRestaurant: () =>
-                                              _openRestaurantDetails(post),
-                                          onToggleFollow: () =>
-                                              _toggleFollow(post),
-                                          onToggleLike: () => _toggleLike(post),
-                                          onOpenComments: () =>
-                                              _openComments(post),
-                                          onShare: () => _sharePromo(post),
-                                        ),
-                                      ],
+                                        ],
+                                      ),
                                     ),
                                   ),
-                                ),
-                                SizedBox(
-                                  height: _clampDouble(
-                                    10 * metrics.scale,
-                                    6,
-                                    12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        if (likeBursts.isNotEmpty)
-                          Positioned.fill(
-                            child: IgnorePointer(
-                              child: Stack(
-                                children: [
-                                  for (final burst in likeBursts)
-                                    _TastyLikeBurst(
-                                      key: ValueKey<int>(burst.id),
-                                      tapPosition: burst.tapPosition,
+                                  SizedBox(
+                                    height: _clampDouble(
+                                      10 * metrics.scale,
+                                      6,
+                                      12,
                                     ),
+                                  ),
                                 ],
                               ),
                             ),
                           ),
+                          if (likeBursts.isNotEmpty)
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                child: Stack(
+                                  children: [
+                                    for (final burst in likeBursts)
+                                      _TastyLikeBurst(
+                                        key: ValueKey<int>(burst.id),
+                                        tapPosition: burst.tapPosition,
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          Positioned(
+                            left: _clampDouble(10 * metrics.scale, 8, 14),
+                            right: _clampDouble(10 * metrics.scale, 8, 14),
+                            bottom: _clampDouble(8 * metrics.scale, 6, 10),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(999),
+                              child: VideoProgressIndicator(
+                                _videoControllers[index],
+                                allowScrubbing: true,
+                                padding: EdgeInsets.zero,
+                                colors: const VideoProgressColors(
+                                  playedColor: Color(0xFFFF7E4D),
+                                  bufferedColor: Color(0x80FFFFFF),
+                                  backgroundColor: Color(0x50000000),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   );
@@ -1070,30 +1233,31 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
                 bottomInset: navBarBottomInset,
               ),
             ),
-            Align(
-              alignment: Alignment.topCenter,
-              child: SafeArea(
-                bottom: false,
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    metrics.horizontalPadding,
-                    metrics.topPadding,
-                    metrics.horizontalPadding,
-                    0,
-                  ),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: _TopControls(
-                      metrics: metrics,
-                      selectedTab: widget.selectedTopTab,
-                      onTabSelected: widget.onTopTabSelected,
-                      onOpenSearch: _openSearch,
-                      onOpenNotifications: _openNotifications,
+            if (!_isVideoHoldActive)
+              Align(
+                alignment: Alignment.topCenter,
+                child: SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      metrics.horizontalPadding,
+                      metrics.topPadding,
+                      metrics.horizontalPadding,
+                      0,
+                    ),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: _TopControls(
+                        metrics: metrics,
+                        selectedTab: widget.selectedTopTab,
+                        onTabSelected: widget.onTopTabSelected,
+                        onOpenSearch: _openSearch,
+                        onOpenNotifications: _openNotifications,
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
           ],
         );
       },
@@ -1984,11 +2148,16 @@ class _FeedVideoPostData {
 class _DiscoverTabBody extends StatefulWidget {
   const _DiscoverTabBody({
     required this.userName,
+    required this.favoriteSpotTitles,
+    required this.onSetSpotFavorite,
     required this.selectedBottomIndex,
     required this.onBottomNavSelected,
   });
 
   final String userName;
+  final Set<String> favoriteSpotTitles;
+  final void Function(_DiscoverSpotData spot, bool isFavorite)
+  onSetSpotFavorite;
   final int selectedBottomIndex;
   final ValueChanged<int> onBottomNavSelected;
 
@@ -2106,7 +2275,6 @@ class _DiscoverTabBody extends StatefulWidget {
 }
 
 class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
-  final Set<String> _favoriteSpotTitles = <String>{};
   Set<String> _activeCuisineFilters = <String>{};
   double _minimumRatingFilter = 0;
   int? _maximumDeliveryMinutesFilter;
@@ -2484,6 +2652,10 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
     _DiscoverSpotData spot,
   ) async {
     await _openDiscoverRestaurantProfile(context, spot);
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
   }
 
   Future<void> _openPopularSpotMenu(
@@ -2558,14 +2730,20 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
     );
   }
 
+  bool _isSpotSaved(_DiscoverSpotData spot) {
+    final savedFromDiscoverHeart = widget.favoriteSpotTitles.contains(
+      spot.title.trim(),
+    );
+    final savedFromProfileHeart = isCustomerRestaurantSaved(
+      restaurantName: spot.title,
+      handle: spot.handle,
+    );
+    return savedFromDiscoverHeart || savedFromProfileHeart;
+  }
+
   void _toggleSpotFavorite(_DiscoverSpotData spot) {
-    setState(() {
-      if (_favoriteSpotTitles.contains(spot.title)) {
-        _favoriteSpotTitles.remove(spot.title);
-      } else {
-        _favoriteSpotTitles.add(spot.title);
-      }
-    });
+    final nextSaved = !_isSpotSaved(spot);
+    widget.onSetSpotFavorite(spot, nextSaved);
   }
 
   void _openQuickCravingDetails(BuildContext context, _DiscoverDealData deal) {
@@ -2850,8 +3028,7 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                                       return _DiscoverSpotCard(
                                         data: spot,
                                         metrics: metrics,
-                                        isFavorite: _favoriteSpotTitles
-                                            .contains(spot.title),
+                                        isFavorite: _isSpotSaved(spot),
                                         onTap: () =>
                                             _openPopularSpot(context, spot),
                                         onViewMenuTap: () =>
@@ -7065,6 +7242,7 @@ class _ProfileTabBody extends StatelessWidget {
     this.userEmail,
     this.userAvatarUrl,
     this.accountLabel,
+    required this.savedPlaces,
     required this.selectedBottomIndex,
     required this.onOpenMenu,
     required this.onBottomNavSelected,
@@ -7075,6 +7253,7 @@ class _ProfileTabBody extends StatelessWidget {
   final String? userEmail;
   final String? userAvatarUrl;
   final String? accountLabel;
+  final List<_SavedPlaceData> savedPlaces;
   final int selectedBottomIndex;
   final VoidCallback onOpenMenu;
   final ValueChanged<int> onBottomNavSelected;
@@ -7083,33 +7262,6 @@ class _ProfileTabBody extends StatelessWidget {
       List<_PastOrderEntryData>.unmodifiable(
         _OrdersTabBody._pastOrders.take(2),
       );
-
-  static const List<_SavedPlaceData> _savedPlaces = [
-    _SavedPlaceData(
-      title: 'The Golden Spoon',
-      subtitle: 'Italian - 1.2 mi',
-      handle: 'thegoldenspoon',
-      rating: 4.9,
-      caption: 'Italian comfort and signature pasta specials near you.',
-      cuisineSummary: 'Italian Kitchen',
-      phoneLabel: '+961 1 554 101',
-      locationLabel: 'Mar Mikhael, Beirut',
-      followersCount: 18320,
-      icon: Icons.restaurant_rounded,
-    ),
-    _SavedPlaceData(
-      title: 'Bean & Brew',
-      subtitle: 'Cafe - 0.5 mi',
-      handle: 'beanandbrew',
-      rating: 4.7,
-      caption: 'Coffee house favorites, fresh bakery treats, and brunch bites.',
-      cuisineSummary: 'Specialty Cafe',
-      phoneLabel: '+961 1 554 102',
-      locationLabel: 'Hamra, Beirut',
-      followersCount: 12640,
-      icon: Icons.local_cafe_rounded,
-    ),
-  ];
 
   void _openFollowingRestaurants(
     BuildContext context,
@@ -7379,42 +7531,60 @@ class _ProfileTabBody extends StatelessWidget {
                                   14,
                                 ),
                               ),
-                              _ProfilePanel(
-                                child: Column(
-                                  children: List.generate(_savedPlaces.length, (
-                                    index,
-                                  ) {
-                                    final place = _savedPlaces[index];
-                                    return Column(
-                                      children: [
-                                        _SavedPlaceTile(
-                                          data: place,
-                                          metrics: metrics,
-                                          onTap: () => _openSavedPlaceProfile(
-                                            context,
-                                            place,
-                                          ),
-                                        ),
-                                        if (index != _savedPlaces.length - 1)
-                                          Divider(
-                                            height: 1,
-                                            color: const Color(0xFFF0E2D3),
-                                            indent: _clampDouble(
-                                              74 * metrics.scale,
-                                              58,
-                                              74,
+                              if (savedPlaces.isEmpty)
+                                _ProfilePanel(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(
+                                      _clampDouble(18 * metrics.scale, 14, 18),
+                                    ),
+                                    child: const Text(
+                                      'Save a restaurant from its profile or heart it in Discover and it will appear here.',
+                                      style: TextStyle(
+                                        color: Color(0xFF7D6C60),
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              else
+                                _ProfilePanel(
+                                  child: Column(
+                                    children: List.generate(
+                                      savedPlaces.length,
+                                      (index) {
+                                        final place = savedPlaces[index];
+                                        return Column(
+                                          children: [
+                                            _SavedPlaceTile(
+                                              data: place,
+                                              metrics: metrics,
+                                              onTap: () =>
+                                                  _openSavedPlaceProfile(
+                                                    context,
+                                                    place,
+                                                  ),
                                             ),
-                                            endIndent: _clampDouble(
-                                              18 * metrics.scale,
-                                              14,
-                                              18,
-                                            ),
-                                          ),
-                                      ],
-                                    );
-                                  }),
+                                            if (index != savedPlaces.length - 1)
+                                              Divider(
+                                                height: 1,
+                                                color: const Color(0xFFF0E2D3),
+                                                indent: _clampDouble(
+                                                  74 * metrics.scale,
+                                                  58,
+                                                  74,
+                                                ),
+                                                endIndent: _clampDouble(
+                                                  18 * metrics.scale,
+                                                  14,
+                                                  18,
+                                                ),
+                                              ),
+                                          ],
+                                        );
+                                      },
+                                    ),
+                                  ),
                                 ),
-                              ),
                               const SizedBox.shrink(),
                             ],
                           ),
@@ -10534,6 +10704,253 @@ class _SwipeDismissSurfaceState extends State<_SwipeDismissSurface> {
       onVerticalDragEnd: (details) =>
           _dismissByVelocity(details.primaryVelocity ?? 0),
       child: widget.child,
+    );
+  }
+}
+
+class _FeedReviewsBottomSheet extends StatelessWidget {
+  const _FeedReviewsBottomSheet({
+    required this.restaurantName,
+    required this.rating,
+    required this.reviews,
+    required this.onViewAllReviews,
+  });
+
+  final String restaurantName;
+  final double rating;
+  final List<RestaurantProfileReviewPreview> reviews;
+  final VoidCallback onViewAllReviews;
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final sheetHeight = _clampDouble(media.size.height * 0.56, 320, 520);
+    return SafeArea(
+      top: false,
+      child: Container(
+        height: sheetHeight,
+        decoration: const BoxDecoration(
+          color: Color(0xFFFFFBF8),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+        ),
+        child: Column(
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 46,
+              height: 5,
+              decoration: BoxDecoration(
+                color: const Color(0xFFD2C5BB),
+                borderRadius: BorderRadius.circular(20),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 10, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${_formatCompactCount(reviews.length)} reviews',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF231A16),
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded),
+                    color: const Color(0xFF7A695E),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      restaurantName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF7E6D62),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Icon(
+                    Icons.star_rounded,
+                    color: Color(0xFFF5B63F),
+                    size: 16,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    rating.toStringAsFixed(1),
+                    style: const TextStyle(
+                      color: Color(0xFF5B4A41),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1, color: Color(0xFFECE1D7)),
+            Expanded(
+              child: reviews.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'No reviews yet.',
+                        style: TextStyle(
+                          color: Color(0xFF7E6D62),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                      itemCount: reviews.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        final review = reviews[index];
+                        return Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFF4EC),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: const Color(0xFFF0E2D5)),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Container(
+                                width: 34,
+                                height: 34,
+                                alignment: Alignment.center,
+                                decoration: const BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Color(0xFFFFE4D1),
+                                ),
+                                child: const Icon(
+                                  Icons.person_rounded,
+                                  size: 18,
+                                  color: Color(0xFF9A5A3B),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            review.customerName,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Color(0xFF231A16),
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          review.timeLabel,
+                                          style: const TextStyle(
+                                            color: Color(0xFF8A7A6F),
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.star_rounded,
+                                          color: Color(0xFFF5B63F),
+                                          size: 14,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          review.rating.toStringAsFixed(1),
+                                          style: const TextStyle(
+                                            color: Color(0xFF5B4A41),
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            review.orderLabel,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Color(0xFF8A7A6F),
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      review.comment,
+                                      style: const TextStyle(
+                                        color: Color(0xFF5B4A41),
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        height: 1.3,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: onViewAllReviews,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF7E4D),
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(50),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  icon: const Icon(Icons.reviews_rounded),
+                  label: const Text(
+                    'View All Reviews',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
