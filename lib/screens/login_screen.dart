@@ -453,6 +453,7 @@ class _LoginScreenState extends State<LoginScreen> {
             userEmail: customerEmail,
             userAvatarUrl: customerAvatarUrl,
             accountLabel: customerAccountLabel,
+            authSession: customerSession,
           ),
         ),
       );

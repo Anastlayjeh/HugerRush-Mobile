@@ -188,6 +188,10 @@ class _AppShellState extends State<AppShell> {
         userEmail: _extractUserEmail(session.user),
         userAvatarUrl: _extractUserAvatarUrl(session.user),
         accountLabel: _extractUserAccountLabel(session),
+        authSession: session,
+        onSessionUpdated: (updatedSession) async =>
+            _handleAuthenticated(updatedSession),
+        onSessionExpired: _handleLogout,
       );
     }
 

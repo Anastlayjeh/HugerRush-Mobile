@@ -3929,10 +3929,12 @@ class SearchScreen extends StatefulWidget {
     super.key,
     this.initialQuery = '',
     this.includeCustomers = true,
+    this.returnSubmittedQuery = false,
   });
 
   final String initialQuery;
   final bool includeCustomers;
+  final bool returnSubmittedQuery;
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -4009,6 +4011,17 @@ class _SearchScreenState extends State<SearchScreen> {
     });
   }
 
+  Future<void> _handleSubmittedSearch(String query) async {
+    final cleanedQuery = query.trim();
+    if (widget.returnSubmittedQuery) {
+      if (cleanedQuery.isNotEmpty) {
+        Navigator.of(context).pop(cleanedQuery);
+      }
+      return;
+    }
+    await _runSearch(cleanedQuery);
+  }
+
   void _handleBackPressed() {
     FocusScope.of(context).unfocus();
     final navigator = Navigator.of(context);
@@ -4059,7 +4072,7 @@ class _SearchScreenState extends State<SearchScreen> {
             TextField(
               controller: _controller,
               textInputAction: TextInputAction.search,
-              onSubmitted: _runSearch,
+              onSubmitted: _handleSubmittedSearch,
               decoration: InputDecoration(
                 hintText: _searchHintText,
                 prefixIcon: const Icon(Icons.search_rounded),

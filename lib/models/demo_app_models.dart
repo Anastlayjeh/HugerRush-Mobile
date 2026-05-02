@@ -16,6 +16,14 @@ class DemoFeedPost {
     required this.commentCount,
     required this.isLiked,
     required this.isFollowing,
+    this.restaurantId,
+    this.menuItemName,
+    this.menuItemPrice,
+    this.thumbnailUrl,
+    this.previewUrl,
+    this.saveCount = 0,
+    this.shareCount = 0,
+    this.isSaved = false,
   });
 
   final String id;
@@ -30,6 +38,14 @@ class DemoFeedPost {
   final int commentCount;
   final bool isLiked;
   final bool isFollowing;
+  final String? restaurantId;
+  final String? menuItemName;
+  final double? menuItemPrice;
+  final String? thumbnailUrl;
+  final String? previewUrl;
+  final int saveCount;
+  final int shareCount;
+  final bool isSaved;
 
   DemoFeedPost copyWith({
     String? id,
@@ -44,6 +60,14 @@ class DemoFeedPost {
     int? commentCount,
     bool? isLiked,
     bool? isFollowing,
+    String? restaurantId,
+    String? menuItemName,
+    double? menuItemPrice,
+    String? thumbnailUrl,
+    String? previewUrl,
+    int? saveCount,
+    int? shareCount,
+    bool? isSaved,
   }) {
     return DemoFeedPost(
       id: id ?? this.id,
@@ -58,6 +82,14 @@ class DemoFeedPost {
       commentCount: commentCount ?? this.commentCount,
       isLiked: isLiked ?? this.isLiked,
       isFollowing: isFollowing ?? this.isFollowing,
+      restaurantId: restaurantId ?? this.restaurantId,
+      menuItemName: menuItemName ?? this.menuItemName,
+      menuItemPrice: menuItemPrice ?? this.menuItemPrice,
+      thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
+      previewUrl: previewUrl ?? this.previewUrl,
+      saveCount: saveCount ?? this.saveCount,
+      shareCount: shareCount ?? this.shareCount,
+      isSaved: isSaved ?? this.isSaved,
     );
   }
 }
