@@ -3925,9 +3925,14 @@ class _RestaurantReviewsPage extends StatelessWidget {
 }
 
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({super.key, this.initialQuery = ''});
+  const SearchScreen({
+    super.key,
+    this.initialQuery = '',
+    this.includeCustomers = true,
+  });
 
   final String initialQuery;
+  final bool includeCustomers;
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -3936,9 +3941,22 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   final _repository = DemoAppRepository.instance;
   late final TextEditingController _controller;
+  int _activeSearchRequestId = 0;
 
   List<DemoSearchResult> _results = const <DemoSearchResult>[];
   bool _isLoading = false;
+
+  String get _searchHintText {
+    return widget.includeCustomers
+        ? 'Search restaurants or customers'
+        : 'Search restaurants';
+  }
+
+  String get _searchPromptText {
+    return widget.includeCustomers
+        ? 'Start typing to search restaurants or customers.'
+        : 'Start typing to search restaurants.';
+  }
 
   @override
   void initState() {
@@ -3951,9 +3969,7 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   void _handleQueryChanged() {
-    if (mounted) {
-      setState(() {});
-    }
+    _runSearch(_controller.text);
   }
 
   @override
@@ -3964,9 +3980,27 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Future<void> _runSearch(String query) async {
+    final cleanedQuery = query.trim();
+    final requestId = ++_activeSearchRequestId;
+    if (cleanedQuery.isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _results = const <DemoSearchResult>[];
+        _isLoading = false;
+      });
+      return;
+    }
     setState(() => _isLoading = true);
-    final results = await _repository.search(query);
+    final results = await _repository.search(
+      cleanedQuery,
+      includeCustomers: widget.includeCustomers,
+    );
     if (!mounted) {
+      return;
+    }
+    if (requestId != _activeSearchRequestId) {
       return;
     }
     setState(() {
@@ -3975,10 +4009,49 @@ class _SearchScreenState extends State<SearchScreen> {
     });
   }
 
+  void _handleBackPressed() {
+    FocusScope.of(context).unfocus();
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.pop();
+      return;
+    }
+    final rootNavigator = Navigator.of(context, rootNavigator: true);
+    if (rootNavigator.canPop()) {
+      rootNavigator.pop();
+    }
+  }
+
+  Future<void> _openRestaurantProfileFromResult(DemoSearchResult result) async {
+    if (!result.id.startsWith('post-')) {
+      return;
+    }
+    final postId = result.id.substring('post-'.length);
+    final post = _repository.findFeedPost(postId);
+    if (post == null || !mounted) {
+      return;
+    }
+    await showRestaurantProfilePopup(
+      context,
+      restaurantName: post.restaurantName,
+      handle: post.restaurantHandle,
+      rating: post.rating,
+      caption: post.caption,
+      followersCountLabel: '${post.followersCount} followers',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Search')),
+      appBar: AppBar(
+        leading: IconButton(
+          onPressed: _handleBackPressed,
+          icon: const Icon(Icons.arrow_back_rounded),
+          tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+        ),
+        title: const Text('Search'),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -3988,7 +4061,7 @@ class _SearchScreenState extends State<SearchScreen> {
               textInputAction: TextInputAction.search,
               onSubmitted: _runSearch,
               decoration: InputDecoration(
-                hintText: 'Search promos, orders, or messages',
+                hintText: _searchHintText,
                 prefixIcon: const Icon(Icons.search_rounded),
                 suffixIcon: IconButton(
                   onPressed: _controller.text.trim().isEmpty
@@ -4005,40 +4078,71 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            if (_isLoading)
-              const Expanded(child: Center(child: CircularProgressIndicator()))
-            else if (_results.isEmpty)
-              const Expanded(
+            if (_controller.text.trim().isEmpty)
+              Expanded(
                 child: Center(
-                  child: Text(
-                    'No results yet. Try a restaurant, customer, or order ID.',
-                    textAlign: TextAlign.center,
-                  ),
+                  child: Text(_searchPromptText, textAlign: TextAlign.center),
                 ),
               )
             else
-              Expanded(
-                child: ListView.separated(
-                  itemCount: _results.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 10),
-                  itemBuilder: (context, index) {
-                    final result = _results[index];
-                    return ListTile(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
+              Align(
+                alignment: Alignment.topCenter,
+                child: Container(
+                  constraints: const BoxConstraints(maxHeight: 360),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFE4DDD6)),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x1A000000),
+                        blurRadius: 14,
+                        offset: Offset(0, 6),
                       ),
-                      tileColor: const Color(0xFFF3F0EC),
-                      title: Text(result.title),
-                      subtitle: Text(result.subtitle),
-                      trailing: Text(
-                        result.categoryLabel,
-                        style: const TextStyle(
-                          color: Color(0xFFFF7E4D),
-                          fontWeight: FontWeight.w700,
+                    ],
+                  ),
+                  child: _isLoading
+                      ? const Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Center(child: CircularProgressIndicator()),
+                        )
+                      : _results.isEmpty
+                      ? const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 20),
+                          child: Center(
+                            child: Text(
+                              'No match found',
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        )
+                      : ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: _results.length,
+                          separatorBuilder: (_, _) => const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final result = _results[index];
+                            return ListTile(
+                              onTap: result.id.startsWith('post-')
+                                  ? () =>
+                                        _openRestaurantProfileFromResult(result)
+                                  : null,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              tileColor: const Color(0xFFF3F0EC),
+                              title: Text(result.title),
+                              subtitle: Text(result.subtitle),
+                              trailing: Text(
+                                result.categoryLabel,
+                                style: const TextStyle(
+                                  color: Color(0xFFFF7E4D),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            );
+                          },
                         ),
-                      ),
-                    );
-                  },
                 ),
               ),
           ],

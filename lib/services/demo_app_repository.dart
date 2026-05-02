@@ -5,6 +5,20 @@ class DemoAppRepository {
 
   static final DemoAppRepository instance = DemoAppRepository._();
 
+  static String _normalizeSearchValue(String value) {
+    return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+  }
+
+  static bool _matchesLettersInOrder({
+    required String source,
+    required String query,
+  }) {
+    if (query.isEmpty) {
+      return false;
+    }
+    return source.contains(query);
+  }
+
   final Map<String, DemoFeedPost> _feedPosts = <String, DemoFeedPost>{
     'for-you': const DemoFeedPost(
       id: 'for-you',
@@ -52,42 +66,43 @@ class DemoAppRepository {
     ),
   };
 
-  final Map<String, List<DemoComment>> _commentsByPost = <String, List<DemoComment>>{
-    'for-you': <DemoComment>[
-      DemoComment(
-        id: 'c1',
-        authorName: 'Lina M.',
-        body: 'The crust looks amazing.',
-        createdAt: DateTime.now().subtract(const Duration(minutes: 18)),
-        isRestaurantReply: false,
-      ),
-      DemoComment(
-        id: 'c2',
-        authorName: 'Bella Italia',
-        body: 'Fresh from the oven. Come hungry.',
-        createdAt: DateTime.now().subtract(const Duration(minutes: 12)),
-        isRestaurantReply: true,
-      ),
-    ],
-    'following': <DemoComment>[
-      DemoComment(
-        id: 'c3',
-        authorName: 'Rami A.',
-        body: 'Saving this for dinner.',
-        createdAt: DateTime.now().subtract(const Duration(minutes: 24)),
-        isRestaurantReply: false,
-      ),
-    ],
-    'vendor-feed': <DemoComment>[
-      DemoComment(
-        id: 'c4',
-        authorName: 'Maya K.',
-        body: 'Looks perfect.',
-        createdAt: DateTime.now().subtract(const Duration(minutes: 11)),
-        isRestaurantReply: false,
-      ),
-    ],
-  };
+  final Map<String, List<DemoComment>> _commentsByPost =
+      <String, List<DemoComment>>{
+        'for-you': <DemoComment>[
+          DemoComment(
+            id: 'c1',
+            authorName: 'Lina M.',
+            body: 'The crust looks amazing.',
+            createdAt: DateTime.now().subtract(const Duration(minutes: 18)),
+            isRestaurantReply: false,
+          ),
+          DemoComment(
+            id: 'c2',
+            authorName: 'Bella Italia',
+            body: 'Fresh from the oven. Come hungry.',
+            createdAt: DateTime.now().subtract(const Duration(minutes: 12)),
+            isRestaurantReply: true,
+          ),
+        ],
+        'following': <DemoComment>[
+          DemoComment(
+            id: 'c3',
+            authorName: 'Rami A.',
+            body: 'Saving this for dinner.',
+            createdAt: DateTime.now().subtract(const Duration(minutes: 24)),
+            isRestaurantReply: false,
+          ),
+        ],
+        'vendor-feed': <DemoComment>[
+          DemoComment(
+            id: 'c4',
+            authorName: 'Maya K.',
+            body: 'Looks perfect.',
+            createdAt: DateTime.now().subtract(const Duration(minutes: 11)),
+            isRestaurantReply: false,
+          ),
+        ],
+      };
 
   List<DemoNotificationItem> _notifications = <DemoNotificationItem>[
     const DemoNotificationItem(
@@ -191,7 +206,8 @@ class DemoAppRepository {
         DemoConversationMessage(
           id: 'm1',
           senderName: 'Sara N.',
-          body: 'Can I switch my side from fries to grilled veggies before pickup?',
+          body:
+              'Can I switch my side from fries to grilled veggies before pickup?',
           sentAt: DateTime.now().subtract(const Duration(minutes: 2)),
           fromRestaurant: false,
         ),
@@ -330,14 +346,18 @@ class DemoAppRepository {
     final nextLiked = !post.isLiked;
     final updated = post.copyWith(
       isLiked: nextLiked,
-      likeCount: nextLiked ? post.likeCount + 1 : (post.likeCount - 1).clamp(0, 1 << 31),
+      likeCount: nextLiked
+          ? post.likeCount + 1
+          : (post.likeCount - 1).clamp(0, 1 << 31),
     );
     _feedPosts[postId] = updated;
     return updated;
   }
 
   List<DemoComment> getComments(String postId) {
-    return List<DemoComment>.from(_commentsByPost[postId] ?? const <DemoComment>[]);
+    return List<DemoComment>.from(
+      _commentsByPost[postId] ?? const <DemoComment>[],
+    );
   }
 
   Future<List<DemoComment>> addComment({
@@ -350,7 +370,9 @@ class DemoAppRepository {
     if (cleaned.isEmpty) {
       return getComments(postId);
     }
-    final items = List<DemoComment>.from(_commentsByPost[postId] ?? const <DemoComment>[]);
+    final items = List<DemoComment>.from(
+      _commentsByPost[postId] ?? const <DemoComment>[],
+    );
     items.add(
       DemoComment(
         id: 'comment-${DateTime.now().microsecondsSinceEpoch}',
@@ -381,49 +403,56 @@ class DemoAppRepository {
     return List<DemoNotificationItem>.from(_notifications);
   }
 
-  Future<List<DemoSearchResult>> search(String query) async {
+  Future<List<DemoSearchResult>> search(
+    String query, {
+    bool includeCustomers = true,
+  }) async {
     await Future<void>.delayed(const Duration(milliseconds: 120));
-    final cleaned = query.trim().toLowerCase();
+    final cleaned = _normalizeSearchValue(query.trim());
     if (cleaned.isEmpty) {
       return const <DemoSearchResult>[];
     }
     final results = <DemoSearchResult>[];
+    final seenRestaurantKeys = <String>{};
+    final seenCustomerKeys = <String>{};
     for (final post in _feedPosts.values) {
-      final haystack = '${post.restaurantName} ${post.caption} ${post.tags}'.toLowerCase();
-      if (haystack.contains(cleaned)) {
+      final haystack = _normalizeSearchValue(
+        '${post.restaurantName} ${post.restaurantHandle}',
+      );
+      if (_matchesLettersInOrder(source: haystack, query: cleaned)) {
+        final handleKey = post.restaurantHandle.trim().toLowerCase();
+        final restaurantKey = handleKey.isEmpty
+            ? post.restaurantName.trim().toLowerCase()
+            : handleKey;
+        if (!seenRestaurantKeys.add(restaurantKey)) {
+          continue;
+        }
         results.add(
           DemoSearchResult(
             id: 'post-${post.id}',
             title: post.restaurantName,
             subtitle: post.caption,
-            categoryLabel: 'Promo',
+            categoryLabel: 'Restaurant',
           ),
         );
       }
     }
-    for (final order in _orders) {
-      final haystack = '${order.id} ${order.customerName} ${order.itemSummary}'.toLowerCase();
-      if (haystack.contains(cleaned)) {
-        results.add(
-          DemoSearchResult(
-            id: 'order-${order.id}',
-            title: order.id,
-            subtitle: '${order.customerName} • ${order.itemSummary}',
-            categoryLabel: 'Order',
-          ),
-        );
-      }
-    }
-    for (final thread in _threads) {
-      final haystack =
-          '${thread.customerName} ${thread.lastMessage} ${thread.orderLabel}'.toLowerCase();
-      if (haystack.contains(cleaned)) {
+    if (includeCustomers) {
+      for (final thread in _threads) {
+        final customerKey = thread.customerName.trim().toLowerCase();
+        if (customerKey.isEmpty || !seenCustomerKeys.add(customerKey)) {
+          continue;
+        }
+        final haystack = _normalizeSearchValue(thread.customerName);
+        if (!_matchesLettersInOrder(source: haystack, query: cleaned)) {
+          continue;
+        }
         results.add(
           DemoSearchResult(
             id: 'thread-${thread.id}',
             title: thread.customerName,
             subtitle: thread.lastMessage,
-            categoryLabel: 'Message',
+            categoryLabel: 'Customer',
           ),
         );
       }
@@ -431,9 +460,11 @@ class DemoAppRepository {
     return results;
   }
 
-  List<DemoOrder> getOrders({
-    bool? completed,
-  }) {
+  DemoFeedPost? findFeedPost(String postId) {
+    return _feedPosts[postId];
+  }
+
+  List<DemoOrder> getOrders({bool? completed}) {
     if (completed == null) {
       return List<DemoOrder>.from(_orders);
     }
@@ -458,6 +489,8 @@ class DemoAppRepository {
   Future<DemoUploadedPost> createPost({
     required String fileName,
     required int fileSizeBytes,
+    required String caption,
+    required String hashtags,
   }) async {
     await Future<void>.delayed(const Duration(milliseconds: 650));
     final post = DemoUploadedPost(
@@ -465,6 +498,8 @@ class DemoAppRepository {
       fileName: fileName,
       fileSizeBytes: fileSizeBytes,
       createdAt: DateTime.now(),
+      caption: caption,
+      hashtags: hashtags,
     );
     _uploadedPosts.insert(0, post);
     _notifications = <DemoNotificationItem>[
@@ -486,7 +521,10 @@ class DemoAppRepository {
   }
 
   List<String> getCustomerNames() {
-    final names = _threads.map((thread) => thread.customerName).toSet().toList();
+    final names = _threads
+        .map((thread) => thread.customerName)
+        .toSet()
+        .toList();
     names.sort();
     return names;
   }

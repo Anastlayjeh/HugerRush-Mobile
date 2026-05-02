@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
@@ -38,6 +39,8 @@ String _feedCreatorLabel(String restaurantName) {
       .join(' ');
   return (label.isEmpty ? 'HR' : label).toUpperCase();
 }
+
+enum _VideoHoldAction { none, pause, speed2x }
 
 class RestaurantFeedScreen extends StatefulWidget {
   const RestaurantFeedScreen({
@@ -153,9 +156,11 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     ),
     _FeedVideoPostData(
       videoAssetPath: 'assets/videos/home_video_2.mp4',
-      postId: 'following',
+      postId: 'vendor-feed',
     ),
   ];
+  static const String _sampleProfileVideoAssetPath =
+      'assets/videos/home_video_2.mp4';
 
   final _profileScaffoldKey = GlobalKey<ScaffoldState>();
   final _demoRepository = DemoAppRepository.instance;
@@ -178,6 +183,9 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   int _currentVideoIndex = 0;
   int _videoPlaybackSyncVersion = 0;
   int _nextLikeBurstId = 0;
+  bool _isVideoHoldActive = false;
+  _VideoHoldAction _videoHoldAction = _VideoHoldAction.none;
+  bool _isVideoManuallyPaused = false;
 
   late _RestaurantProfileInfo _profileInfo;
   bool _isRefreshingProfile = false;
@@ -230,6 +238,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       primary: widget.initialUserData,
       fallbackName: widget.restaurantName,
     );
+    _addSampleProfileVideo();
     _refreshRestaurantProfile();
   }
 
@@ -288,6 +297,22 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   List<RestaurantMenuItem> get _menuItemsForDisplay =>
       _restaurantMenuItems.isEmpty ? _fallbackMenuItems : _restaurantMenuItems;
 
+  void _addSampleProfileVideo() {
+    if (_uploadedVideos.isNotEmpty) {
+      return;
+    }
+    _uploadedVideos.add(
+      _UploadedRestaurantVideo(
+        name: 'sample_promo.mp4',
+        sizeBytes: 12400000,
+        uploadedAt: DateTime.now().subtract(const Duration(hours: 2)),
+        caption: 'Fresh out of the oven and ready for tonight.',
+        hashtags: '#pizza #fresh #hugerush',
+        videoAssetPath: _sampleProfileVideoAssetPath,
+      ),
+    );
+  }
+
   DemoFeedPost get _activeFeedPost {
     final index = _currentVideoIndex.clamp(0, _feedVideos.length - 1);
     final video = _feedVideos[index];
@@ -297,10 +322,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   DemoFeedPost _loadPostForId(String postId) {
     final post = postId == 'vendor-feed'
         ? _demoRepository.getFeedPost(following: true, vendorView: true)
-        : _demoRepository.getFeedPost(following: postId == 'following');
-    if (postId == 'following' && post.isLiked) {
-      return post.copyWith(isLiked: false);
-    }
+        : _demoRepository.getFeedPost(following: false);
     return post;
   }
 
@@ -381,9 +403,11 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   }
 
   Future<void> _openSearch() async {
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const SearchScreen()));
+    await Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const SearchScreen(includeCustomers: false),
+      ),
+    );
   }
 
   Future<void> _openNotifications() async {
@@ -439,14 +463,60 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     );
   }
 
-  Future<void> _toggleVendorFollow([DemoFeedPost? post]) async {
-    final targetPost = post ?? _activeFeedPost;
-    final updated = await _demoRepository.toggleFollow(targetPost.id);
-    if (!mounted) {
+  Future<void> _openUploadedVideo(_UploadedRestaurantVideo video) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _UploadedVideoPlayerScreen(
+          video: video,
+          profileInfo: _profileInfo,
+          uploadedVideos: _uploadedVideos,
+          menuItems: _menuItemsForDisplay,
+          onOpenFollowers: () =>
+              _openFollowersList(restaurantName: _profileInfo.name),
+          onUpdateVideo: _updateUploadedVideo,
+          onDeleteVideo: _deleteUploadedVideo,
+        ),
+      ),
+    );
+  }
+
+  int _indexOfUploadedVideo(_UploadedRestaurantVideo target) {
+    final identityIndex = _uploadedVideos.indexWhere(
+      (item) => identical(item, target),
+    );
+    if (identityIndex >= 0) {
+      return identityIndex;
+    }
+    return _uploadedVideos.indexWhere(
+      (item) =>
+          item.name == target.name &&
+          item.sizeBytes == target.sizeBytes &&
+          item.uploadedAt == target.uploadedAt &&
+          item.videoFilePath == target.videoFilePath &&
+          item.videoAssetPath == target.videoAssetPath,
+    );
+  }
+
+  void _updateUploadedVideo(
+    _UploadedRestaurantVideo original,
+    _UploadedRestaurantVideo updated,
+  ) {
+    final index = _indexOfUploadedVideo(original);
+    if (index < 0 || !mounted) {
       return;
     }
     setState(() {
-      _feedPostsById[targetPost.id] = updated;
+      _uploadedVideos[index] = updated;
+    });
+  }
+
+  void _deleteUploadedVideo(_UploadedRestaurantVideo target) {
+    final index = _indexOfUploadedVideo(target);
+    if (index < 0 || !mounted) {
+      return;
+    }
+    setState(() {
+      _uploadedVideos.removeAt(index);
     });
   }
 
@@ -586,6 +656,9 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
   void _handleVideoPageChanged(int index) {
     _currentVideoIndex = index;
+    _isVideoHoldActive = false;
+    _videoHoldAction = _VideoHoldAction.none;
+    _isVideoManuallyPaused = false;
     unawaited(
       _syncVideoPlayback(resetCurrentToStart: true, resetInactiveToStart: true),
     );
@@ -605,6 +678,8 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         continue;
       }
       final isCurrentVideo = i == _currentVideoIndex;
+      final isSpeedHold =
+          _isVideoHoldActive && _videoHoldAction == _VideoHoldAction.speed2x;
       await controller.pause();
       if (isCurrentVideo && resetCurrentToStart) {
         await controller.seekTo(Duration.zero);
@@ -614,7 +689,15 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       if (!mounted || syncVersion != _videoPlaybackSyncVersion) {
         return;
       }
-      if (isCurrentVideo) {
+      final shouldPlayCurrent =
+          isCurrentVideo &&
+          ((_isVideoHoldActive && isSpeedHold) ||
+              (!_isVideoHoldActive && !_isVideoManuallyPaused));
+      final targetSpeed = shouldPlayCurrent && isSpeedHold ? 2.0 : 1.0;
+      if ((controller.value.playbackSpeed - targetSpeed).abs() > 0.01) {
+        await controller.setPlaybackSpeed(targetSpeed);
+      }
+      if (shouldPlayCurrent) {
         await controller.play();
       }
     }
@@ -622,12 +705,92 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
   void _pauseAllFeedVideos() {
     _videoPlaybackSyncVersion++;
+    _isVideoHoldActive = false;
+    _videoHoldAction = _VideoHoldAction.none;
+    _isVideoManuallyPaused = false;
     for (final controller in _videoControllers) {
       if (!controller.value.isInitialized) {
         continue;
       }
+      if ((controller.value.playbackSpeed - 1.0).abs() > 0.01) {
+        unawaited(controller.setPlaybackSpeed(1.0));
+      }
       controller.pause();
     }
+  }
+
+  _VideoHoldAction _holdActionForPosition({
+    required double localDx,
+    required double surfaceWidth,
+  }) {
+    if (surfaceWidth <= 0) {
+      return _VideoHoldAction.pause;
+    }
+    final sideWidth = surfaceWidth * 0.3;
+    if (localDx <= sideWidth || localDx >= surfaceWidth - sideWidth) {
+      return _VideoHoldAction.speed2x;
+    }
+    return _VideoHoldAction.pause;
+  }
+
+  void _handleVideoLongPressStart({
+    required int index,
+    required double localDx,
+    required double surfaceWidth,
+  }) {
+    if (index != _currentVideoIndex || _isVideoHoldActive) {
+      return;
+    }
+    final holdAction = _holdActionForPosition(
+      localDx: localDx,
+      surfaceWidth: surfaceWidth,
+    );
+    setState(() {
+      _isVideoHoldActive = true;
+      _videoHoldAction = holdAction;
+    });
+    final controller = _videoControllers[index];
+    if (!controller.value.isInitialized) {
+      return;
+    }
+    if (holdAction == _VideoHoldAction.speed2x) {
+      if ((controller.value.playbackSpeed - 2.0).abs() > 0.01) {
+        unawaited(controller.setPlaybackSpeed(2.0));
+      }
+      unawaited(controller.play());
+      return;
+    }
+    controller.pause();
+  }
+
+  void _handleVideoLongPressEnd() {
+    if (!_isVideoHoldActive) {
+      return;
+    }
+    setState(() {
+      _isVideoHoldActive = false;
+      _videoHoldAction = _VideoHoldAction.none;
+    });
+    unawaited(_syncVideoPlayback());
+  }
+
+  void _toggleVideoTapPlayback(int index) {
+    if (index != _currentVideoIndex || _isVideoHoldActive) {
+      return;
+    }
+    final controller = _videoControllers[index];
+    if (!controller.value.isInitialized) {
+      return;
+    }
+    setState(() => _isVideoManuallyPaused = !_isVideoManuallyPaused);
+    if (_isVideoManuallyPaused) {
+      if ((controller.value.playbackSpeed - 1.0).abs() > 0.01) {
+        unawaited(controller.setPlaybackSpeed(1.0));
+      }
+      unawaited(controller.pause());
+      return;
+    }
+    unawaited(_syncVideoPlayback());
   }
 
   static String _timeAgoShort(DateTime dateTime) {
@@ -813,6 +976,13 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                     final likeBursts = _likeBurstsForPost(post.id);
                     return GestureDetector(
                       behavior: HitTestBehavior.translucent,
+                      onTap: () => _toggleVideoTapPlayback(index),
+                      onLongPressStart: (details) => _handleVideoLongPressStart(
+                        index: index,
+                        localDx: details.localPosition.dx,
+                        surfaceWidth: itemSize.width,
+                      ),
+                      onLongPressEnd: (_) => _handleVideoLongPressEnd(),
                       onDoubleTapDown: (details) =>
                           _rememberDoubleTapPosition(post.id, details),
                       onDoubleTap: () =>
@@ -824,82 +994,86 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                               controller: _videoControllers[index],
                             ),
                           ),
-                          Positioned.fill(
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                  colors: [
-                                    const Color(0x08000000),
-                                    const Color(0x6B000000),
-                                    const Color(0xD100131A),
-                                  ],
-                                  stops: const [0.0, 0.6, 1.0],
+                          if (!_isVideoHoldActive) ...[
+                            Positioned.fill(
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      const Color(0x08000000),
+                                      const Color(0x6B000000),
+                                      const Color(0xD100131A),
+                                    ],
+                                    stops: const [0.0, 0.6, 1.0],
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                          SafeArea(
-                            bottom: false,
-                            child: Padding(
-                              padding: EdgeInsets.fromLTRB(
-                                metrics.horizontalPadding,
-                                metrics.topPadding,
-                                metrics.horizontalPadding,
-                                0,
-                              ),
-                              child: Column(
-                                children: [
-                                  SizedBox(height: topOverlayReservedHeight),
-                                  Expanded(
-                                    child: Align(
-                                      alignment: Alignment.bottomCenter,
-                                      child: Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.end,
-                                        children: [
-                                          Expanded(
-                                            child: _FeedDetails(
-                                              post: post,
+                            SafeArea(
+                              bottom: false,
+                              child: Padding(
+                                padding: EdgeInsets.fromLTRB(
+                                  metrics.horizontalPadding,
+                                  metrics.topPadding,
+                                  metrics.horizontalPadding,
+                                  0,
+                                ),
+                                child: Column(
+                                  children: [
+                                    SizedBox(height: topOverlayReservedHeight),
+                                    Expanded(
+                                      child: Align(
+                                        alignment: Alignment.bottomCenter,
+                                        child: Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.end,
+                                          children: [
+                                            Expanded(
+                                              child: _FeedDetails(
+                                                post: post,
+                                                metrics: metrics,
+                                                onOpenRestaurant: () =>
+                                                    _openRestaurantDetails(
+                                                      post,
+                                                    ),
+                                                onOpenAudio: () =>
+                                                    _openVendorPromoDetails(
+                                                      post,
+                                                    ),
+                                              ),
+                                            ),
+                                            SizedBox(width: metrics.railGap),
+                                            _ActionRail(
                                               metrics: metrics,
+                                              post: post,
                                               onOpenRestaurant: () =>
                                                   _openRestaurantDetails(post),
-                                              onOpenAudio: () =>
-                                                  _openVendorPromoDetails(post),
+                                              onToggleLike: () =>
+                                                  _toggleVendorLike(post),
+                                              onOpenComments: () =>
+                                                  _openVendorComments(post),
+                                              onShare: () =>
+                                                  _shareVendorPromo(post),
                                             ),
-                                          ),
-                                          SizedBox(width: metrics.railGap),
-                                          _ActionRail(
-                                            metrics: metrics,
-                                            post: post,
-                                            onOpenRestaurant: () =>
-                                                _openRestaurantDetails(post),
-                                            onToggleFollow: () =>
-                                                _toggleVendorFollow(post),
-                                            onToggleLike: () =>
-                                                _toggleVendorLike(post),
-                                            onOpenComments: () =>
-                                                _openVendorComments(post),
-                                            onShare: () =>
-                                                _shareVendorPromo(post),
-                                          ),
-                                        ],
+                                          ],
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                  SizedBox(
-                                    height: _clampDouble(
-                                      10 * metrics.scale,
-                                      6,
-                                      12,
+                                    SizedBox(
+                                      height: _clampDouble(
+                                        10 * metrics.scale,
+                                        6,
+                                        12,
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                          if (likeBursts.isNotEmpty)
+                          ],
+                          if (!_isVideoHoldActive && likeBursts.isNotEmpty)
                             Positioned.fill(
                               child: IgnorePointer(
                                 child: Stack(
@@ -910,6 +1084,25 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                                         tapPosition: burst.tapPosition,
                                       ),
                                   ],
+                                ),
+                              ),
+                            ),
+                          if (!_isVideoHoldActive)
+                            Positioned(
+                              left: _clampDouble(10 * metrics.scale, 8, 14),
+                              right: _clampDouble(10 * metrics.scale, 8, 14),
+                              bottom: _clampDouble(8 * metrics.scale, 6, 10),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(999),
+                                child: VideoProgressIndicator(
+                                  _videoControllers[index],
+                                  allowScrubbing: true,
+                                  padding: EdgeInsets.zero,
+                                  colors: const VideoProgressColors(
+                                    playedColor: Color(0xFFFF7E4D),
+                                    bufferedColor: Color(0x80FFFFFF),
+                                    backgroundColor: Color(0x50000000),
+                                  ),
                                 ),
                               ),
                             ),
@@ -929,32 +1122,33 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                   bottomInset: navBarBottomInset,
                 ),
               ),
-              Align(
-                alignment: Alignment.topCenter,
-                child: SafeArea(
-                  bottom: false,
-                  child: Padding(
-                    padding: EdgeInsets.fromLTRB(
-                      metrics.horizontalPadding,
-                      metrics.topPadding,
-                      metrics.horizontalPadding,
-                      0,
-                    ),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: _TopControls(
-                        metrics: metrics,
-                        selectedTab: _selectedTopTab,
-                        onTabSelected: (index) {
-                          setState(() => _selectedTopTab = index);
-                        },
-                        onOpenSearch: _openSearch,
-                        onOpenNotifications: _openNotifications,
+              if (!_isVideoHoldActive)
+                Align(
+                  alignment: Alignment.topCenter,
+                  child: SafeArea(
+                    bottom: false,
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        metrics.horizontalPadding,
+                        metrics.topPadding,
+                        metrics.horizontalPadding,
+                        0,
+                      ),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: _TopControls(
+                          metrics: metrics,
+                          selectedTab: _selectedTopTab,
+                          onTabSelected: (index) {
+                            setState(() => _selectedTopTab = index);
+                          },
+                          onOpenSearch: _openSearch,
+                          onOpenNotifications: _openNotifications,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
             ],
           );
         },
@@ -1017,6 +1211,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                       selectedTabIndex: _selectedProfileTabIndex,
                       onTabSelected: _onProfileTabSelected,
                       uploadedVideos: _uploadedVideos,
+                      onOpenUploadedVideo: _openUploadedVideo,
                     ),
                   ),
                 ),
@@ -1319,11 +1514,24 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
     final selectedVideo = _selectedPostVideo!;
     FocusScope.of(context).unfocus();
+    final composerResult = await Navigator.of(context)
+        .push<_CreatePostComposerResult>(
+          MaterialPageRoute(
+            builder: (context) => _CreatePostComposerScreen(
+              selectedVideoName: selectedVideo.name,
+            ),
+          ),
+        );
+    if (!mounted || composerResult == null) {
+      return;
+    }
     setState(() => _isCreatingPost = true);
     try {
       final created = await _demoRepository.createPost(
         fileName: selectedVideo.name,
         fileSizeBytes: selectedVideo.size,
+        caption: composerResult.caption,
+        hashtags: composerResult.hashtags,
       );
       if (!mounted) {
         return;
@@ -1335,6 +1543,9 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
             name: created.fileName,
             sizeBytes: created.fileSizeBytes,
             uploadedAt: created.createdAt,
+            caption: created.caption,
+            hashtags: created.hashtags,
+            videoFilePath: selectedVideo.path,
           ),
         );
         _selectedPostVideo = null;
@@ -1435,6 +1646,977 @@ class _FeedBackground extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _UploadedVideoPlayerScreen extends StatefulWidget {
+  const _UploadedVideoPlayerScreen({
+    required this.video,
+    required this.profileInfo,
+    required this.uploadedVideos,
+    required this.menuItems,
+    required this.onOpenFollowers,
+    required this.onUpdateVideo,
+    required this.onDeleteVideo,
+  });
+
+  final _UploadedRestaurantVideo video;
+  final _RestaurantProfileInfo profileInfo;
+  final List<_UploadedRestaurantVideo> uploadedVideos;
+  final List<RestaurantMenuItem> menuItems;
+  final VoidCallback onOpenFollowers;
+  final void Function(
+    _UploadedRestaurantVideo original,
+    _UploadedRestaurantVideo updated,
+  )
+  onUpdateVideo;
+  final ValueChanged<_UploadedRestaurantVideo> onDeleteVideo;
+
+  @override
+  State<_UploadedVideoPlayerScreen> createState() =>
+      _UploadedVideoPlayerScreenState();
+}
+
+class _UploadedVideoPlayerScreenState
+    extends State<_UploadedVideoPlayerScreen> {
+  final _repository = DemoAppRepository.instance;
+  VideoPlayerController? _controller;
+  late _UploadedRestaurantVideo _videoData;
+  late DemoFeedPost _socialPost;
+  String? _loadError;
+  bool _isInitialized = false;
+  bool _isVideoHoldActive = false;
+  _VideoHoldAction _videoHoldAction = _VideoHoldAction.none;
+  bool _isVideoManuallyPaused = false;
+  bool _isTogglingLike = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _videoData = widget.video;
+    _socialPost = _repository.getFeedPost(following: true, vendorView: true);
+    _initializeVideo();
+  }
+
+  Future<void> _initializeVideo() async {
+    final filePath = _videoData.videoFilePath?.trim() ?? '';
+    final assetPath = _videoData.videoAssetPath?.trim() ?? '';
+    VideoPlayerController? controller;
+    if (filePath.isNotEmpty) {
+      final file = File(filePath);
+      if (file.existsSync()) {
+        controller = VideoPlayerController.file(file);
+      } else if (assetPath.isEmpty) {
+        setState(() {
+          _loadError = 'Video file is no longer available on this device.';
+        });
+        return;
+      }
+    }
+    controller ??= assetPath.isNotEmpty
+        ? VideoPlayerController.asset(assetPath)
+        : null;
+    if (controller == null) {
+      setState(() {
+        _loadError =
+            'Video source is missing. Upload again to view this video.';
+      });
+      return;
+    }
+    _controller = controller;
+    try {
+      await controller.initialize();
+      await controller.setLooping(true);
+      if (!mounted) {
+        return;
+      }
+      setState(() => _isInitialized = true);
+      unawaited(_syncViewerPlayback());
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loadError = 'Unable to play this video right now.';
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  void _togglePlayback() {
+    final controller = _controller;
+    if (controller == null || !_isInitialized || _isVideoHoldActive) {
+      return;
+    }
+    setState(() => _isVideoManuallyPaused = !_isVideoManuallyPaused);
+    unawaited(_syncViewerPlayback());
+  }
+
+  double _parseRatingLabel(String value) {
+    final match = RegExp(r'(\d+(\.\d+)?)').firstMatch(value);
+    if (match == null) {
+      return 4.7;
+    }
+    return double.tryParse(match.group(0) ?? '') ?? 4.7;
+  }
+
+  _VideoHoldAction _holdActionForPosition({
+    required double localDx,
+    required double surfaceWidth,
+  }) {
+    if (surfaceWidth <= 0) {
+      return _VideoHoldAction.pause;
+    }
+    final safeWidth = surfaceWidth < 1 ? 1 : surfaceWidth;
+    final normalizedDx = localDx.clamp(0.0, safeWidth);
+    final middleStart = safeWidth * 0.33;
+    final middleEnd = safeWidth * 0.67;
+    if (normalizedDx >= middleStart && normalizedDx <= middleEnd) {
+      return _VideoHoldAction.pause;
+    }
+    if (normalizedDx <= safeWidth * 0.2 || normalizedDx >= safeWidth * 0.8) {
+      return _VideoHoldAction.speed2x;
+    }
+    return _VideoHoldAction.pause;
+  }
+
+  void _handleVideoLongPressStart({
+    required double localDx,
+    required double surfaceWidth,
+  }) {
+    final controller = _controller;
+    if (controller == null || !_isInitialized || _isVideoHoldActive) {
+      return;
+    }
+    final holdAction = _holdActionForPosition(
+      localDx: localDx,
+      surfaceWidth: surfaceWidth,
+    );
+    setState(() {
+      _isVideoHoldActive = true;
+      _videoHoldAction = holdAction;
+    });
+    if (holdAction == _VideoHoldAction.speed2x) {
+      unawaited(controller.setPlaybackSpeed(2));
+      if (!controller.value.isPlaying) {
+        unawaited(controller.play());
+      }
+      return;
+    }
+    unawaited(controller.pause());
+  }
+
+  void _handleVideoLongPressEnd() {
+    if (!_isVideoHoldActive) {
+      return;
+    }
+    setState(() {
+      _isVideoHoldActive = false;
+      _videoHoldAction = _VideoHoldAction.none;
+    });
+    unawaited(_syncViewerPlayback());
+  }
+
+  Future<void> _syncViewerPlayback() async {
+    final controller = _controller;
+    if (controller == null || !_isInitialized) {
+      return;
+    }
+    final isSpeedHold =
+        _isVideoHoldActive && _videoHoldAction == _VideoHoldAction.speed2x;
+    await controller.setPlaybackSpeed(isSpeedHold ? 2 : 1);
+    final shouldPlay =
+        (_isVideoHoldActive && isSpeedHold) ||
+        (!_isVideoHoldActive && !_isVideoManuallyPaused);
+    if (shouldPlay) {
+      if (!controller.value.isPlaying) {
+        await controller.play();
+      }
+      return;
+    }
+    if (controller.value.isPlaying) {
+      await controller.pause();
+    }
+  }
+
+  void _openRestaurantDetails() {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('This is your profile.'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  String _normalizeHashtags(String rawValue) {
+    final normalized = <String>[];
+    final seen = <String>{};
+    final parts = rawValue.split(RegExp(r'[\s,]+'));
+    for (final part in parts) {
+      final cleaned = part.trim().replaceAll(RegExp(r'[^A-Za-z0-9_#]'), '');
+      if (cleaned.isEmpty) {
+        continue;
+      }
+      final withoutPrefix = cleaned.replaceAll('#', '');
+      if (withoutPrefix.isEmpty) {
+        continue;
+      }
+      final tag = '#$withoutPrefix';
+      final key = tag.toLowerCase();
+      if (!seen.add(key)) {
+        continue;
+      }
+      normalized.add(tag);
+    }
+    return normalized.join(' ');
+  }
+
+  Future<void> _openEditPostSheet() async {
+    final captionController = TextEditingController(text: _videoData.caption);
+    final hashtagsController = TextEditingController(text: _videoData.hashtags);
+    try {
+      final updated = await showModalBottomSheet<_UploadedRestaurantVideo>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: const Color(0xFFF8EFE8),
+        builder: (sheetContext) {
+          return SafeArea(
+            top: false,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                16,
+                16,
+                16,
+                MediaQuery.viewInsetsOf(sheetContext).bottom + 16,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Edit Post',
+                    style: TextStyle(
+                      color: Color(0xFF1F1B19),
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: captionController,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      labelText: 'Caption',
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: Color(0xFFE6D9CD)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(
+                          color: Color(0xFFFF7E4D),
+                          width: 1.5,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: hashtagsController,
+                    maxLines: 2,
+                    decoration: InputDecoration(
+                      labelText: 'Hashtags',
+                      hintText: '#pizza #fresh',
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: Color(0xFFE6D9CD)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(
+                          color: Color(0xFFFF7E4D),
+                          width: 1.5,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        final caption = captionController.text.trim();
+                        final hashtags = _normalizeHashtags(
+                          hashtagsController.text,
+                        );
+                        if (caption.isEmpty || hashtags.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Please add both caption and hashtags.',
+                              ),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                          return;
+                        }
+                        Navigator.of(sheetContext).pop(
+                          _videoData.copyWith(
+                            caption: caption,
+                            hashtags: hashtags,
+                          ),
+                        );
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFFF7E4D),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: const Text(
+                        'Save Changes',
+                        style: TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+      if (updated == null || !mounted) {
+        return;
+      }
+      final original = _videoData;
+      setState(() => _videoData = updated);
+      widget.onUpdateVideo(original, updated);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Post updated.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      captionController.dispose();
+      hashtagsController.dispose();
+    }
+  }
+
+  Future<void> _removePost() async {
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Remove Post'),
+          content: const Text('Are you sure you want to remove this post?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFFB7372B),
+              ),
+              child: const Text('Remove'),
+            ),
+          ],
+        );
+      },
+    );
+    if (shouldDelete != true || !mounted) {
+      return;
+    }
+    final deleted = _videoData;
+    widget.onDeleteVideo(deleted);
+    Navigator.of(context).pop();
+  }
+
+  Future<void> _openEditMenu() async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: const Color(0xFFF8EFE8),
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(
+                  Icons.edit_rounded,
+                  color: Color(0xFFFF7E4D),
+                ),
+                title: const Text('Edit Post'),
+                onTap: () => Navigator.of(sheetContext).pop('edit'),
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.delete_outline_rounded,
+                  color: Color(0xFFB7372B),
+                ),
+                title: const Text(
+                  'Remove Post',
+                  style: TextStyle(color: Color(0xFFB7372B)),
+                ),
+                onTap: () => Navigator.of(sheetContext).pop('remove'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (!mounted || action == null) {
+      return;
+    }
+    if (action == 'edit') {
+      await _openEditPostSheet();
+      return;
+    }
+    if (action == 'remove') {
+      await _removePost();
+    }
+  }
+
+  Future<void> _toggleLike() async {
+    if (_isTogglingLike) {
+      return;
+    }
+    _isTogglingLike = true;
+    try {
+      final updated = await _repository.toggleLike(_socialPost.id);
+      if (!mounted) {
+        return;
+      }
+      setState(() => _socialPost = updated);
+    } finally {
+      _isTogglingLike = false;
+    }
+  }
+
+  Future<void> _openComments() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _FeedCommentsBottomSheet(
+        postId: _socialPost.id,
+        postTitle: _socialPost.restaurantName,
+      ),
+    );
+    if (!mounted) {
+      return;
+    }
+    final refreshed = _repository.findFeedPost(_socialPost.id);
+    if (refreshed == null) {
+      return;
+    }
+    setState(() => _socialPost = refreshed);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = _controller;
+    final videoReady = controller != null && _isInitialized;
+    final postCaption = _videoData.caption.trim();
+    final postHashtags = _videoData.hashtags.trim();
+    final restaurantName = widget.profileInfo.name.trim().isEmpty
+        ? 'Restaurant'
+        : widget.profileInfo.name.trim();
+    final restaurantHandle = widget.profileInfo.handle.trim().isEmpty
+        ? restaurantName.toLowerCase().replaceAll(RegExp(r'\s+'), '')
+        : widget.profileInfo.handle.trim();
+    final caption = postCaption.isEmpty
+        ? 'No caption was added for this post.'
+        : postCaption;
+    final hashtags = postHashtags.isEmpty ? '#hugerush' : postHashtags;
+    final feedPost = _socialPost.copyWith(
+      restaurantName: restaurantName,
+      restaurantHandle: restaurantHandle,
+      caption: caption,
+      tags: hashtags,
+      audioLabel: 'Original Audio - $restaurantName',
+      rating: _parseRatingLabel(widget.profileInfo.ratingLabel),
+    );
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A2230),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final safeAreaPadding = MediaQuery.paddingOf(context);
+          final safeHeight =
+              constraints.maxHeight -
+              safeAreaPadding.top -
+              safeAreaPadding.bottom;
+          final metrics = _ResponsiveMetrics.from(
+            BoxConstraints(
+              maxWidth: constraints.maxWidth,
+              maxHeight: safeHeight > 0 ? safeHeight : constraints.maxHeight,
+            ),
+          );
+          final navBarBottomInset = safeAreaPadding.bottom;
+          final navBarTotalHeight = metrics.navHeight + navBarBottomInset;
+          final topOverlayReservedHeight =
+              metrics.topControlButtonSize + metrics.gapAfterTop;
+
+          return Stack(
+            children: [
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 0,
+                bottom: navBarTotalHeight,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: _togglePlayback,
+                  onLongPressStart: (details) => _handleVideoLongPressStart(
+                    localDx: details.localPosition.dx,
+                    surfaceWidth: constraints.maxWidth,
+                  ),
+                  onLongPressEnd: (_) => _handleVideoLongPressEnd(),
+                  child: Stack(
+                    children: [
+                      if (videoReady)
+                        Positioned.fill(
+                          child: _FeedBackground(controller: controller),
+                        )
+                      else
+                        const Positioned.fill(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(color: Colors.black),
+                          ),
+                        ),
+                      Positioned.fill(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                const Color(0x09000000),
+                                const Color(0x6B000000),
+                                const Color(0xD100131A),
+                              ],
+                              stops: const [0.0, 0.6, 1.0],
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (!videoReady && _loadError == null)
+                        const Center(
+                          child: CircularProgressIndicator(
+                            color: Color(0xFFFF7E4D),
+                          ),
+                        ),
+                      if (_loadError != null)
+                        Center(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            child: Text(
+                              _loadError!,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (videoReady && !_isVideoHoldActive)
+                        SafeArea(
+                          bottom: false,
+                          child: Padding(
+                            padding: EdgeInsets.fromLTRB(
+                              metrics.horizontalPadding,
+                              metrics.topPadding,
+                              metrics.horizontalPadding,
+                              0,
+                            ),
+                            child: Column(
+                              children: [
+                                SizedBox(height: topOverlayReservedHeight),
+                                Expanded(
+                                  child: Align(
+                                    alignment: Alignment.bottomCenter,
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.end,
+                                      children: [
+                                        Expanded(
+                                          child: _FeedDetails(
+                                            post: feedPost,
+                                            metrics: metrics,
+                                            onOpenRestaurant:
+                                                _openRestaurantDetails,
+                                            onOpenAudio: () {},
+                                          ),
+                                        ),
+                                        SizedBox(width: metrics.railGap),
+                                        _ActionRail(
+                                          metrics: metrics,
+                                          post: feedPost,
+                                          onOpenRestaurant:
+                                              _openRestaurantDetails,
+                                          onToggleLike: _toggleLike,
+                                          onOpenComments: _openComments,
+                                          onShare: () {},
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(
+                                  height: _clampDouble(
+                                    10 * metrics.scale,
+                                    6,
+                                    12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      if (!_isVideoHoldActive)
+                        SafeArea(
+                          bottom: false,
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Material(
+                                  color: Colors.transparent,
+                                  child: InkWell(
+                                    onTap: () => Navigator.of(context).pop(),
+                                    customBorder: const CircleBorder(),
+                                    child: Container(
+                                      width: 42,
+                                      height: 42,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: const Color(0x45000000),
+                                        border: Border.all(
+                                          color: const Color(0x2FFFFFFF),
+                                        ),
+                                      ),
+                                      child: const Icon(
+                                        Icons.arrow_back_rounded,
+                                        color: Colors.white,
+                                        size: 24,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                Material(
+                                  color: Colors.transparent,
+                                  child: InkWell(
+                                    onTap: _openEditMenu,
+                                    customBorder: const CircleBorder(),
+                                    child: Container(
+                                      width: 42,
+                                      height: 42,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: const Color(0x45000000),
+                                        border: Border.all(
+                                          color: const Color(0x2FFFFFFF),
+                                        ),
+                                      ),
+                                      child: const Icon(
+                                        Icons.edit_rounded,
+                                        color: Colors.white,
+                                        size: 22,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      if (videoReady && !_isVideoHoldActive)
+                        Positioned(
+                          left: _clampDouble(10 * metrics.scale, 8, 14),
+                          right: _clampDouble(10 * metrics.scale, 8, 14),
+                          bottom: _clampDouble(8 * metrics.scale, 6, 10),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(999),
+                            child: VideoProgressIndicator(
+                              controller,
+                              allowScrubbing: true,
+                              padding: EdgeInsets.zero,
+                              colors: const VideoProgressColors(
+                                playedColor: Color(0xFFFF7E4D),
+                                bufferedColor: Color(0x80FFFFFF),
+                                backgroundColor: Color(0x50000000),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: _BottomNavBar(
+                  metrics: metrics,
+                  selectedIndex: 4,
+                  onSelected: (_) {},
+                  fullWidth: true,
+                  bottomInset: navBarBottomInset,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _CreatePostComposerResult {
+  const _CreatePostComposerResult({
+    required this.caption,
+    required this.hashtags,
+  });
+
+  final String caption;
+  final String hashtags;
+}
+
+class _CreatePostComposerScreen extends StatefulWidget {
+  const _CreatePostComposerScreen({required this.selectedVideoName});
+
+  final String selectedVideoName;
+
+  @override
+  State<_CreatePostComposerScreen> createState() =>
+      _CreatePostComposerScreenState();
+}
+
+class _CreatePostComposerScreenState extends State<_CreatePostComposerScreen> {
+  late final TextEditingController _captionController;
+  late final TextEditingController _hashtagsController;
+
+  @override
+  void initState() {
+    super.initState();
+    _captionController = TextEditingController();
+    _hashtagsController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _captionController.dispose();
+    _hashtagsController.dispose();
+    super.dispose();
+  }
+
+  String _normalizeHashtags(String rawValue) {
+    final normalized = <String>[];
+    final seen = <String>{};
+    final parts = rawValue.split(RegExp(r'[\s,]+'));
+    for (final part in parts) {
+      final cleaned = part.trim().replaceAll(RegExp(r'[^A-Za-z0-9_#]'), '');
+      if (cleaned.isEmpty) {
+        continue;
+      }
+      final withoutPrefix = cleaned.replaceAll('#', '');
+      if (withoutPrefix.isEmpty) {
+        continue;
+      }
+      final tag = '#$withoutPrefix';
+      final key = tag.toLowerCase();
+      if (!seen.add(key)) {
+        continue;
+      }
+      normalized.add(tag);
+    }
+    return normalized.join(' ');
+  }
+
+  void _submit() {
+    final caption = _captionController.text.trim();
+    final hashtags = _normalizeHashtags(_hashtagsController.text);
+    if (caption.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please add a caption.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    if (hashtags.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please add at least one hashtag.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    Navigator.of(
+      context,
+    ).pop(_CreatePostComposerResult(caption: caption, hashtags: hashtags));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8EFE8),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFF8EFE8),
+        elevation: 0,
+        foregroundColor: const Color(0xFF1F1B19),
+        title: const Text(
+          'Create Post',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.selectedVideoName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF8D7E73),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Caption',
+                    style: TextStyle(
+                      color: Color(0xFF1F1B19),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _captionController,
+                    maxLines: 4,
+                    textInputAction: TextInputAction.newline,
+                    decoration: InputDecoration(
+                      hintText: 'Write a short caption for your post...',
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: Color(0xFFE6D9CD)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: Color(0xFFE6D9CD)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(
+                          color: Color(0xFFFF7E4D),
+                          width: 1.5,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Hashtags',
+                    style: TextStyle(
+                      color: Color(0xFF1F1B19),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _hashtagsController,
+                    maxLines: 2,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => _submit(),
+                    decoration: InputDecoration(
+                      hintText: '#pizza #burger #fresh',
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: Color(0xFFE6D9CD)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: Color(0xFFE6D9CD)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(
+                          color: Color(0xFFFF7E4D),
+                          width: 1.5,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SafeArea(
+            top: false,
+            minimum: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _submit,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFFF7E4D),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: const Text(
+                  'Create',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -3334,11 +4516,39 @@ class _UploadedRestaurantVideo {
     required this.name,
     required this.sizeBytes,
     required this.uploadedAt,
+    required this.caption,
+    required this.hashtags,
+    this.videoFilePath,
+    this.videoAssetPath,
   });
 
   final String name;
   final int sizeBytes;
   final DateTime uploadedAt;
+  final String caption;
+  final String hashtags;
+  final String? videoFilePath;
+  final String? videoAssetPath;
+
+  _UploadedRestaurantVideo copyWith({
+    String? name,
+    int? sizeBytes,
+    DateTime? uploadedAt,
+    String? caption,
+    String? hashtags,
+    String? videoFilePath,
+    String? videoAssetPath,
+  }) {
+    return _UploadedRestaurantVideo(
+      name: name ?? this.name,
+      sizeBytes: sizeBytes ?? this.sizeBytes,
+      uploadedAt: uploadedAt ?? this.uploadedAt,
+      caption: caption ?? this.caption,
+      hashtags: hashtags ?? this.hashtags,
+      videoFilePath: videoFilePath ?? this.videoFilePath,
+      videoAssetPath: videoAssetPath ?? this.videoAssetPath,
+    );
+  }
 }
 
 class _RestaurantReviewData {
@@ -3597,6 +4807,7 @@ class _ProfileSection extends StatelessWidget {
     required this.selectedTabIndex,
     required this.onTabSelected,
     required this.uploadedVideos,
+    required this.onOpenUploadedVideo,
   });
 
   final _ResponsiveMetrics metrics;
@@ -3611,6 +4822,7 @@ class _ProfileSection extends StatelessWidget {
   final int selectedTabIndex;
   final ValueChanged<int> onTabSelected;
   final List<_UploadedRestaurantVideo> uploadedVideos;
+  final ValueChanged<_UploadedRestaurantVideo> onOpenUploadedVideo;
 
   static const int _videosTabIndex = 0;
   static const int _reviewsTabIndex = 2;
@@ -3871,6 +5083,7 @@ class _ProfileSection extends StatelessWidget {
               metrics: metrics,
               video: uploadedVideos[index],
               index: index,
+              onTap: () => onOpenUploadedVideo(uploadedVideos[index]),
             );
           },
         ),
@@ -4023,11 +5236,13 @@ class _UploadedVideoGridTile extends StatelessWidget {
     required this.metrics,
     required this.video,
     required this.index,
+    required this.onTap,
   });
 
   final _ResponsiveMetrics metrics;
   final _UploadedRestaurantVideo video;
   final int index;
+  final VoidCallback onTap;
 
   static String _timeAgo(DateTime dateTime) {
     final diff = DateTime.now().difference(dateTime);
@@ -4045,79 +5260,86 @@ class _UploadedVideoGridTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.all(_clampDouble(7 * metrics.scale, 6, 7)),
-      decoration: BoxDecoration(
-        color: Colors.white,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE6DCCF)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Stack(
-              children: [
-                Container(
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFEFE8),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(
-                    Icons.play_circle_fill_rounded,
-                    color: const Color(0xFFFF7E4D),
-                    size: _clampDouble(30 * metrics.scale, 22, 30),
-                  ),
-                ),
-                Positioned(
-                  top: 4,
-                  left: 4,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 5,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xD9000000),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      '#${index + 1}',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: _clampDouble(9 * metrics.scale, 8, 9),
-                        fontWeight: FontWeight.w700,
+        child: Container(
+          padding: EdgeInsets.all(_clampDouble(7 * metrics.scale, 6, 7)),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE6DCCF)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Stack(
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFEFE8),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(
+                        Icons.play_circle_fill_rounded,
+                        color: const Color(0xFFFF7E4D),
+                        size: _clampDouble(30 * metrics.scale, 22, 30),
                       ),
                     ),
-                  ),
+                    Positioned(
+                      top: 4,
+                      left: 4,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xD9000000),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          '#${index + 1}',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: _clampDouble(9 * metrics.scale, 8, 9),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+              SizedBox(height: _clampDouble(6 * metrics.scale, 4, 6)),
+              Text(
+                video.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: const Color(0xFF1F1B19),
+                  fontSize: _clampDouble(11 * metrics.scale, 9, 11),
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              SizedBox(height: _clampDouble(2 * metrics.scale, 1, 2)),
+              Text(
+                '${_formatFileSize(video.sizeBytes)} • ${_timeAgo(video.uploadedAt)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: const Color(0xFF8D7E73),
+                  fontSize: _clampDouble(9.5 * metrics.scale, 8, 9.5),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
-          SizedBox(height: _clampDouble(6 * metrics.scale, 4, 6)),
-          Text(
-            video.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: const Color(0xFF1F1B19),
-              fontSize: _clampDouble(11 * metrics.scale, 9, 11),
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          SizedBox(height: _clampDouble(2 * metrics.scale, 1, 2)),
-          Text(
-            '${_formatFileSize(video.sizeBytes)} • ${_timeAgo(video.uploadedAt)}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: const Color(0xFF8D7E73),
-              fontSize: _clampDouble(9.5 * metrics.scale, 8, 9.5),
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -6992,13 +8214,6 @@ class _TopControls extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   _TopTab(
-                    label: 'Following',
-                    selected: selectedTab == 0,
-                    metrics: metrics,
-                    onTap: () => onTabSelected(0),
-                  ),
-                  SizedBox(width: _clampDouble(18 * metrics.scale, 8, 18)),
-                  _TopTab(
                     label: 'For You',
                     selected: selectedTab == 1,
                     metrics: metrics,
@@ -7253,7 +8468,6 @@ class _ActionRail extends StatelessWidget {
     required this.metrics,
     required this.post,
     required this.onOpenRestaurant,
-    required this.onToggleFollow,
     required this.onToggleLike,
     required this.onOpenComments,
     required this.onShare,
@@ -7262,7 +8476,6 @@ class _ActionRail extends StatelessWidget {
   final _ResponsiveMetrics metrics;
   final DemoFeedPost post;
   final VoidCallback onOpenRestaurant;
-  final VoidCallback onToggleFollow;
   final VoidCallback onToggleLike;
   final VoidCallback onOpenComments;
   final VoidCallback onShare;
@@ -7278,7 +8491,6 @@ class _ActionRail extends StatelessWidget {
             metrics: metrics,
             post: post,
             onOpenRestaurant: onOpenRestaurant,
-            onToggleFollow: onToggleFollow,
           ),
           SizedBox(height: metrics.railItemGap),
           _ActionButton(
@@ -7315,13 +8527,11 @@ class _CreatorAvatar extends StatelessWidget {
     required this.metrics,
     required this.post,
     required this.onOpenRestaurant,
-    required this.onToggleFollow,
   });
 
   final _ResponsiveMetrics metrics;
   final DemoFeedPost post;
   final VoidCallback onOpenRestaurant;
-  final VoidCallback onToggleFollow;
 
   @override
   Widget build(BuildContext context) {
@@ -7353,28 +8563,6 @@ class _CreatorAvatar extends StatelessWidget {
                 height: 1.2,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.3,
-              ),
-            ),
-          ),
-        ),
-        Positioned(
-          bottom: -4,
-          right: -4,
-          child: InkWell(
-            onTap: onToggleFollow,
-            customBorder: const CircleBorder(),
-            child: Container(
-              width: metrics.creatorPlusSize,
-              height: metrics.creatorPlusSize,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: const Color(0xFFFF7E4D),
-                border: Border.all(color: Colors.white, width: 2),
-              ),
-              child: Icon(
-                post.isFollowing ? Icons.check_rounded : Icons.add_rounded,
-                color: Colors.white,
-                size: metrics.creatorPlusSize * 0.62,
               ),
             ),
           ),
