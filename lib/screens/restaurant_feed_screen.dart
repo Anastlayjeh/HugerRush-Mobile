@@ -587,10 +587,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   void _handleVideoPageChanged(int index) {
     _currentVideoIndex = index;
     unawaited(
-      _syncVideoPlayback(
-        resetCurrentToStart: true,
-        resetInactiveToStart: true,
-      ),
+      _syncVideoPlayback(resetCurrentToStart: true, resetInactiveToStart: true),
     );
   }
 
@@ -3775,8 +3772,9 @@ class _ProfileSection extends StatelessWidget {
             return _PopularMenuCard(
               metrics: metrics,
               item: popularItem,
-              onTap: () =>
-                  onOpenMenuItemDetails(popularItem.toRestaurantMenuItem(index)),
+              onTap: () => onOpenMenuItemDetails(
+                popularItem.toRestaurantMenuItem(index),
+              ),
             );
           },
         ),
@@ -4478,7 +4476,7 @@ class _MenuStatCard extends StatelessWidget {
   }
 }
 
-class _MenuSection extends StatelessWidget {
+class _MenuSection extends StatefulWidget {
   const _MenuSection({
     required this.metrics,
     required this.items,
@@ -4496,10 +4494,52 @@ class _MenuSection extends StatelessWidget {
   final ValueChanged<RestaurantMenuItem> onItemTap;
 
   @override
-  Widget build(BuildContext context) {
-    final hasError = errorMessage != null && errorMessage!.trim().isNotEmpty;
+  State<_MenuSection> createState() => _MenuSectionState();
+}
 
-    if (isLoading && items.isEmpty) {
+class _MenuSectionState extends State<_MenuSection> {
+  static const String _allCategory = 'All';
+  String _selectedCategory = _allCategory;
+
+  List<String> get _categories {
+    final categories = <String>{};
+    for (final item in widget.items) {
+      final category = item.category.trim();
+      if (category.isNotEmpty) {
+        categories.add(category);
+      }
+    }
+    final sorted = categories.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return <String>[_allCategory, ...sorted];
+  }
+
+  @override
+  void didUpdateWidget(covariant _MenuSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_categories.contains(_selectedCategory)) {
+      _selectedCategory = _allCategory;
+    }
+  }
+
+  List<RestaurantMenuItem> _filterItems(List<RestaurantMenuItem> source) {
+    if (_selectedCategory == _allCategory) {
+      return source;
+    }
+    final normalized = _selectedCategory.toLowerCase();
+    return source
+        .where((item) => item.category.trim().toLowerCase() == normalized)
+        .toList(growable: false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasError =
+        widget.errorMessage != null && widget.errorMessage!.trim().isNotEmpty;
+    final categories = _categories;
+    final filteredItems = _filterItems(widget.items);
+
+    if (widget.isLoading && widget.items.isEmpty) {
       return const Center(
         child: CircularProgressIndicator(color: Color(0xFFFF7E4D)),
       );
@@ -4509,32 +4549,79 @@ class _MenuSection extends StatelessWidget {
       children: [
         if (hasError) ...[
           _MenuSyncBanner(
-            metrics: metrics,
-            message: errorMessage!.trim(),
-            onRetry: onRetry,
+            metrics: widget.metrics,
+            message: widget.errorMessage!.trim(),
+            onRetry: widget.onRetry,
           ),
-          SizedBox(height: _clampDouble(10 * metrics.scale, 8, 10)),
+          SizedBox(height: _clampDouble(10 * widget.metrics.scale, 8, 10)),
+        ],
+        if (widget.items.isNotEmpty && categories.length > 1) ...[
+          SizedBox(
+            height: _clampDouble(34 * widget.metrics.scale, 32, 34),
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              itemCount: categories.length,
+              separatorBuilder: (_, _) =>
+                  SizedBox(width: _clampDouble(8 * widget.metrics.scale, 6, 8)),
+              itemBuilder: (context, index) {
+                final category = categories[index];
+                final selected = _selectedCategory == category;
+                return ChoiceChip(
+                  label: Text(category),
+                  selected: selected,
+                  onSelected: (_) {
+                    setState(() => _selectedCategory = category);
+                  },
+                  labelStyle: TextStyle(
+                    color: selected
+                        ? const Color(0xFFFF7E4D)
+                        : const Color(0xFF7D6C60),
+                    fontSize: _clampDouble(12 * widget.metrics.scale, 10, 12),
+                    fontWeight: FontWeight.w700,
+                  ),
+                  backgroundColor: const Color(0xFFF7EFE7),
+                  selectedColor: const Color(0xFFFFEFE5),
+                  side: BorderSide(
+                    color: selected
+                        ? const Color(0xFFFFC9B2)
+                        : const Color(0xFFE7D6C8),
+                  ),
+                  showCheckmark: false,
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                );
+              },
+            ),
+          ),
+          SizedBox(height: _clampDouble(10 * widget.metrics.scale, 8, 10)),
         ],
         Expanded(
           child: RefreshIndicator(
             color: const Color(0xFFFF7E4D),
-            onRefresh: onRetry,
-            child: items.isEmpty
-                ? _EmptyMenuState(metrics: metrics)
+            onRefresh: widget.onRetry,
+            child: widget.items.isEmpty
+                ? _EmptyMenuState(metrics: widget.metrics)
+                : filteredItems.isEmpty
+                ? _EmptyMenuState(
+                    metrics: widget.metrics,
+                    title: 'No items in "$_selectedCategory"',
+                    description: 'Try another category or pull to refresh.',
+                  )
                 : ListView.separated(
                     physics: const BouncingScrollPhysics(
                       parent: AlwaysScrollableScrollPhysics(),
                     ),
-                    itemCount: items.length,
+                    itemCount: filteredItems.length,
                     separatorBuilder: (_, _) => SizedBox(
-                      height: _clampDouble(10 * metrics.scale, 8, 10),
+                      height: _clampDouble(10 * widget.metrics.scale, 8, 10),
                     ),
                     itemBuilder: (context, index) {
-                      final item = items[index];
+                      final item = filteredItems[index];
                       return _ManagedMenuItemCard(
-                        metrics: metrics,
+                        metrics: widget.metrics,
                         item: item,
-                        onTap: () => onItemTap(item),
+                        onTap: () => widget.onItemTap(item),
                       );
                     },
                   ),
@@ -4612,9 +4699,15 @@ class _MenuSyncBanner extends StatelessWidget {
 }
 
 class _EmptyMenuState extends StatelessWidget {
-  const _EmptyMenuState({required this.metrics});
+  const _EmptyMenuState({
+    required this.metrics,
+    this.title = 'No menu items found',
+    this.description = 'Add dishes from your backend and pull to refresh.',
+  });
 
   final _ResponsiveMetrics metrics;
+  final String title;
+  final String description;
 
   @override
   Widget build(BuildContext context) {
@@ -4639,7 +4732,7 @@ class _EmptyMenuState extends StatelessWidget {
         ),
         SizedBox(height: _clampDouble(14 * metrics.scale, 10, 14)),
         Text(
-          'No menu items found',
+          title,
           textAlign: TextAlign.center,
           style: TextStyle(
             color: const Color(0xFF2A231E),
@@ -4649,7 +4742,7 @@ class _EmptyMenuState extends StatelessWidget {
         ),
         SizedBox(height: _clampDouble(6 * metrics.scale, 4, 6)),
         Text(
-          'Add dishes from your backend and pull to refresh.',
+          description,
           textAlign: TextAlign.center,
           style: TextStyle(
             color: const Color(0xFF8D7E73),
@@ -4737,7 +4830,11 @@ class _ManagedMenuItemCard extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: const Color(0xFF1F1B19),
-                              fontSize: _clampDouble(18 * metrics.scale, 14, 18),
+                              fontSize: _clampDouble(
+                                18 * metrics.scale,
+                                14,
+                                18,
+                              ),
                               fontWeight: FontWeight.w800,
                             ),
                           ),

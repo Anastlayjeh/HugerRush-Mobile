@@ -409,30 +409,50 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     if (detectedRole == null || _isNormalUserRole(detectedRole)) {
-      await _authSessionService.clearSession();
+      final customerName = _extractUserName(
+        result.user,
+        fallbackEmail: fallbackEmail,
+        fallbackDisplayName: fallbackDisplayName,
+      );
+      final customerEmail = _extractUserEmail(
+        result.user,
+        fallbackEmail: fallbackEmail,
+      );
+      final customerAvatarUrl = _extractUserAvatarUrl(
+        result.user,
+        fallbackAvatarUrl: fallbackAvatarUrl,
+      );
+      final customerAccountLabel = _extractUserAccountLabel(
+        result.user,
+        fallbackLabel: fallbackAccountLabel,
+      );
+      final customerSession = AuthSession(
+        token: token,
+        role: detectedRole ?? 'customer',
+        // `restaurantName` is required by AuthSession and reused as a generic
+        // persisted display label for non-restaurant users.
+        restaurantName: customerName,
+        refreshToken: result.refreshToken?.trim(),
+        user: result.user,
+      );
+      await _authSessionService.saveSession(customerSession);
       if (!mounted) {
         return;
       }
+
+      final onAuthenticated = widget.onAuthenticated;
+      if (onAuthenticated != null) {
+        onAuthenticated(customerSession);
+        return;
+      }
+
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(
           builder: (_) => UserHomeScreen(
-            userName: _extractUserName(
-              result.user,
-              fallbackEmail: fallbackEmail,
-              fallbackDisplayName: fallbackDisplayName,
-            ),
-            userEmail: _extractUserEmail(
-              result.user,
-              fallbackEmail: fallbackEmail,
-            ),
-            userAvatarUrl: _extractUserAvatarUrl(
-              result.user,
-              fallbackAvatarUrl: fallbackAvatarUrl,
-            ),
-            accountLabel: _extractUserAccountLabel(
-              result.user,
-              fallbackLabel: fallbackAccountLabel,
-            ),
+            userName: customerName,
+            userEmail: customerEmail,
+            userAvatarUrl: customerAvatarUrl,
+            accountLabel: customerAccountLabel,
           ),
         ),
       );
