@@ -140,12 +140,16 @@ class DemoUploadedPost {
     required this.fileName,
     required this.fileSizeBytes,
     required this.createdAt,
+    this.caption = '',
+    this.hashtags = '',
   });
 
   final String id;
   final String fileName;
   final int fileSizeBytes;
   final DateTime createdAt;
+  final String caption;
+  final String hashtags;
 }
 
 class DemoConversationMessage {

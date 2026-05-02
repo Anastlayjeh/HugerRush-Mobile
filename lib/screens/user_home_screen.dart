@@ -30,6 +30,17 @@ bool _looksLikeHttpUrl(String? value) {
       (parsed.scheme == 'http' || parsed.scheme == 'https');
 }
 
+String _normalizeSearchValue(String value) {
+  return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+}
+
+bool _matchesLettersInOrder({required String source, required String query}) {
+  if (query.isEmpty) {
+    return false;
+  }
+  return source.contains(query);
+}
+
 String _formatCompactCount(int value) {
   if (value >= 1000000) {
     return '${_trimTrailingZero((value / 1000000).toStringAsFixed(1))}M';
@@ -91,6 +102,8 @@ enum _OrderStatus {
   canceled,
   rejected,
 }
+
+enum _VideoHoldAction { none, pause, speed2x }
 
 const List<_OrderStatus> _orderStatusFlow = [
   _OrderStatus.pending,
@@ -414,6 +427,9 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
   late final List<bool> _videoErrorLogged;
   int _currentVideoIndex = 0;
   int _nextLikeBurstId = 0;
+  bool _isVideoHoldActive = false;
+  _VideoHoldAction _videoHoldAction = _VideoHoldAction.none;
+  bool _isVideoManuallyPaused = false;
 
   @override
   void initState() {
@@ -676,6 +692,9 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
   void _handleVideoPageChanged(int index) {
     final previousIndex = _currentVideoIndex;
     _currentVideoIndex = index;
+    _isVideoHoldActive = false;
+    _videoHoldAction = _VideoHoldAction.none;
+    _isVideoManuallyPaused = false;
     if (previousIndex != index &&
         previousIndex >= 0 &&
         previousIndex < _isOrderNowVisibleByVideoIndex.length &&
@@ -694,12 +713,97 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
       if (!controller.value.isInitialized) {
         continue;
       }
-      if (i == _currentVideoIndex) {
+      final isCurrentVideo = i == _currentVideoIndex;
+      final isSpeedHold =
+          _isVideoHoldActive && _videoHoldAction == _VideoHoldAction.speed2x;
+      final shouldPlayCurrent =
+          isCurrentVideo &&
+          ((_isVideoHoldActive && isSpeedHold) ||
+              (!_isVideoHoldActive && !_isVideoManuallyPaused));
+      final targetSpeed = shouldPlayCurrent && isSpeedHold ? 2.0 : 1.0;
+      if ((controller.value.playbackSpeed - targetSpeed).abs() > 0.01) {
+        controller.setPlaybackSpeed(targetSpeed);
+      }
+      if (shouldPlayCurrent) {
         controller.play();
       } else {
         controller.pause();
       }
     }
+  }
+
+  _VideoHoldAction _holdActionForPosition({
+    required double localDx,
+    required double surfaceWidth,
+  }) {
+    if (surfaceWidth <= 0) {
+      return _VideoHoldAction.pause;
+    }
+    final sideWidth = surfaceWidth * 0.3;
+    if (localDx <= sideWidth || localDx >= surfaceWidth - sideWidth) {
+      return _VideoHoldAction.speed2x;
+    }
+    return _VideoHoldAction.pause;
+  }
+
+  void _handleVideoLongPressStart({
+    required int index,
+    required double localDx,
+    required double surfaceWidth,
+  }) {
+    if (index != _currentVideoIndex || _isVideoHoldActive) {
+      return;
+    }
+    final holdAction = _holdActionForPosition(
+      localDx: localDx,
+      surfaceWidth: surfaceWidth,
+    );
+    setState(() {
+      _isVideoHoldActive = true;
+      _videoHoldAction = holdAction;
+    });
+    final controller = _videoControllers[index];
+    if (!controller.value.isInitialized) {
+      return;
+    }
+    if (holdAction == _VideoHoldAction.speed2x) {
+      if ((controller.value.playbackSpeed - 2.0).abs() > 0.01) {
+        controller.setPlaybackSpeed(2.0);
+      }
+      controller.play();
+      return;
+    }
+    controller.pause();
+  }
+
+  void _handleVideoLongPressEnd() {
+    if (!_isVideoHoldActive) {
+      return;
+    }
+    setState(() {
+      _isVideoHoldActive = false;
+      _videoHoldAction = _VideoHoldAction.none;
+    });
+    _syncVideoPlayback();
+  }
+
+  void _toggleVideoTapPlayback(int index) {
+    if (index != _currentVideoIndex || _isVideoHoldActive) {
+      return;
+    }
+    final controller = _videoControllers[index];
+    if (!controller.value.isInitialized) {
+      return;
+    }
+    setState(() => _isVideoManuallyPaused = !_isVideoManuallyPaused);
+    if (_isVideoManuallyPaused) {
+      if ((controller.value.playbackSpeed - 1.0).abs() > 0.01) {
+        controller.setPlaybackSpeed(1.0);
+      }
+      controller.pause();
+      return;
+    }
+    _syncVideoPlayback();
   }
 
   @override
@@ -759,6 +863,13 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
                   final likeBursts = _likeBurstsForPost(post.id);
                   return GestureDetector(
                     behavior: HitTestBehavior.translucent,
+                    onTap: () => _toggleVideoTapPlayback(index),
+                    onLongPressStart: (details) => _handleVideoLongPressStart(
+                      index: index,
+                      localDx: details.localPosition.dx,
+                      surfaceWidth: itemSize.width,
+                    ),
+                    onLongPressEnd: (_) => _handleVideoLongPressEnd(),
                     onDoubleTapDown: (details) =>
                         _rememberDoubleTapPosition(post.id, details),
                     onDoubleTap: () => _handleFeedDoubleTapLike(post, itemSize),
@@ -769,87 +880,90 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
                             controller: _videoControllers[index],
                           ),
                         ),
-                        Positioned.fill(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [
-                                  const Color(0x08000000),
-                                  const Color(0x6B000000),
-                                  const Color(0xD100131A),
-                                ],
-                                stops: const [0.0, 0.6, 1.0],
+                        if (!_isVideoHoldActive) ...[
+                          Positioned.fill(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    const Color(0x08000000),
+                                    const Color(0x6B000000),
+                                    const Color(0xD100131A),
+                                  ],
+                                  stops: const [0.0, 0.6, 1.0],
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        SafeArea(
-                          bottom: false,
-                          child: Padding(
-                            padding: EdgeInsets.fromLTRB(
-                              metrics.horizontalPadding,
-                              metrics.topPadding,
-                              metrics.horizontalPadding,
-                              0,
-                            ),
-                            child: Column(
-                              children: [
-                                SizedBox(height: topOverlayReservedHeight),
-                                Expanded(
-                                  child: Align(
-                                    alignment: Alignment.bottomCenter,
-                                    child: Row(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.end,
-                                      children: [
-                                        Expanded(
-                                          child: _FeedDetails(
-                                            post: post,
+                          SafeArea(
+                            bottom: false,
+                            child: Padding(
+                              padding: EdgeInsets.fromLTRB(
+                                metrics.horizontalPadding,
+                                metrics.topPadding,
+                                metrics.horizontalPadding,
+                                0,
+                              ),
+                              child: Column(
+                                children: [
+                                  SizedBox(height: topOverlayReservedHeight),
+                                  Expanded(
+                                    child: Align(
+                                      alignment: Alignment.bottomCenter,
+                                      child: Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.end,
+                                        children: [
+                                          Expanded(
+                                            child: _FeedDetails(
+                                              post: post,
+                                              metrics: metrics,
+                                              onOpenRestaurant: () =>
+                                                  _openRestaurantDetails(post),
+                                              onOpenAudio: () =>
+                                                  _openPromoDetails(post),
+                                              showOrderNow: showOrderNow,
+                                              orderNowPriceLabel:
+                                                  video.priceLabel,
+                                              onDismissOrderNow: () =>
+                                                  _dismissOrderNowForVideoIndex(
+                                                    index,
+                                                  ),
+                                            ),
+                                          ),
+                                          SizedBox(width: metrics.railGap),
+                                          _ActionRail(
                                             metrics: metrics,
+                                            post: post,
                                             onOpenRestaurant: () =>
                                                 _openRestaurantDetails(post),
-                                            onOpenAudio: () =>
-                                                _openPromoDetails(post),
-                                            showOrderNow: showOrderNow,
-                                            orderNowPriceLabel:
-                                                video.priceLabel,
-                                            onDismissOrderNow: () =>
-                                                _dismissOrderNowForVideoIndex(
-                                                  index,
-                                                ),
+                                            onToggleFollow: () =>
+                                                _toggleFollow(post),
+                                            onToggleLike: () =>
+                                                _toggleLike(post),
+                                            onOpenComments: () =>
+                                                _openComments(post),
+                                            onShare: () => _sharePromo(post),
                                           ),
-                                        ),
-                                        SizedBox(width: metrics.railGap),
-                                        _ActionRail(
-                                          metrics: metrics,
-                                          post: post,
-                                          onOpenRestaurant: () =>
-                                              _openRestaurantDetails(post),
-                                          onToggleFollow: () =>
-                                              _toggleFollow(post),
-                                          onToggleLike: () => _toggleLike(post),
-                                          onOpenComments: () =>
-                                              _openComments(post),
-                                          onShare: () => _sharePromo(post),
-                                        ),
-                                      ],
+                                        ],
+                                      ),
                                     ),
                                   ),
-                                ),
-                                SizedBox(
-                                  height: _clampDouble(
-                                    10 * metrics.scale,
-                                    6,
-                                    12,
+                                  SizedBox(
+                                    height: _clampDouble(
+                                      10 * metrics.scale,
+                                      6,
+                                      12,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                        if (likeBursts.isNotEmpty)
+                        ],
+                        if (!_isVideoHoldActive && likeBursts.isNotEmpty)
                           Positioned.fill(
                             child: IgnorePointer(
                               child: Stack(
@@ -860,6 +974,25 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
                                       tapPosition: burst.tapPosition,
                                     ),
                                 ],
+                              ),
+                            ),
+                          ),
+                        if (!_isVideoHoldActive)
+                          Positioned(
+                            left: _clampDouble(10 * metrics.scale, 8, 14),
+                            right: _clampDouble(10 * metrics.scale, 8, 14),
+                            bottom: _clampDouble(8 * metrics.scale, 6, 10),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(999),
+                              child: VideoProgressIndicator(
+                                _videoControllers[index],
+                                allowScrubbing: true,
+                                padding: EdgeInsets.zero,
+                                colors: const VideoProgressColors(
+                                  playedColor: Color(0xFFFF7E4D),
+                                  bufferedColor: Color(0x80FFFFFF),
+                                  backgroundColor: Color(0x50000000),
+                                ),
                               ),
                             ),
                           ),
@@ -879,30 +1012,31 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
                 bottomInset: navBarBottomInset,
               ),
             ),
-            Align(
-              alignment: Alignment.topCenter,
-              child: SafeArea(
-                bottom: false,
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    metrics.horizontalPadding,
-                    metrics.topPadding,
-                    metrics.horizontalPadding,
-                    0,
-                  ),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: _TopControls(
-                      metrics: metrics,
-                      selectedTab: widget.selectedTopTab,
-                      onTabSelected: widget.onTopTabSelected,
-                      onOpenSearch: _openSearch,
-                      onOpenNotifications: _openNotifications,
+            if (!_isVideoHoldActive)
+              Align(
+                alignment: Alignment.topCenter,
+                child: SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      metrics.horizontalPadding,
+                      metrics.topPadding,
+                      metrics.horizontalPadding,
+                      0,
+                    ),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: _TopControls(
+                        metrics: metrics,
+                        selectedTab: widget.selectedTopTab,
+                        onTabSelected: widget.onTopTabSelected,
+                        onOpenSearch: _openSearch,
+                        onOpenNotifications: _openNotifications,
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
           ],
         );
       },
@@ -2107,12 +2241,90 @@ class _DiscoverTabBody extends StatefulWidget {
 
 class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
   final Set<String> _favoriteSpotTitles = <String>{};
+  final TextEditingController _discoverSearchController =
+      TextEditingController();
+  final FocusNode _discoverSearchFocusNode = FocusNode();
+  String _discoverSearchQuery = '';
   Set<String> _activeCuisineFilters = <String>{};
   double _minimumRatingFilter = 0;
   int? _maximumDeliveryMinutesFilter;
   int? _maximumPriceTierFilter;
 
+  bool get _showSearchSuggestions {
+    return _discoverSearchFocusNode.hasFocus &&
+        _discoverSearchQuery.trim().isNotEmpty;
+  }
+
+  List<_DiscoverSpotData> get _searchSuggestions {
+    final cleanedQuery = _normalizeSearchValue(_discoverSearchQuery.trim());
+    if (cleanedQuery.isEmpty) {
+      return const <_DiscoverSpotData>[];
+    }
+    return _DiscoverTabBody._popularSpots
+        .where((spot) {
+          final haystack = _normalizeSearchValue(
+            '${spot.title} ${spot.handle}',
+          );
+          return _matchesLettersInOrder(source: haystack, query: cleanedQuery);
+        })
+        .take(6)
+        .toList(growable: false);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _discoverSearchFocusNode.addListener(_handleSearchFocusChanged);
+  }
+
+  void _handleSearchFocusChanged() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _discoverSearchFocusNode.removeListener(_handleSearchFocusChanged);
+    _discoverSearchFocusNode.dispose();
+    _discoverSearchController.dispose();
+    super.dispose();
+  }
+
+  void _handleSearchQueryChanged(String value) {
+    if (_discoverSearchQuery == value) {
+      return;
+    }
+    setState(() => _discoverSearchQuery = value);
+  }
+
+  void _submitSearchQuery(String value) {
+    if (_discoverSearchQuery != value) {
+      setState(() => _discoverSearchQuery = value);
+    }
+    _discoverSearchFocusNode.unfocus();
+  }
+
+  void _clearSearchQuery() {
+    _discoverSearchController.clear();
+    setState(() => _discoverSearchQuery = '');
+  }
+
+  void _selectSearchSuggestion(_DiscoverSpotData spot) {
+    final title = spot.title;
+    _discoverSearchController.value = TextEditingValue(
+      text: title,
+      selection: TextSelection.collapsed(offset: title.length),
+    );
+    setState(() => _discoverSearchQuery = title);
+    _discoverSearchFocusNode.unfocus();
+  }
+
   List<_DiscoverSpotData> get _filteredPopularSpots {
+    final cleanedSearchQuery = _normalizeSearchValue(
+      _discoverSearchQuery.trim(),
+    );
     return _DiscoverTabBody._popularSpots
         .where((spot) {
           if (_activeCuisineFilters.isNotEmpty &&
@@ -2130,6 +2342,17 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
               spot.priceTier > _maximumPriceTierFilter!) {
             return false;
           }
+          if (cleanedSearchQuery.isNotEmpty) {
+            final haystack = _normalizeSearchValue(
+              '${spot.title} ${spot.handle}',
+            );
+            if (!_matchesLettersInOrder(
+              source: haystack,
+              query: cleanedSearchQuery,
+            )) {
+              return false;
+            }
+          }
           return true;
         })
         .toList(growable: false);
@@ -2139,12 +2362,6 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
     return _DiscoverTabBody._popularSpots
         .where((spot) => spot.categoryTitle == cuisineTitle)
         .toList(growable: false);
-  }
-
-  Future<void> _openDiscoverSearch(BuildContext context) async {
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const SearchScreen()));
   }
 
   void _openVoiceSearch(BuildContext context) {
@@ -2610,12 +2827,37 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                         height: _clampDouble(18 * metrics.scale, 14, 18),
                       ),
                       Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Expanded(
-                            child: _DiscoverSearchBar(
-                              metrics: metrics,
-                              onTapSearch: () => _openDiscoverSearch(context),
-                              onTapVoiceSearch: () => _openVoiceSearch(context),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _DiscoverSearchBar(
+                                  metrics: metrics,
+                                  controller: _discoverSearchController,
+                                  focusNode: _discoverSearchFocusNode,
+                                  onChanged: _handleSearchQueryChanged,
+                                  onSubmitted: _submitSearchQuery,
+                                  onClear: _clearSearchQuery,
+                                  onTapVoiceSearch: () =>
+                                      _openVoiceSearch(context),
+                                ),
+                                if (_showSearchSuggestions) ...[
+                                  SizedBox(
+                                    height: _clampDouble(
+                                      10 * metrics.scale,
+                                      8,
+                                      10,
+                                    ),
+                                  ),
+                                  _DiscoverSearchSuggestionsDropdown(
+                                    metrics: metrics,
+                                    matches: _searchSuggestions,
+                                    onSelected: _selectSearchSuggestion,
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
                           SizedBox(
@@ -7021,74 +7263,210 @@ class _ProfileBackground extends StatelessWidget {
 class _DiscoverSearchBar extends StatelessWidget {
   const _DiscoverSearchBar({
     required this.metrics,
-    required this.onTapSearch,
+    required this.controller,
+    required this.focusNode,
+    required this.onChanged,
+    required this.onSubmitted,
+    required this.onClear,
     required this.onTapVoiceSearch,
   });
 
   final _ResponsiveMetrics metrics;
-  final VoidCallback onTapSearch;
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final ValueChanged<String> onChanged;
+  final ValueChanged<String> onSubmitted;
+  final VoidCallback onClear;
   final VoidCallback onTapVoiceSearch;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTapSearch,
-        borderRadius: BorderRadius.circular(22),
-        child: Ink(
-          height: _clampDouble(56 * metrics.scale, 48, 56),
-          padding: EdgeInsets.symmetric(
-            horizontal: _clampDouble(18 * metrics.scale, 14, 18),
-          ),
-          decoration: BoxDecoration(
-            color: const Color(0xFFFEFCFA),
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: const Color(0xFFF3DFCF)),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x10A7633A),
-                blurRadius: 20,
-                offset: Offset(0, 10),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Icon(
-                Icons.search_rounded,
-                color: const Color(0xFFFF7E4D),
-                size: _clampDouble(24 * metrics.scale, 20, 24),
-              ),
-              SizedBox(width: _clampDouble(10 * metrics.scale, 8, 10)),
-              Expanded(
-                child: Text(
-                  'Search restaurants or dishes',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: const Color(0xFF9D8A7D),
-                    fontSize: _clampDouble(15 * metrics.scale, 12, 15),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              GestureDetector(
-                onTap: onTapVoiceSearch,
-                behavior: HitTestBehavior.opaque,
-                child: Padding(
-                  padding: const EdgeInsets.all(2),
-                  child: Icon(
-                    Icons.mic_none_rounded,
-                    color: const Color(0xFFB9A596),
-                    size: _clampDouble(22 * metrics.scale, 18, 22),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
+    final hasQuery = controller.text.trim().isNotEmpty;
+    return Container(
+      height: _clampDouble(56 * metrics.scale, 48, 56),
+      padding: EdgeInsets.symmetric(
+        horizontal: _clampDouble(18 * metrics.scale, 14, 18),
       ),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEFCFA),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFFF3DFCF)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x10A7633A),
+            blurRadius: 20,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.search_rounded,
+            color: const Color(0xFFFF7E4D),
+            size: _clampDouble(24 * metrics.scale, 20, 24),
+          ),
+          SizedBox(width: _clampDouble(10 * metrics.scale, 8, 10)),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              focusNode: focusNode,
+              textInputAction: TextInputAction.search,
+              onChanged: onChanged,
+              onSubmitted: onSubmitted,
+              style: TextStyle(
+                color: const Color(0xFF5A4A3F),
+                fontSize: _clampDouble(15 * metrics.scale, 12, 15),
+                fontWeight: FontWeight.w700,
+              ),
+              decoration: InputDecoration(
+                border: InputBorder.none,
+                isDense: true,
+                hintText: 'Search restaurants or dishes',
+                hintStyle: TextStyle(
+                  color: const Color(0xFF9D8A7D),
+                  fontSize: _clampDouble(15 * metrics.scale, 12, 15),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: hasQuery ? onClear : onTapVoiceSearch,
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.all(2),
+              child: Icon(
+                hasQuery ? Icons.close_rounded : Icons.mic_none_rounded,
+                color: const Color(0xFFB9A596),
+                size: _clampDouble(22 * metrics.scale, 18, 22),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DiscoverSearchSuggestionsDropdown extends StatelessWidget {
+  const _DiscoverSearchSuggestionsDropdown({
+    required this.metrics,
+    required this.matches,
+    required this.onSelected,
+  });
+
+  final _ResponsiveMetrics metrics;
+  final List<_DiscoverSpotData> matches;
+  final ValueChanged<_DiscoverSpotData> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasMatches = matches.isNotEmpty;
+    final maxHeight = hasMatches
+        ? _clampDouble(220 * metrics.scale, 148, 220)
+        : _clampDouble(76 * metrics.scale, 60, 76);
+    return Container(
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEFCFA),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFEAD9CB)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14A7633A),
+            blurRadius: 16,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: hasMatches
+          ? ListView.separated(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              shrinkWrap: true,
+              itemCount: matches.length,
+              separatorBuilder: (_, _) => const Divider(
+                height: 1,
+                indent: 14,
+                endIndent: 14,
+                color: Color(0xFFF1E5DA),
+              ),
+              itemBuilder: (context, index) {
+                final spot = matches[index];
+                return Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => onSelected(spot),
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: _clampDouble(14 * metrics.scale, 12, 14),
+                        vertical: _clampDouble(10 * metrics.scale, 8, 10),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.storefront_rounded,
+                            color: const Color(0xFFFF7E4D),
+                            size: _clampDouble(20 * metrics.scale, 18, 20),
+                          ),
+                          SizedBox(
+                            width: _clampDouble(10 * metrics.scale, 8, 10),
+                          ),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  spot.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: const Color(0xFF2A1E18),
+                                    fontSize: _clampDouble(
+                                      14 * metrics.scale,
+                                      12,
+                                      14,
+                                    ),
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                SizedBox(
+                                  height: _clampDouble(2 * metrics.scale, 2, 2),
+                                ),
+                                Text(
+                                  '${spot.categoryTitle} - ${spot.deliveryLabel}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: const Color(0xFF8C7A6E),
+                                    fontSize: _clampDouble(
+                                      12 * metrics.scale,
+                                      10,
+                                      12,
+                                    ),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            )
+          : Center(
+              child: Text(
+                'No match found',
+                style: TextStyle(
+                  color: const Color(0xFF8D7B6E),
+                  fontSize: _clampDouble(14 * metrics.scale, 12, 14),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
     );
   }
 }
