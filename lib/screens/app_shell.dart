@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/auth_session.dart';
 import '../services/auth_session_service.dart';
+import 'admin_dashboard_screen.dart';
 import 'login_screen.dart';
 import 'restaurant_feed_screen.dart';
 import 'user_home_screen.dart';
@@ -21,6 +22,7 @@ class _AppShellState extends State<AppShell> {
     'vendor',
     'merchant',
   };
+  static const _adminRoles = <String>{'admin', 'super_admin', 'administrator'};
 
   final _authSessionService = AuthSessionService();
   AuthSession? _session;
@@ -50,6 +52,10 @@ class _AppShellState extends State<AppShell> {
 
   bool _isRestaurantRole(String role) {
     return _restaurantRoles.contains(_normalizeRole(role));
+  }
+
+  bool _isAdminRole(String role) {
+    return _adminRoles.contains(_normalizeRole(role));
   }
 
   bool _isNormalUserRole(String role) {
@@ -175,9 +181,19 @@ class _AppShellState extends State<AppShell> {
       );
     }
 
+    if (_isAdminRole(session.role)) {
+      return AdminDashboardScreen(
+        authToken: session.token,
+        adminName: _extractUserName(session.user),
+        onLogout: _handleLogout,
+      );
+    }
+
     if (_isRestaurantRole(session.role)) {
       return RestaurantFeedScreen(
         restaurantName: session.restaurantName,
+        authToken: session.token,
+        initialUserData: session.user,
         onLogout: _handleLogout,
       );
     }
@@ -188,6 +204,7 @@ class _AppShellState extends State<AppShell> {
         userEmail: _extractUserEmail(session.user),
         userAvatarUrl: _extractUserAvatarUrl(session.user),
         accountLabel: _extractUserAccountLabel(session),
+        authSession: session,
       );
     }
 

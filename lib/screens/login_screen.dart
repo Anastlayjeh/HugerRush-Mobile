@@ -8,6 +8,7 @@ import '../models/auth_session.dart';
 import '../services/auth_api_service.dart';
 import '../services/auth_session_service.dart';
 import '../widgets/auth_social_buttons.dart';
+import 'admin_dashboard_screen.dart';
 import 'frontend_placeholder_screen.dart';
 import 'registration_screen.dart';
 import 'restaurant_feed_screen.dart';
@@ -38,6 +39,7 @@ class _LoginScreenState extends State<LoginScreen> {
     'vendor',
     'merchant',
   };
+  static const _adminRoles = <String>{'admin', 'super_admin', 'administrator'};
   static bool _googleSignInInitialized = false;
   static Future<void>? _googleSignInInitialization;
 
@@ -161,6 +163,20 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _isRestaurantRole(String role) {
     return _restaurantRoles.contains(role);
+  }
+
+  bool _isAdminRole(String role) {
+    return _adminRoles.contains(role);
+  }
+
+  String? _findAdminRole(Map<String, dynamic>? user) {
+    final roles = _extractRoles(user);
+    for (final role in roles) {
+      if (_isAdminRole(role)) {
+        return role;
+      }
+    }
+    return null;
   }
 
   String? _findRestaurantRole(Map<String, dynamic>? user) {
@@ -383,9 +399,45 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     final detectedRole =
+        _findAdminRole(result.user) ??
         _findRestaurantRole(result.user) ??
         _normalizeRole(result.role) ??
         _extractRoleFromMessage(result.message);
+
+    if (detectedRole != null && _isAdminRole(detectedRole)) {
+      final adminName = _extractUserName(
+        result.user,
+        fallbackEmail: fallbackEmail,
+        fallbackDisplayName: fallbackDisplayName,
+      );
+      final session = AuthSession(
+        token: token,
+        role: detectedRole,
+        restaurantName: adminName,
+        refreshToken: result.refreshToken?.trim(),
+        user: result.user,
+      );
+      await _authSessionService.saveSession(session);
+      if (!mounted) {
+        return;
+      }
+
+      final onAuthenticated = widget.onAuthenticated;
+      if (onAuthenticated != null) {
+        onAuthenticated(session);
+        return;
+      }
+
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) => AdminDashboardScreen(
+            authToken: session.token,
+            adminName: adminName,
+          ),
+        ),
+      );
+      return;
+    }
 
     if (detectedRole != null && _isRestaurantRole(detectedRole)) {
       final session = AuthSession(
@@ -463,6 +515,7 @@ class _LoginScreenState extends State<LoginScreen> {
             userEmail: customerEmail,
             userAvatarUrl: customerAvatarUrl,
             accountLabel: customerAccountLabel,
+            authSession: customerSession,
           ),
         ),
       );

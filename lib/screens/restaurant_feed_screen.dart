@@ -6,10 +6,13 @@ import 'package:file_picker/file_picker.dart';
 import 'package:video_player/video_player.dart';
 
 import '../models/demo_app_models.dart';
+import '../services/conversation_api_service.dart';
 import '../services/demo_app_repository.dart';
 import 'login_screen.dart';
 import '../services/restaurant_menu_api_service.dart';
+import '../services/restaurant_owner_api_service.dart';
 import '../services/restaurant_profile_api_service.dart';
+import '../services/support_report_api_service.dart';
 import 'app_support_screens.dart';
 
 double _clampDouble(double value, double min, double max) {
@@ -66,89 +69,6 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   static const int _messagesTabIndex = 3;
   static const int _profileTabIndex = 4;
   static const int _profileMenuTabIndex = 1;
-  static const List<RestaurantMenuItem> _fallbackMenuItems = [
-    RestaurantMenuItem(
-      id: 'margherita-special',
-      title: 'Margherita Special',
-      description:
-          'Fresh basil, mozzarella, tomato sauce, and olive oil drizzle.',
-      price: 11.00,
-      imageUrl:
-          'https://images.unsplash.com/photo-1604382354936-07c5d9983bd3?auto=format&fit=crop&w=900&q=80',
-      category: 'Pizza',
-      isAvailable: true,
-      isPopular: true,
-      rating: 4.8,
-      ordersCount: 148,
-    ),
-    RestaurantMenuItem(
-      id: 'crispy-wings',
-      title: 'Crispy Wings (6pcs)',
-      description: 'Golden fried wings served with spicy dipping sauce.',
-      price: 9.50,
-      imageUrl:
-          'https://images.unsplash.com/photo-1562967916-eb82221dfb92?auto=format&fit=crop&w=900&q=80',
-      category: 'Starters',
-      isAvailable: true,
-      isPopular: false,
-      rating: 4.6,
-      ordersCount: 96,
-    ),
-    RestaurantMenuItem(
-      id: 'creamy-carbonara',
-      title: 'Creamy Carbonara',
-      description: 'Spaghetti tossed in creamy parmesan sauce and herbs.',
-      price: 13.25,
-      imageUrl:
-          'https://images.unsplash.com/photo-1621996346565-e3dbc646d9a9?auto=format&fit=crop&w=900&q=80',
-      category: 'Pasta',
-      isAvailable: true,
-      isPopular: true,
-      rating: 4.9,
-      ordersCount: 121,
-    ),
-    RestaurantMenuItem(
-      id: 'smoked-bbq-burger',
-      title: 'Smoked BBQ Burger',
-      description: 'Beef patty, cheddar, caramelized onions, and BBQ sauce.',
-      price: 12.75,
-      imageUrl:
-          'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=900&q=80',
-      category: 'Burgers',
-      isAvailable: true,
-      isPopular: true,
-      rating: 4.7,
-      ordersCount: 134,
-    ),
-    RestaurantMenuItem(
-      id: 'garden-caesar-salad',
-      title: 'Garden Caesar Salad',
-      description:
-          'Romaine lettuce, parmesan flakes, croutons, and Caesar dressing.',
-      price: 8.40,
-      imageUrl:
-          'https://images.unsplash.com/photo-1546793665-c74683f339c1?auto=format&fit=crop&w=900&q=80',
-      category: 'Salads',
-      isAvailable: true,
-      isPopular: false,
-      rating: 4.4,
-      ordersCount: 58,
-    ),
-    RestaurantMenuItem(
-      id: 'double-chocolate-brownie',
-      title: 'Double Chocolate Brownie',
-      description:
-          'Warm brownie served with chocolate sauce and vanilla cream.',
-      price: 6.80,
-      imageUrl:
-          'https://images.unsplash.com/photo-1606313564200-e75d5e30476c?auto=format&fit=crop&w=900&q=80',
-      category: 'Desserts',
-      isAvailable: true,
-      isPopular: false,
-      rating: 4.8,
-      ordersCount: 73,
-    ),
-  ];
   static const List<_FeedVideoPostData> _feedVideos = [
     _FeedVideoPostData(
       videoAssetPath: 'assets/videos/home_video_1.mp4',
@@ -173,6 +93,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   int _selectedProfileTabIndex = _profileMenuTabIndex;
   final _profileApiService = RestaurantProfileApiService();
   final _menuApiService = RestaurantMenuApiService();
+  final _ownerApiService = RestaurantOwnerApiService();
   PlatformFile? _selectedPostVideo;
   bool _isPickingPostVideo = false;
   bool _isCreatingPost = false;
@@ -194,6 +115,12 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   bool _isRefreshingMenu = false;
   bool _hasLoadedMenu = false;
   String? _menuSyncError;
+  List<OwnerOrder> _restaurantOrders = const <OwnerOrder>[];
+  List<OwnerReview> _restaurantReviews = const <OwnerReview>[];
+  RestaurantAnalyticsSnapshot? _analyticsSnapshot;
+  bool _isRefreshingDashboard = false;
+  bool _hasLoadedDashboard = false;
+  String? _dashboardSyncError;
 
   @override
   void initState() {
@@ -240,6 +167,8 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     );
     _addSampleProfileVideo();
     _refreshRestaurantProfile();
+    _refreshRestaurantMenu();
+    _refreshDashboardData();
   }
 
   @override
@@ -249,6 +178,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     }
     _profileApiService.dispose();
     _menuApiService.dispose();
+    _ownerApiService.dispose();
     super.dispose();
   }
 
@@ -295,8 +225,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   bool get _isDashboardTabSelected =>
       _selectedBottomIndex == _dashboardTabIndex;
   bool get _isMessagesTabSelected => _selectedBottomIndex == _messagesTabIndex;
-  List<RestaurantMenuItem> get _menuItemsForDisplay =>
-      _restaurantMenuItems.isEmpty ? _fallbackMenuItems : _restaurantMenuItems;
+  List<RestaurantMenuItem> get _menuItemsForDisplay => _restaurantMenuItems;
 
   void _addSampleProfileVideo() {
     if (_uploadedVideos.isNotEmpty) {
@@ -439,7 +368,9 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   Future<void> _openNotifications() async {
     await _withFeedPlaybackPaused<void>(
       () => Navigator.of(context).push(
-        MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
+        MaterialPageRoute<void>(
+          builder: (_) => NotificationsScreen(authToken: widget.authToken),
+        ),
       ),
     );
   }
@@ -489,7 +420,6 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         menuItems: _menuItemsForDisplay,
         uploadedVideos: videoPreviews,
         reviews: reviewPreviews,
-        showMenuCategoryFilter: true,
       ),
     );
   }
@@ -610,22 +540,25 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   }
 
   Future<void> _openCompletedOrders() async {
+    final orders = _demoOrdersFromOwnerOrders(completed: true);
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => OrderListScreen(
-          title: 'Completed Orders',
-          orders: _demoRepository.getOrders(completed: true),
-        ),
+        builder: (_) =>
+            OrderListScreen(title: 'Completed Orders', orders: orders),
       ),
     );
   }
 
   Future<void> _openRevenueAnalytics() async {
-    final completedOrders = _computeOrdersCompletedToday(_menuItemsForDisplay);
-    final revenueToday = _computeRevenueToday(
-      completedToday: completedOrders,
-      averagePrice: _computeAveragePrice(_menuItemsForDisplay),
-    );
+    final completedOrders =
+        _analyticsSnapshot?.ordersToday ??
+        _restaurantOrders.where((order) => order.completed).length;
+    final revenueToday =
+        _analyticsSnapshot?.revenueToday ??
+        _restaurantOrders.fold<double>(
+          0,
+          (total, order) => total + order.total,
+        );
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => RevenueAnalyticsScreen(
@@ -637,37 +570,57 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   }
 
   Future<void> _openActiveOrders() async {
+    final orders = _demoOrdersFromOwnerOrders(completed: false);
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => OrderListScreen(
-          title: 'Orders In Progress',
-          orders: _demoRepository.getOrders(completed: false),
-        ),
+        builder: (_) =>
+            OrderListScreen(title: 'Orders In Progress', orders: orders),
       ),
     );
   }
 
   Future<void> _openOrderManagement() async {
+    final orders = _demoOrdersFromOwnerOrders();
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            OrderManagementScreen(orders: _demoRepository.getOrders()),
+        builder: (_) => OrderManagementScreen(orders: orders),
       ),
     );
   }
 
   Future<void> _openOrderDetails(String orderId) async {
-    final order = _demoRepository.findOrder(orderId);
+    DemoOrder? order;
+    for (final item in _demoOrdersFromOwnerOrders()) {
+      if (item.id == orderId ||
+          item.id.replaceAll('#', '') == orderId.replaceAll('#', '')) {
+        order = item;
+        break;
+      }
+    }
     if (order == null) {
       return;
     }
+    final selectedOrder = order;
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => OrderDetailScreen(order: order)),
+      MaterialPageRoute<void>(
+        builder: (_) => OrderDetailScreen(order: selectedOrder),
+      ),
     );
   }
 
   void _openMenuItemDetails(RestaurantMenuItem item) {
     showRestaurantMenuItemDetailsPopup(context, item: item);
+  }
+
+  List<DemoOrder> _demoOrdersFromOwnerOrders({bool? completed}) {
+    final realOrders = _restaurantOrders
+        .where((order) => completed == null || order.completed == completed)
+        .map((order) => order.toDemoOrder())
+        .toList(growable: false);
+    if (realOrders.isNotEmpty) {
+      return realOrders;
+    }
+    return const <DemoOrder>[];
   }
 
   void _onBottomNavSelected(int index) {
@@ -680,6 +633,12 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     if (index == _menuTabIndex || index == _dashboardTabIndex) {
       _refreshRestaurantMenu();
     }
+    if (index == _dashboardTabIndex) {
+      _refreshDashboardData();
+    }
+    if (index == _profileTabIndex && _selectedProfileTabIndex == 2) {
+      _refreshRestaurantReviews();
+    }
   }
 
   void _openMenuSection() {
@@ -689,6 +648,12 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
   void _onProfileTabSelected(int index) {
     setState(() => _selectedProfileTabIndex = index);
+    if (index == _profileMenuTabIndex) {
+      _refreshRestaurantMenu();
+    }
+    if (index == 2) {
+      _refreshRestaurantReviews();
+    }
   }
 
   void _handleVideoPageChanged(int index) {
@@ -914,7 +879,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     final token = widget.authToken?.trim() ?? '';
     if (token.isEmpty) {
       setState(() {
-        _restaurantMenuItems = _fallbackMenuItems;
+        _restaurantMenuItems = const <RestaurantMenuItem>[];
         _hasLoadedMenu = true;
         _isRefreshingMenu = false;
         _menuSyncError = 'Missing auth token. Please log in again.';
@@ -933,23 +898,88 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         return;
       }
       setState(() {
-        _restaurantMenuItems = items.isEmpty ? _fallbackMenuItems : items;
+        _restaurantMenuItems = items;
         _hasLoadedMenu = true;
         _isRefreshingMenu = false;
-        _menuSyncError = items.isEmpty
-            ? 'No backend menu items were returned, so sample dishes are shown.'
-            : null;
+        _menuSyncError = null;
       });
     } on RestaurantMenuApiException catch (e) {
       if (!mounted) {
         return;
       }
       setState(() {
-        _restaurantMenuItems = _fallbackMenuItems;
+        _restaurantMenuItems = const <RestaurantMenuItem>[];
         _hasLoadedMenu = true;
         _isRefreshingMenu = false;
         _menuSyncError = e.message;
       });
+    }
+  }
+
+  Future<void> _refreshDashboardData({bool force = false}) async {
+    if (_isRefreshingDashboard) {
+      return;
+    }
+    if (_hasLoadedDashboard && !force) {
+      return;
+    }
+    final token = widget.authToken?.trim() ?? '';
+    if (token.isEmpty) {
+      setState(() {
+        _restaurantOrders = const <OwnerOrder>[];
+        _restaurantReviews = const <OwnerReview>[];
+        _analyticsSnapshot = null;
+        _hasLoadedDashboard = true;
+        _dashboardSyncError = 'Missing auth token. Please log in again.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isRefreshingDashboard = true;
+      _dashboardSyncError = null;
+    });
+    try {
+      final results = await Future.wait<Object>([
+        _ownerApiService.fetchOrders(token: token),
+        _ownerApiService.fetchAnalytics(token: token),
+        _ownerApiService.fetchReviews(token: token),
+      ]);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _restaurantOrders = results[0] as List<OwnerOrder>;
+        _analyticsSnapshot = results[1] as RestaurantAnalyticsSnapshot;
+        _restaurantReviews = results[2] as List<OwnerReview>;
+        _hasLoadedDashboard = true;
+        _isRefreshingDashboard = false;
+      });
+    } on RestaurantOwnerApiException catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isRefreshingDashboard = false;
+        _hasLoadedDashboard = true;
+        _dashboardSyncError = e.message;
+      });
+    }
+  }
+
+  Future<void> _refreshRestaurantReviews() async {
+    final token = widget.authToken?.trim() ?? '';
+    if (token.isEmpty) {
+      return;
+    }
+    try {
+      final reviews = await _ownerApiService.fetchReviews(token: token);
+      if (!mounted) {
+        return;
+      }
+      setState(() => _restaurantReviews = reviews);
+    } on RestaurantOwnerApiException {
+      // The profile tab already has a dashboard-level retry surface.
     }
   }
 
@@ -1205,6 +1235,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         onManageMenu: _openMenuSection,
         onOpenFollowers: () =>
             _openFollowersList(restaurantName: _profileInfo.name),
+        authToken: widget.authToken,
         onLogout: _logoutToLogin,
       ),
       body: LayoutBuilder(
@@ -1239,6 +1270,8 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                     child: _ProfileSection(
                       metrics: metrics,
                       profileInfo: _profileInfo,
+                      menuItems: _menuItemsForDisplay,
+                      reviews: _restaurantReviews,
                       isSyncingProfile: _isRefreshingProfile,
                       profileSyncError: _profileSyncError,
                       onRetryProfileSync: _refreshRestaurantProfile,
@@ -1364,14 +1397,18 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   }
 
   Widget _buildDashboardScaffold() {
-    final completedOrdersToday = _computeOrdersCompletedToday(
-      _restaurantMenuItems,
-    );
-    final ordersInProgress = _computeOrdersInProgress(completedOrdersToday);
-    final revenueToday = _computeRevenueToday(
-      completedToday: completedOrdersToday,
-      averagePrice: _computeAveragePrice(_restaurantMenuItems),
-    );
+    final completedOrdersToday =
+        _analyticsSnapshot?.ordersToday ??
+        _restaurantOrders.where((order) => order.completed).length;
+    final ordersInProgress =
+        _analyticsSnapshot?.ordersInProgress ??
+        _restaurantOrders.where((order) => !order.completed).length;
+    final revenueToday =
+        _analyticsSnapshot?.revenueToday ??
+        _restaurantOrders.fold<double>(
+          0,
+          (total, order) => total + order.total,
+        );
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8EFE8),
@@ -1407,17 +1444,24 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                     child: _DashboardSection(
                       metrics: metrics,
                       restaurantName: _restaurantName,
-                      isRefreshing: _isRefreshingMenu,
+                      isRefreshing: _isRefreshingDashboard,
+                      errorMessage: _dashboardSyncError,
                       ordersCompletedToday: completedOrdersToday,
                       revenueToday: revenueToday,
                       ordersInProgress: ordersInProgress,
+                      liveOrders: _demoOrdersFromOwnerOrders(completed: false),
                       selectedVideoName: _selectedPostVideo?.name,
                       selectedVideoSizeBytes: _selectedPostVideo?.size,
                       isPickingVideo: _isPickingPostVideo,
                       isCreatingPost: _isCreatingPost,
                       onSelectVideo: _pickPostVideo,
                       onClearVideo: _clearSelectedPostVideo,
-                      onRefresh: () => _refreshRestaurantMenu(force: true),
+                      onRefresh: () async {
+                        await Future.wait([
+                          _refreshRestaurantMenu(force: true),
+                          _refreshDashboardData(force: true),
+                        ]);
+                      },
                       onCreatePost: _createVideoPost,
                       onOpenCompletedOrders: _openCompletedOrders,
                       onOpenRevenueAnalytics: _openRevenueAnalytics,
@@ -1480,6 +1524,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                     child: _MessagesSection(
                       metrics: metrics,
                       restaurantName: _restaurantName,
+                      authToken: widget.authToken,
                     ),
                   ),
                 ),
@@ -1619,28 +1664,6 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     }
     final sum = prices.fold<double>(0, (value, item) => value + item);
     return sum / prices.length;
-  }
-
-  int _computeOrdersCompletedToday(List<RestaurantMenuItem> items) {
-    final backendSignal = items
-        .map((item) => item.ordersCount ?? 0)
-        .fold<int>(0, (total, value) => total + value);
-    if (backendSignal <= 0) {
-      return 28;
-    }
-    return (backendSignal * 0.08).round().clamp(8, 320).toInt();
-  }
-
-  int _computeOrdersInProgress(int completedToday) {
-    return (completedToday * 0.34).round().clamp(3, 120).toInt();
-  }
-
-  double _computeRevenueToday({
-    required int completedToday,
-    required double? averagePrice,
-  }) {
-    final estimatedTicketSize = averagePrice ?? 12.5;
-    return completedToday * estimatedTicketSize;
   }
 }
 
@@ -2665,9 +2688,11 @@ class _DashboardSection extends StatelessWidget {
     required this.metrics,
     required this.restaurantName,
     required this.isRefreshing,
+    required this.errorMessage,
     required this.ordersCompletedToday,
     required this.revenueToday,
     required this.ordersInProgress,
+    required this.liveOrders,
     required this.selectedVideoName,
     required this.selectedVideoSizeBytes,
     required this.isPickingVideo,
@@ -2686,9 +2711,11 @@ class _DashboardSection extends StatelessWidget {
   final _ResponsiveMetrics metrics;
   final String restaurantName;
   final bool isRefreshing;
+  final String? errorMessage;
   final int ordersCompletedToday;
   final double revenueToday;
   final int ordersInProgress;
+  final List<DemoOrder> liveOrders;
   final String? selectedVideoName;
   final int? selectedVideoSizeBytes;
   final bool isPickingVideo;
@@ -2721,6 +2748,14 @@ class _DashboardSection extends StatelessWidget {
             isRefreshing: isRefreshing,
             onRefresh: onRefresh,
           ),
+          if (errorMessage != null) ...[
+            SizedBox(height: sectionGap),
+            _DashboardErrorBanner(
+              metrics: metrics,
+              message: errorMessage!,
+              onRetry: onRefresh,
+            ),
+          ],
           SizedBox(height: sectionGap),
           _DashboardStatsPanel(
             metrics: metrics,
@@ -2746,6 +2781,7 @@ class _DashboardSection extends StatelessWidget {
           _DashboardLiveOrdersPanel(
             metrics: metrics,
             ordersInProgress: ordersInProgress,
+            orders: liveOrders,
             onOpenOrderManagement: onOpenOrderManagement,
             onOpenOrderDetails: onOpenOrderDetails,
           ),
@@ -2874,6 +2910,47 @@ class _DashboardHeaderCard extends StatelessWidget {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DashboardErrorBanner extends StatelessWidget {
+  const _DashboardErrorBanner({
+    required this.metrics,
+    required this.message,
+    required this.onRetry,
+  });
+
+  final _ResponsiveMetrics metrics;
+  final String message;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(_clampDouble(14 * metrics.scale, 10, 14)),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF1EC),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFFFD2C2)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_off_rounded, color: Color(0xFFB7372B)),
+          SizedBox(width: _clampDouble(10 * metrics.scale, 8, 10)),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: Color(0xFF7E3B2E),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          TextButton(onPressed: onRetry, child: const Text('Retry')),
         ],
       ),
     );
@@ -3276,49 +3353,33 @@ class _DashboardLiveOrdersPanel extends StatelessWidget {
   const _DashboardLiveOrdersPanel({
     required this.metrics,
     required this.ordersInProgress,
+    required this.orders,
     required this.onOpenOrderManagement,
     required this.onOpenOrderDetails,
   });
 
   final _ResponsiveMetrics metrics;
   final int ordersInProgress;
+  final List<DemoOrder> orders;
   final Future<void> Function() onOpenOrderManagement;
   final Future<void> Function(String orderId) onOpenOrderDetails;
-
-  static const List<_DashboardLiveOrderData> _sampleOrders = [
-    _DashboardLiveOrderData(
-      orderId: '#4735',
-      customerName: 'Lina M.',
-      itemSummary: '2x Pepperoni Feast, 1x Cola',
-      etaLabel: 'ETA 14m',
-      statusLabel: 'Cooking',
-      highlighted: true,
-    ),
-    _DashboardLiveOrderData(
-      orderId: '#4733',
-      customerName: 'Rami A.',
-      itemSummary: '1x Chicken Wrap, 1x Fries',
-      etaLabel: 'ETA 8m',
-      statusLabel: 'Packing',
-      highlighted: false,
-    ),
-    _DashboardLiveOrderData(
-      orderId: '#4730',
-      customerName: 'Jad F.',
-      itemSummary: '1x Family Box, 2x Garlic Dip',
-      etaLabel: 'ETA 22m',
-      statusLabel: 'Queued',
-      highlighted: false,
-    ),
-  ];
 
   @override
   Widget build(BuildContext context) {
     final cardRadius = _clampDouble(22 * metrics.scale, 16, 22);
     final listGap = _clampDouble(8 * metrics.scale, 6, 8);
-    final displayCount = _sampleOrders
-        .take(ordersInProgress.clamp(1, _sampleOrders.length))
-        .toList();
+    final displayOrders = orders
+        .map(
+          (order) => _DashboardLiveOrderData(
+            orderId: order.id,
+            customerName: order.customerName,
+            itemSummary: order.itemSummary,
+            etaLabel: order.etaLabel,
+            statusLabel: order.statusLabel,
+            highlighted: order.highlighted,
+          ),
+        )
+        .toList(growable: false);
 
     return Container(
       width: double.infinity,
@@ -3395,18 +3456,36 @@ class _DashboardLiveOrdersPanel extends StatelessWidget {
             ],
           ),
           SizedBox(height: _clampDouble(10 * metrics.scale, 8, 10)),
-          ...List.generate(displayCount.length, (index) {
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: index == displayCount.length - 1 ? 0 : listGap,
+          if (displayOrders.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: EdgeInsets.all(_clampDouble(14 * metrics.scale, 10, 14)),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8EFE8),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFE2D6CB)),
               ),
-              child: _DashboardLiveOrderRow(
-                metrics: metrics,
-                data: displayCount[index],
-                onTap: () => onOpenOrderDetails(displayCount[index].orderId),
+              child: const Text(
+                'No active orders in the database right now.',
+                style: TextStyle(
+                  color: Color(0xFF7D6C60),
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            );
-          }),
+            )
+          else
+            ...List.generate(displayOrders.length, (index) {
+              return Padding(
+                padding: EdgeInsets.only(
+                  bottom: index == displayOrders.length - 1 ? 0 : listGap,
+                ),
+                child: _DashboardLiveOrderRow(
+                  metrics: metrics,
+                  data: displayOrders[index],
+                  onTap: () => onOpenOrderDetails(displayOrders[index].orderId),
+                ),
+              );
+            }),
           SizedBox(height: _clampDouble(10 * metrics.scale, 8, 10)),
           SizedBox(
             width: double.infinity,
@@ -3583,10 +3662,15 @@ class _DashboardLiveOrderData {
 }
 
 class _MessagesSection extends StatefulWidget {
-  const _MessagesSection({required this.metrics, required this.restaurantName});
+  const _MessagesSection({
+    required this.metrics,
+    required this.restaurantName,
+    this.authToken,
+  });
 
   final _ResponsiveMetrics metrics;
   final String restaurantName;
+  final String? authToken;
 
   @override
   State<_MessagesSection> createState() => _MessagesSectionState();
@@ -3594,12 +3678,14 @@ class _MessagesSection extends StatefulWidget {
 
 class _MessagesSectionState extends State<_MessagesSection> {
   final _repository = DemoAppRepository.instance;
+  final _conversationApiService = ConversationApiService();
 
   List<DemoConversationThread> _threads = const <DemoConversationThread>[];
   MessageFilterType _selectedFilter = MessageFilterType.all;
   String? _selectedCustomerName;
   bool _needsReplyOnly = false;
   bool _isLoading = true;
+  String? _errorMessage;
 
   @override
   void initState() {
@@ -3608,14 +3694,37 @@ class _MessagesSectionState extends State<_MessagesSection> {
   }
 
   Future<void> _loadThreads() async {
-    final threads = await _repository.getThreads();
-    if (!mounted) {
-      return;
-    }
     setState(() {
-      _threads = threads;
-      _isLoading = false;
+      _isLoading = true;
+      _errorMessage = null;
     });
+    try {
+      final token = widget.authToken?.trim() ?? '';
+      final threads = token.isEmpty
+          ? await _repository.getThreads()
+          : await _conversationApiService.fetchThreads(token: token);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _threads = threads;
+        _isLoading = false;
+      });
+    } on ConversationApiException catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _errorMessage = e.message;
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _conversationApiService.dispose();
+    super.dispose();
   }
 
   List<DemoConversationThread> get _visibleThreads {
@@ -3669,6 +3778,7 @@ class _MessagesSectionState extends State<_MessagesSection> {
         builder: (_) => ConversationScreen(
           threadId: thread.id,
           restaurantName: widget.restaurantName,
+          authToken: widget.authToken,
           openComposerOnStart: openComposer,
         ),
       ),
@@ -3695,6 +3805,26 @@ class _MessagesSectionState extends State<_MessagesSection> {
               children: [
                 SizedBox(height: 200),
                 Center(child: CircularProgressIndicator()),
+              ],
+            )
+          : _errorMessage != null
+          ? ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              children: [
+                const SizedBox(height: 160),
+                Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    children: [
+                      Text(_errorMessage!, textAlign: TextAlign.center),
+                      const SizedBox(height: 12),
+                      FilledButton(
+                        onPressed: _loadThreads,
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
+                ),
               ],
             )
           : ListView(
@@ -4835,6 +4965,8 @@ class _ProfileSection extends StatelessWidget {
   const _ProfileSection({
     required this.metrics,
     required this.profileInfo,
+    required this.menuItems,
+    required this.reviews,
     required this.isSyncingProfile,
     required this.profileSyncError,
     required this.onRetryProfileSync,
@@ -4850,6 +4982,8 @@ class _ProfileSection extends StatelessWidget {
 
   final _ResponsiveMetrics metrics;
   final _RestaurantProfileInfo profileInfo;
+  final List<RestaurantMenuItem> menuItems;
+  final List<OwnerReview> reviews;
   final bool isSyncingProfile;
   final String? profileSyncError;
   final VoidCallback onRetryProfileSync;
@@ -4864,64 +4998,6 @@ class _ProfileSection extends StatelessWidget {
 
   static const int _videosTabIndex = 0;
   static const int _reviewsTabIndex = 2;
-
-  static const List<_PopularMenuItemData> _popularItems = [
-    _PopularMenuItemData(
-      title: 'Pepperoni Feast',
-      subtitle: 'Extra cheese, smoky beef, chili flakes',
-      price: '\$14.99',
-      imageUrl:
-          'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=1000&q=80',
-    ),
-    _PopularMenuItemData(
-      title: 'Classic Burger',
-      subtitle: 'Beef patty, lettuce, cheddar, special sauce',
-      price: '\$12.40',
-      imageUrl:
-          'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=1000&q=80',
-    ),
-    _PopularMenuItemData(
-      title: 'Creamy Carbonara',
-      subtitle: 'Fresh pasta, parmesan, black pepper',
-      price: '\$13.25',
-      imageUrl:
-          'https://images.unsplash.com/photo-1612874742237-6526221588e3?auto=format&fit=crop&w=1000&q=80',
-    ),
-  ];
-
-  static const List<_RestaurantReviewData> _sampleReviews = [
-    _RestaurantReviewData(
-      customerName: 'Lina M.',
-      rating: 4.8,
-      comment:
-          'Pizza arrived hot and fresh. Crust was perfect and delivery was very quick.',
-      timeLabel: '2h ago',
-      orderLabel: '#4731',
-    ),
-    _RestaurantReviewData(
-      customerName: 'Rami A.',
-      rating: 4.6,
-      comment:
-          'Great flavor and portion size. Please keep the same quality for the fries.',
-      timeLabel: '5h ago',
-      orderLabel: '#4728',
-    ),
-    _RestaurantReviewData(
-      customerName: 'Maya K.',
-      rating: 5.0,
-      comment:
-          'Excellent as always. Packaging was clean and food arrived on time.',
-      timeLabel: 'Yesterday',
-      orderLabel: '#4722',
-    ),
-    _RestaurantReviewData(
-      customerName: 'Karim D.',
-      rating: 4.4,
-      comment: 'Burger was tasty and juicy. I would love a bit more sauce.',
-      timeLabel: 'Yesterday',
-      orderLabel: '#4713',
-    ),
-  ];
 
   @override
   Widget build(BuildContext context) {
@@ -4991,9 +5067,16 @@ class _ProfileSection extends StatelessWidget {
     required double popularCardHeight,
     required double itemGap,
   }) {
+    final popularItems = menuItems.isEmpty
+        ? const <RestaurantMenuItem>[]
+        : (menuItems.where((item) => item.isPopular).isEmpty
+                  ? menuItems
+                  : menuItems.where((item) => item.isPopular))
+              .take(6)
+              .toList(growable: false);
     return [
       Text(
-        'Popular Choices',
+        'Menu Highlights',
         style: TextStyle(
           color: const Color(0xFF1F1B19),
           fontSize: sectionTitleSize * 0.53,
@@ -5002,7 +5085,7 @@ class _ProfileSection extends StatelessWidget {
       ),
       SizedBox(height: _clampDouble(10 * metrics.scale, 7, 10)),
       Text(
-        'Best performing dishes this week',
+        'Pulled from your database menu',
         style: TextStyle(
           color: const Color(0xFF8E7E72),
           fontSize: subtitleSize,
@@ -5010,25 +5093,32 @@ class _ProfileSection extends StatelessWidget {
         ),
       ),
       SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
-      SizedBox(
-        height: popularCardHeight,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          physics: const BouncingScrollPhysics(),
-          itemCount: _popularItems.length,
-          separatorBuilder: (_, index) => SizedBox(width: itemGap),
-          itemBuilder: (context, index) {
-            final popularItem = _popularItems[index];
-            return _PopularMenuCard(
-              metrics: metrics,
-              item: popularItem,
-              onTap: () => onOpenMenuItemDetails(
-                popularItem.toRestaurantMenuItem(index),
-              ),
-            );
-          },
+      if (popularItems.isEmpty)
+        _ProfileTabEmptyState(
+          metrics: metrics,
+          icon: Icons.restaurant_menu_rounded,
+          title: 'No Menu Items Yet',
+          message:
+              'Create menu items in Menu Management and they will appear here.',
+        )
+      else
+        SizedBox(
+          height: popularCardHeight,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            itemCount: popularItems.length,
+            separatorBuilder: (_, index) => SizedBox(width: itemGap),
+            itemBuilder: (context, index) {
+              final menuItem = popularItems[index];
+              return _PopularMenuCard(
+                metrics: metrics,
+                item: _PopularMenuItemData.fromMenuItem(menuItem),
+                onTap: () => onOpenMenuItemDetails(menuItem),
+              );
+            },
+          ),
         ),
-      ),
       SizedBox(height: sectionGap),
       SizedBox(
         width: double.infinity,
@@ -5135,12 +5225,26 @@ class _ProfileSection extends StatelessWidget {
     required double sectionTitleSize,
   }) {
     final titleFont = sectionTitleSize * 0.53;
-    final avgRating =
-        _sampleReviews.fold<double>(
-          0,
-          (total, review) => total + review.rating,
-        ) /
-        _sampleReviews.length;
+    final reviewCards = reviews
+        .map(
+          (review) => _RestaurantReviewData(
+            customerName: review.customerName,
+            rating: review.rating,
+            comment: review.comment.isEmpty
+                ? 'No written comment.'
+                : review.comment,
+            timeLabel: _formatRelativeTime(review.createdAt ?? DateTime.now()),
+            orderLabel: review.orderLabel,
+          ),
+        )
+        .toList(growable: false);
+    final avgRating = reviewCards.isEmpty
+        ? 0.0
+        : reviewCards.fold<double>(
+                0,
+                (total, review) => total + review.rating,
+              ) /
+              reviewCards.length;
 
     return [
       Row(
@@ -5187,16 +5291,24 @@ class _ProfileSection extends StatelessWidget {
         ],
       ),
       SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
-      ...List.generate(_sampleReviews.length, (index) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: index == _sampleReviews.length - 1
-                ? 0
-                : _clampDouble(10 * metrics.scale, 8, 10),
-          ),
-          child: _ReviewCard(metrics: metrics, review: _sampleReviews[index]),
-        );
-      }),
+      if (reviewCards.isEmpty)
+        _ProfileTabEmptyState(
+          metrics: metrics,
+          icon: Icons.reviews_rounded,
+          title: 'No Reviews Yet',
+          message: 'Customer reviews from the database will appear here.',
+        )
+      else
+        ...List.generate(reviewCards.length, (index) {
+          return Padding(
+            padding: EdgeInsets.only(
+              bottom: index == reviewCards.length - 1
+                  ? 0
+                  : _clampDouble(10 * metrics.scale, 8, 10),
+            ),
+            child: _ReviewCard(metrics: metrics, review: reviewCards[index]),
+          );
+        }),
       SizedBox(height: sectionGap * 0.4),
     ];
   }
@@ -6636,6 +6748,7 @@ class _ProfileSettingsDrawer extends StatelessWidget {
     required this.onEditProfile,
     required this.onManageMenu,
     required this.onOpenFollowers,
+    this.authToken,
     required this.onLogout,
   });
 
@@ -6645,6 +6758,7 @@ class _ProfileSettingsDrawer extends StatelessWidget {
   final VoidCallback onEditProfile;
   final VoidCallback onManageMenu;
   final VoidCallback onOpenFollowers;
+  final String? authToken;
   final VoidCallback onLogout;
 
   @override
@@ -6694,7 +6808,8 @@ class _ProfileSettingsDrawer extends StatelessWidget {
           Navigator.of(context).pop();
           Navigator.of(context).push(
             MaterialPageRoute<void>(
-              builder: (_) => const _RestaurantHelpSupportScreen(),
+              builder: (_) =>
+                  _RestaurantHelpSupportScreen(authToken: authToken),
             ),
           );
         },
@@ -6985,7 +7100,9 @@ class _ProfileSettingsItemData {
 }
 
 class _RestaurantHelpSupportScreen extends StatefulWidget {
-  const _RestaurantHelpSupportScreen();
+  const _RestaurantHelpSupportScreen({this.authToken});
+
+  final String? authToken;
 
   @override
   State<_RestaurantHelpSupportScreen> createState() =>
@@ -6994,6 +7111,8 @@ class _RestaurantHelpSupportScreen extends StatefulWidget {
 
 class _RestaurantHelpSupportScreenState
     extends State<_RestaurantHelpSupportScreen> {
+  final _supportReportApiService = SupportReportApiService();
+
   static const List<_SupportFaqItemData> _faqs = [
     _SupportFaqItemData(
       question: 'How can I track my order?',
@@ -7069,7 +7188,7 @@ class _RestaurantHelpSupportScreenState
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton(
-                    onPressed: () {
+                    onPressed: () async {
                       final details = detailsController.text.trim();
                       if (details.isEmpty) {
                         final messenger = ScaffoldMessenger.maybeOf(context);
@@ -7083,6 +7202,28 @@ class _RestaurantHelpSupportScreenState
                         return;
                       }
                       Navigator.of(sheetContext).pop();
+                      final token = widget.authToken?.trim() ?? '';
+                      if (token.isNotEmpty) {
+                        try {
+                          await _supportReportApiService.submitSupportRequest(
+                            token: token,
+                            channel: channel.toLowerCase(),
+                            subject: 'Restaurant support via $channel',
+                            message: details,
+                          );
+                        } on SupportReportApiException catch (e) {
+                          if (!mounted) {
+                            return;
+                          }
+                          ScaffoldMessenger.maybeOf(context)
+                            ?..hideCurrentSnackBar()
+                            ..showSnackBar(SnackBar(content: Text(e.message)));
+                          return;
+                        }
+                      }
+                      if (!mounted) {
+                        return;
+                      }
                       final messenger = ScaffoldMessenger.maybeOf(context);
                       messenger
                         ?..hideCurrentSnackBar()
@@ -7112,6 +7253,12 @@ class _RestaurantHelpSupportScreenState
       },
     );
     detailsController.dispose();
+  }
+
+  @override
+  void dispose() {
+    _supportReportApiService.dispose();
+    super.dispose();
   }
 
   @override
@@ -8198,6 +8345,17 @@ class _PopularMenuItemData {
     required this.price,
     required this.imageUrl,
   });
+
+  factory _PopularMenuItemData.fromMenuItem(RestaurantMenuItem item) {
+    return _PopularMenuItemData(
+      title: item.title,
+      subtitle: item.description,
+      price: item.price == null
+          ? 'Market price'
+          : '\$${item.price!.toStringAsFixed(2)}',
+      imageUrl: item.imageUrl,
+    );
+  }
 
   final String title;
   final String subtitle;

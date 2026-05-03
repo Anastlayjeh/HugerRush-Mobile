@@ -13,6 +13,7 @@ class RestaurantMenuApiService {
   final bool _ownsClient;
 
   static const List<String> _candidateEndpoints = [
+    '/api/v1/restaurant/menu/items',
     '/api/v1/restaurant/menu-items',
     '/api/v1/restaurants/me/menu-items',
     '/api/v1/restaurant/menu',
@@ -83,9 +84,13 @@ class RestaurantMenuApiService {
       return <String, dynamic>{};
     }
 
-    final decoded = jsonDecode(body);
-    if (decoded is Map<String, dynamic>) {
-      return decoded;
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+    } catch (_) {
+      return <String, dynamic>{};
     }
 
     return <String, dynamic>{};
@@ -271,8 +276,10 @@ class RestaurantMenuItem {
             'thumbnail',
             'cover_image',
           ]) ??
+          _firstImageUrl(json['image_urls']) ??
           'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=900&q=80',
       category: _firstString(json, const [
+            'category_name',
             'category',
             'section',
             'type',
@@ -378,6 +385,30 @@ class RestaurantMenuItem {
           return false;
         }
       }
+    }
+    return null;
+  }
+
+  static String? _firstImageUrl(dynamic value) {
+    if (value is List) {
+      for (final item in value) {
+        if (item is String && item.trim().isNotEmpty) {
+          return item.trim();
+        }
+      }
+    }
+    if (value is String && value.trim().isNotEmpty) {
+      final trimmed = value.trim();
+      try {
+        final decoded = jsonDecode(trimmed);
+        final fromDecoded = _firstImageUrl(decoded);
+        if (fromDecoded != null) {
+          return fromDecoded;
+        }
+      } catch (_) {
+        return trimmed;
+      }
+      return trimmed;
     }
     return null;
   }

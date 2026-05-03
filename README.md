@@ -1,5 +1,6 @@
 # flutter run // to run the app
 # php artisan serve // in hungerRush-web/api folder
+# The hunger_rush.sql is the database file, make sure to import it when runned locally
 
 # HungerRush Mobile
 

@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../models/demo_app_models.dart';
+import '../services/conversation_api_service.dart';
 import '../services/demo_app_repository.dart';
+import '../services/notification_api_service.dart';
 import '../services/restaurant_menu_api_service.dart';
 
 final Set<String> _customerSavedRestaurantKeys = <String>{};
@@ -1600,65 +1602,14 @@ class _RestaurantProfileMenuTabPanelState
   @override
   Widget build(BuildContext context) {
     final categories = _categories;
-    final filteredPopular = _filterItems(widget.popularChoices);
     final filteredMenu = _filterItems(widget.menuList);
-
-    final menuChildren = <Widget>[];
-    Widget? fullMenuActionTile;
-    menuChildren.add(const _TabSubSectionTitle('Popular Choices'));
-    if (filteredPopular.isEmpty) {
-      menuChildren.add(
-        _MenuCategoryEmptyNote(
-          message: widget.showCategoryFilter
-              ? 'No popular items in "$_selectedCategory".'
-              : 'No popular items yet.',
-        ),
-      );
-    } else {
-      menuChildren.addAll(
-        filteredPopular.map(
-          (item) => _RestaurantProfileMenuTile(
-            item: item,
-            priceLabel: _priceLabel(item.price),
-            showPopularBadge: true,
-            allowAddToCart: widget.allowAddToCart,
-            onAddToCart: widget.onAddToCart,
-          ),
-        ),
-      );
-    }
-
-    if (widget.allowAddToCart) {
-      fullMenuActionTile = _RestaurantProfileFullMenuActionTile(
-        restaurantName: widget.restaurantName,
-        menuItems: widget.menuList,
-        allowAddToCart: widget.allowAddToCart,
-        onAddToCart: widget.onAddToCart,
-      );
-    } else {
-      menuChildren.add(const _TabSubSectionTitle('Full Menu'));
-      if (filteredMenu.isEmpty) {
-        menuChildren.add(
-          _MenuCategoryEmptyNote(
-            message: widget.showCategoryFilter
-                ? 'No full-menu items in "$_selectedCategory".'
-                : 'No full-menu items yet.',
-          ),
-        );
-      } else {
-        menuChildren.addAll(
-          filteredMenu.map(
-            (item) => _RestaurantProfileMenuTile(
-              item: item,
-              priceLabel: _priceLabel(item.price),
-              showPopularBadge: false,
-              allowAddToCart: widget.allowAddToCart,
-              onAddToCart: widget.onAddToCart,
-            ),
-          ),
-        );
-      }
-    }
+    final highlights = filteredMenu.isEmpty
+        ? const <RestaurantMenuItem>[]
+        : (filteredMenu.where((item) => item.isPopular).isEmpty
+                  ? filteredMenu
+                  : filteredMenu.where((item) => item.isPopular))
+              .take(8)
+              .toList(growable: false);
 
     return Container(
       padding: const EdgeInsets.all(10),
@@ -1709,43 +1660,65 @@ class _RestaurantProfileMenuTabPanelState
             ),
             const SizedBox(height: 8),
           ],
-          Expanded(
-            child: ListView.separated(
-              primary: false,
-              physics: const BouncingScrollPhysics(
-                parent: AlwaysScrollableScrollPhysics(),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Menu Highlights',
+              style: TextStyle(
+                color: const Color(0xFF1F1B19),
+                fontSize: 32 * 0.56,
+                fontWeight: FontWeight.w800,
               ),
-              itemCount: menuChildren.length,
-              separatorBuilder: (context, index) => const SizedBox(height: 8),
-              itemBuilder: (context, index) => menuChildren[index],
             ),
           ),
-          if (fullMenuActionTile != null) ...[
-            const SizedBox(height: 8),
-            fullMenuActionTile,
-          ],
+          const SizedBox(height: 6),
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Pulled from your database menu',
+              style: TextStyle(
+                color: Color(0xFF8E7E72),
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Expanded(
+            child: highlights.isEmpty
+                ? _MenuCategoryEmptyNote(
+                    message: widget.showCategoryFilter
+                        ? 'No menu highlights in "$_selectedCategory".'
+                        : 'No menu items yet.',
+                  )
+                : ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    itemCount: highlights.length,
+                    separatorBuilder: (_, _) => const SizedBox(width: 10),
+                    itemBuilder: (context, index) {
+                      final item = highlights[index];
+                      return _RestaurantProfileMenuHighlightCard(
+                        item: item,
+                        priceLabel: _priceLabel(item.price),
+                        onTap: () => showRestaurantMenuItemDetailsPopup(
+                          context,
+                          item: item,
+                          allowAddToCart: widget.allowAddToCart,
+                          onAddToCart: widget.onAddToCart,
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          const SizedBox(height: 10),
+          _RestaurantProfileFullMenuActionTile(
+            restaurantName: widget.restaurantName,
+            menuItems: widget.menuList,
+            allowAddToCart: widget.allowAddToCart,
+            onAddToCart: widget.onAddToCart,
+          ),
         ],
-      ),
-    );
-  }
-}
-
-class _TabSubSectionTitle extends StatelessWidget {
-  const _TabSubSectionTitle(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(2, 2, 2, 0),
-      child: Text(
-        text,
-        style: const TextStyle(
-          color: Color(0xFF856D58),
-          fontSize: 12,
-          fontWeight: FontWeight.w800,
-        ),
       ),
     );
   }
@@ -3146,6 +3119,126 @@ class _RestaurantVideoCommentsBottomSheetState
   }
 }
 
+class _RestaurantProfileMenuHighlightCard extends StatelessWidget {
+  const _RestaurantProfileMenuHighlightCard({
+    required this.item,
+    required this.priceLabel,
+    required this.onTap,
+  });
+
+  final RestaurantMenuItem item;
+  final String priceLabel;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 166,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(18),
+          child: Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEFCFA),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0xFFE4D9CF)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  height: 102,
+                  child: Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: SizedBox.expand(
+                          child: Image.network(
+                            item.imageUrl,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) {
+                              return const DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      Color(0xFFF3C1A8),
+                                      Color(0xFFEFB18E),
+                                    ],
+                                  ),
+                                ),
+                                child: Center(
+                                  child: Icon(
+                                    Icons.fastfood_rounded,
+                                    color: Colors.white,
+                                    size: 28,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF8F3ED),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xD8E8DED5)),
+                          ),
+                          child: Text(
+                            priceLabel,
+                            style: const TextStyle(
+                              color: Color(0xFF2D251F),
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 9),
+                Text(
+                  item.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF1F1B19),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  item.description,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF8F7F73),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    height: 1.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _RestaurantProfileMenuTile extends StatelessWidget {
   const _RestaurantProfileMenuTile({
     required this.item,
@@ -3286,10 +3379,10 @@ class _RestaurantProfileFullMenuActionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () {
+    return SizedBox(
+      width: double.infinity,
+      child: FilledButton.icon(
+        onPressed: () {
           Navigator.of(context).push(
             MaterialPageRoute<void>(
               builder: (_) => _RestaurantFullMenuScreen(
@@ -3301,39 +3394,17 @@ class _RestaurantProfileFullMenuActionTile extends StatelessWidget {
             ),
           );
         },
-        borderRadius: BorderRadius.circular(14),
-        child: Ink(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            color: const Color(0xFFFFF2E9),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFFFD7C6)),
-          ),
-          child: const Row(
-            children: [
-              Icon(
-                Icons.restaurant_menu_rounded,
-                color: Color(0xFFFF7E4D),
-                size: 20,
-              ),
-              SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'View Full Menu',
-                  style: TextStyle(
-                    color: Color(0xFF2F241B),
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-              Icon(
-                Icons.chevron_right_rounded,
-                color: Color(0xFF9A7B67),
-                size: 20,
-              ),
-            ],
+        icon: const Icon(Icons.restaurant_menu_rounded, size: 20),
+        label: const Text(
+          'View Full Menu',
+          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+        ),
+        style: FilledButton.styleFrom(
+          backgroundColor: const Color(0xFFFF6D47),
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 15),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(999),
           ),
         ),
       ),
@@ -4345,7 +4416,9 @@ class _SearchScreenState extends State<SearchScreen> {
 }
 
 class NotificationsScreen extends StatefulWidget {
-  const NotificationsScreen({super.key});
+  const NotificationsScreen({super.key, this.authToken});
+
+  final String? authToken;
 
   @override
   State<NotificationsScreen> createState() => _NotificationsScreenState();
@@ -4353,8 +4426,10 @@ class NotificationsScreen extends StatefulWidget {
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
   final _repository = DemoAppRepository.instance;
+  final _notificationApiService = NotificationApiService();
   List<DemoNotificationItem> _items = const <DemoNotificationItem>[];
   bool _isLoading = true;
+  String? _errorMessage;
 
   @override
   void initState() {
@@ -4363,26 +4438,62 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   Future<void> _load() async {
-    final items = await _repository.getNotifications();
-    if (!mounted) {
-      return;
-    }
     setState(() {
-      _items = items;
-      _isLoading = false;
+      _isLoading = true;
+      _errorMessage = null;
     });
+    try {
+      final token = widget.authToken?.trim() ?? '';
+      final items = token.isEmpty
+          ? await _repository.getNotifications()
+          : await _notificationApiService.fetchNotifications(token: token);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _items = items;
+        _isLoading = false;
+      });
+    } on NotificationApiException catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _errorMessage = e.message;
+        _isLoading = false;
+      });
+    }
   }
 
   Future<void> _markAllRead() async {
     setState(() => _isLoading = true);
-    final items = await _repository.markAllNotificationsRead();
-    if (!mounted) {
-      return;
+    try {
+      final token = widget.authToken?.trim() ?? '';
+      final items = token.isEmpty
+          ? await _repository.markAllNotificationsRead()
+          : await _notificationApiService.markAllRead(token: token);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _items = items;
+        _isLoading = false;
+      });
+    } on NotificationApiException catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _errorMessage = e.message;
+        _isLoading = false;
+      });
     }
-    setState(() {
-      _items = items;
-      _isLoading = false;
-    });
+  }
+
+  @override
+  void dispose() {
+    _notificationApiService.dispose();
+    super.dispose();
   }
 
   @override
@@ -4399,6 +4510,20 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
+          : _errorMessage != null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(_errorMessage!, textAlign: TextAlign.center),
+                    const SizedBox(height: 12),
+                    FilledButton(onPressed: _load, child: const Text('Retry')),
+                  ],
+                ),
+              ),
+            )
           : ListView.separated(
               padding: const EdgeInsets.all(16),
               itemCount: _items.length,
@@ -4743,11 +4868,13 @@ class ConversationScreen extends StatefulWidget {
     super.key,
     required this.threadId,
     required this.restaurantName,
+    this.authToken,
     this.openComposerOnStart = false,
   });
 
   final String threadId;
   final String restaurantName;
+  final String? authToken;
   final bool openComposerOnStart;
 
   @override
@@ -4756,11 +4883,13 @@ class ConversationScreen extends StatefulWidget {
 
 class _ConversationScreenState extends State<ConversationScreen> {
   final _repository = DemoAppRepository.instance;
+  final _conversationApiService = ConversationApiService();
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
 
   DemoConversationThread? _thread;
   bool _isSending = false;
+  String? _errorMessage;
 
   @override
   void initState() {
@@ -4772,25 +4901,46 @@ class _ConversationScreenState extends State<ConversationScreen> {
   void dispose() {
     _controller.dispose();
     _focusNode.dispose();
+    _conversationApiService.dispose();
     super.dispose();
   }
 
   Future<void> _loadThread() async {
-    final thread = _repository.findThread(widget.threadId);
-    if (thread == null) {
-      return;
-    }
-    await _repository.markThreadRead(widget.threadId);
-    if (!mounted) {
-      return;
-    }
-    setState(() => _thread = _repository.findThread(widget.threadId));
-    if (widget.openComposerOnStart) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          _focusNode.requestFocus();
+    try {
+      final token = widget.authToken?.trim() ?? '';
+      DemoConversationThread? thread;
+      if (token.isEmpty) {
+        thread = _repository.findThread(widget.threadId);
+        if (thread == null) {
+          return;
         }
+        await _repository.markThreadRead(widget.threadId);
+        thread = _repository.findThread(widget.threadId);
+      } else {
+        thread = await _conversationApiService.markRead(
+          token: token,
+          threadId: widget.threadId,
+        );
+      }
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _thread = thread;
+        _errorMessage = null;
       });
+      if (widget.openComposerOnStart) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _focusNode.requestFocus();
+          }
+        });
+      }
+    } on ConversationApiException catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _errorMessage = e.message);
     }
   }
 
@@ -4800,22 +4950,39 @@ class _ConversationScreenState extends State<ConversationScreen> {
       return;
     }
     setState(() => _isSending = true);
-    final updated = await _repository.sendReply(
-      threadId: _thread!.id,
-      restaurantName: widget.restaurantName,
-      text: text,
-    );
-    if (!mounted) {
-      return;
+    try {
+      final token = widget.authToken?.trim() ?? '';
+      final updated = token.isEmpty
+          ? await _repository.sendReply(
+              threadId: _thread!.id,
+              restaurantName: widget.restaurantName,
+              text: text,
+            )
+          : await _conversationApiService.sendMessage(
+              token: token,
+              threadId: _thread!.id,
+              body: text,
+            );
+      if (!mounted) {
+        return;
+      }
+      _controller.clear();
+      setState(() {
+        _thread = updated;
+        _isSending = false;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Reply sent')));
+    } on ConversationApiException catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _isSending = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.message)));
     }
-    _controller.clear();
-    setState(() {
-      _thread = updated;
-      _isSending = false;
-    });
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Reply sent')));
   }
 
   @override
@@ -4823,7 +4990,24 @@ class _ConversationScreenState extends State<ConversationScreen> {
     final thread = _thread;
     return Scaffold(
       appBar: AppBar(title: Text(thread?.customerName ?? 'Conversation')),
-      body: thread == null
+      body: _errorMessage != null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(_errorMessage!, textAlign: TextAlign.center),
+                    const SizedBox(height: 12),
+                    FilledButton(
+                      onPressed: _loadThread,
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : thread == null
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
