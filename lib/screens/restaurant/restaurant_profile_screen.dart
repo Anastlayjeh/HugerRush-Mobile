@@ -634,6 +634,7 @@ class _UploadedVideoPlayerScreenState
                                           onToggleLike: _toggleLike,
                                           onOpenComments: _openComments,
                                           onShare: () {},
+                                          onReport: () {},
                                         ),
                                       ],
                                     ),
@@ -3148,7 +3149,7 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
                 label: 'Restaurant Name',
                 hint: 'The Pizza Hub',
                 controller: _restaurantNameController,
-                inputFormatters: const [
+                inputFormatters: [
                   FilteringTextInputFormatter.allow(
                     RegExp(r"[A-Za-z0-9\s'.&-]"),
                   ),
@@ -3160,7 +3161,7 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
                 label: 'Cuisine Type',
                 hint: 'Italian',
                 controller: _cuisineTypeController,
-                inputFormatters: const [
+                inputFormatters: [
                   FilteringTextInputFormatter.allow(RegExp(r"[A-Za-z\s&/-]")),
                   LengthLimitingTextInputFormatter(60),
                 ],
@@ -3178,7 +3179,7 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
                 hint: '+961 03 123 456',
                 keyboardType: TextInputType.phone,
                 controller: _phoneController,
-                inputFormatters: const [
+                inputFormatters: [
                   FilteringTextInputFormatter.digitsOnly,
                   LengthLimitingTextInputFormatter(15),
                 ],
@@ -3191,7 +3192,7 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
                       label: 'Country',
                       hint: 'Lebanon',
                       controller: _countryController,
-                      inputFormatters: const [
+                      inputFormatters: [
                         FilteringTextInputFormatter.allow(
                           RegExp(r"[A-Za-z\s'-]"),
                         ),
@@ -3205,7 +3206,7 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
                       label: 'City',
                       hint: 'Beirut',
                       controller: _cityController,
-                      inputFormatters: const [
+                      inputFormatters: [
                         FilteringTextInputFormatter.allow(
                           RegExp(r"[A-Za-z\s'-]"),
                         ),
@@ -3220,7 +3221,7 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
                 label: 'Street',
                 hint: 'Hamra St, Bldg 42',
                 controller: _streetController,
-                inputFormatters: const [
+                inputFormatters: [
                   LengthLimitingTextInputFormatter(80),
                 ],
               ),
@@ -3230,7 +3231,7 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
                 hint: '1103',
                 keyboardType: TextInputType.number,
                 controller: _postalCodeController,
-                inputFormatters: const [
+                inputFormatters: [
                   FilteringTextInputFormatter.digitsOnly,
                   LengthLimitingTextInputFormatter(10),
                 ],

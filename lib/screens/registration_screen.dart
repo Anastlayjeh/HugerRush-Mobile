@@ -483,7 +483,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
           hint: '1103',
           controller: _postalCodeController,
           keyboardType: TextInputType.number,
-          inputFormatters: const [
+          inputFormatters: [
             FilteringTextInputFormatter.digitsOnly,
             LengthLimitingTextInputFormatter(10),
           ],
@@ -895,7 +895,7 @@ class _PhoneNumberBlock extends StatelessWidget {
                 hint: phoneHint,
                 controller: controller,
                 keyboardType: TextInputType.phone,
-                inputFormatters: const [
+                inputFormatters: [
                   FilteringTextInputFormatter.digitsOnly,
                   LengthLimitingTextInputFormatter(15),
                 ],
@@ -998,7 +998,7 @@ class _InlinePhoneRow extends StatelessWidget {
             hint: phoneHint,
             controller: controller,
             keyboardType: TextInputType.phone,
-            inputFormatters: const [
+            inputFormatters: [
               FilteringTextInputFormatter.digitsOnly,
               LengthLimitingTextInputFormatter(15),
             ],

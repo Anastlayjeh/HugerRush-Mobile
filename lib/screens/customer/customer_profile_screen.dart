@@ -3114,7 +3114,7 @@ class _CustomerEditProfileScreenState
                 hint: 'Jane Doe',
                 controller: _fullNameController,
                 textCapitalization: TextCapitalization.words,
-                inputFormatters: const [
+                inputFormatters: [
                   FilteringTextInputFormatter.allow(RegExp(r"[A-Za-z\s'.-]")),
                   LengthLimitingTextInputFormatter(50),
                 ],
@@ -3132,7 +3132,7 @@ class _CustomerEditProfileScreenState
                 hint: '+961 03 123 456',
                 keyboardType: TextInputType.phone,
                 controller: _phoneController,
-                inputFormatters: const [
+                inputFormatters: [
                   FilteringTextInputFormatter.digitsOnly,
                   LengthLimitingTextInputFormatter(15),
                 ],
@@ -3146,7 +3146,7 @@ class _CustomerEditProfileScreenState
                       hint: 'Lebanon',
                       controller: _countryController,
                       textCapitalization: TextCapitalization.words,
-                      inputFormatters: const [
+                      inputFormatters: [
                         FilteringTextInputFormatter.allow(RegExp(r"[A-Za-z\s'-]")),
                         LengthLimitingTextInputFormatter(40),
                       ],
@@ -3159,7 +3159,7 @@ class _CustomerEditProfileScreenState
                       hint: 'Beirut',
                       controller: _cityController,
                       textCapitalization: TextCapitalization.words,
-                      inputFormatters: const [
+                      inputFormatters: [
                         FilteringTextInputFormatter.allow(RegExp(r"[A-Za-z\s'-]")),
                         LengthLimitingTextInputFormatter(40),
                       ],

@@ -52,9 +52,7 @@ class PostShareService {
         : '$cleanedTitle\n$cleanedCaption\n$link';
 
     try {
-      await SharePlus.instance.share(
-        ShareParams(text: text, subject: cleanedTitle),
-      );
+      await Share.share(text, subject: cleanedTitle);
       return PostShareResult(success: true, link: link);
     } catch (_) {
       if (!kIsWeb) {
