@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../services/auth_api_service.dart';
 import '../widgets/auth_social_buttons.dart';
@@ -65,6 +66,20 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
     return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value.trim());
   }
 
+  String _digitsOnly(String value) {
+    return value.replaceAll(RegExp(r'[^0-9]'), '');
+  }
+
+  bool _isValidPhoneNumber(String value) {
+    final digits = _digitsOnly(value);
+    return digits.length >= 6 && digits.length <= 15;
+  }
+
+  bool _isValidPostalCode(String value) {
+    final digits = _digitsOnly(value);
+    return digits.length >= 3 && digits.length <= 10;
+  }
+
   void _openPlaceholderPage({required String title, required String message}) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -103,6 +118,8 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
         validationError = 'Please complete all required fields.';
       } else if (!_isValidEmail(email)) {
         validationError = 'Enter a valid email address.';
+      } else if (!_isValidPhoneNumber(phone)) {
+        validationError = 'Enter a valid phone number.';
       } else if (password != confirmPassword) {
         validationError = 'Passwords do not match.';
       }
@@ -141,6 +158,10 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
         validationError = 'Please complete all required fields.';
       } else if (!_isValidEmail(email)) {
         validationError = 'Enter a valid business email address.';
+      } else if (!_isValidPhoneNumber(phone)) {
+        validationError = 'Enter a valid business phone number.';
+      } else if (!_isValidPostalCode(postalCode)) {
+        validationError = 'Enter a valid postal code.';
       } else if (password != confirmPassword) {
         validationError = 'Passwords do not match.';
       }
@@ -461,6 +482,11 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
           label: 'Postal Code',
           hint: '1103',
           controller: _postalCodeController,
+          keyboardType: TextInputType.number,
+          inputFormatters: const [
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(10),
+          ],
         ),
       ),
       const SizedBox(height: 12),
@@ -701,6 +727,7 @@ class _LabeledField extends StatelessWidget {
     required this.hint,
     required this.controller,
     this.keyboardType,
+    this.inputFormatters,
     this.obscureText = false,
     this.suffix,
   });
@@ -709,6 +736,7 @@ class _LabeledField extends StatelessWidget {
   final String hint;
   final TextEditingController controller;
   final TextInputType? keyboardType;
+  final List<TextInputFormatter>? inputFormatters;
   final bool obscureText;
   final Widget? suffix;
 
@@ -723,6 +751,7 @@ class _LabeledField extends StatelessWidget {
           hint: hint,
           controller: controller,
           keyboardType: keyboardType,
+          inputFormatters: inputFormatters,
           obscureText: obscureText,
           suffix: suffix,
         ),
@@ -736,6 +765,7 @@ class _RoundedTextInput extends StatelessWidget {
     required this.hint,
     required this.controller,
     this.keyboardType,
+    this.inputFormatters,
     this.obscureText = false,
     this.suffix,
   });
@@ -743,6 +773,7 @@ class _RoundedTextInput extends StatelessWidget {
   final String hint;
   final TextEditingController controller;
   final TextInputType? keyboardType;
+  final List<TextInputFormatter>? inputFormatters;
   final bool obscureText;
   final Widget? suffix;
 
@@ -758,6 +789,7 @@ class _RoundedTextInput extends StatelessWidget {
       child: TextField(
         controller: controller,
         keyboardType: keyboardType,
+        inputFormatters: inputFormatters,
         obscureText: obscureText,
         decoration: InputDecoration(
           border: InputBorder.none,
@@ -863,6 +895,10 @@ class _PhoneNumberBlock extends StatelessWidget {
                 hint: phoneHint,
                 controller: controller,
                 keyboardType: TextInputType.phone,
+                inputFormatters: const [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(15),
+                ],
               ),
             ),
           ],
@@ -962,6 +998,10 @@ class _InlinePhoneRow extends StatelessWidget {
             hint: phoneHint,
             controller: controller,
             keyboardType: TextInputType.phone,
+            inputFormatters: const [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(15),
+            ],
           ),
         ),
       ],

@@ -314,7 +314,11 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
     await _withFeedPlaybackPaused<void>(
       () => Navigator.of(
         context,
-      ).push(MaterialPageRoute<void>(builder: (_) => const SearchScreen())),
+      ).push(
+        MaterialPageRoute<void>(
+          builder: (_) => const SearchScreen(allowFriendActions: true),
+        ),
+      ),
     );
   }
 
@@ -571,12 +575,41 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
   }
 
   Future<void> _sharePromo(DemoFeedPost post) async {
-    await _withFeedPlaybackPaused<void>(
-      () => showShareFallbackDialog(
-        context,
-        title: post.restaurantName,
-        body: post.caption,
-      ),
+    final result = await PostShareService.instance.sharePost(
+      postId: post.id,
+      title: post.restaurantName,
+      caption: post.caption,
+      creatorHandle: post.restaurantHandle,
+    );
+    if (!mounted) {
+      return;
+    }
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.hideCurrentSnackBar();
+    if (!result.success) {
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text(
+            result.errorMessage ??
+                'Unable to share this post right now. Please try again.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (result.copiedToClipboard) {
+      messenger?.showSnackBar(
+        const SnackBar(content: Text('Link copied to clipboard.')),
+      );
+    }
+  }
+
+  Future<void> _reportFeedPost(DemoFeedPost post) async {
+    await showReportSheet(
+      context,
+      itemType: ReportItemType.feedPost,
+      itemId: post.id,
+      itemTitle: post.restaurantName,
     );
   }
 
@@ -796,6 +829,8 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
                                             onOpenComments: () =>
                                                 _openComments(post),
                                             onShare: () => _sharePromo(post),
+                                            onReport: () =>
+                                                _reportFeedPost(post),
                                           ),
                                         ],
                                       ),
@@ -1405,6 +1440,7 @@ class _ActionRail extends StatelessWidget {
     required this.onToggleLike,
     required this.onOpenComments,
     required this.onShare,
+    required this.onReport,
   });
 
   final _ResponsiveMetrics metrics;
@@ -1414,6 +1450,7 @@ class _ActionRail extends StatelessWidget {
   final VoidCallback onToggleLike;
   final VoidCallback onOpenComments;
   final VoidCallback onShare;
+  final VoidCallback onReport;
 
   @override
   Widget build(BuildContext context) {
@@ -1449,6 +1486,13 @@ class _ActionRail extends StatelessWidget {
             value: 'Share',
             metrics: metrics,
             onTap: onShare,
+          ),
+          SizedBox(height: metrics.railItemGap),
+          _ActionButton(
+            icon: Icons.flag_outlined,
+            value: 'Report',
+            metrics: metrics,
+            onTap: onReport,
           ),
         ],
       ),
@@ -2434,6 +2478,30 @@ class _FeedCommentsBottomSheetState extends State<_FeedCommentsBottomSheet> {
                                               color: Color(0xFF8A7A6F),
                                               fontSize: 12,
                                               fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          PopupMenuButton<String>(
+                                            tooltip: 'More actions',
+                                            onSelected: (value) {
+                                              if (value == 'report') {
+                                                showReportSheet(
+                                                  context,
+                                                  itemType: ReportItemType.comment,
+                                                  itemId: comment.id,
+                                                  itemTitle: comment.authorName,
+                                                );
+                                              }
+                                            },
+                                            itemBuilder: (_) => const [
+                                              PopupMenuItem<String>(
+                                                value: 'report',
+                                                child: Text('Report comment'),
+                                              ),
+                                            ],
+                                            icon: const Icon(
+                                              Icons.more_vert_rounded,
+                                              size: 18,
+                                              color: Color(0xFF9E8A7E),
                                             ),
                                           ),
                                         ],
