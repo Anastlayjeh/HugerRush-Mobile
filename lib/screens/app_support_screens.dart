@@ -4744,6 +4744,8 @@ class SearchScreen extends StatefulWidget {
 
   final String initialQuery;
   final bool includeCustomers;
+  final bool returnSubmittedQuery;
+  final bool allowFriendActions;
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
