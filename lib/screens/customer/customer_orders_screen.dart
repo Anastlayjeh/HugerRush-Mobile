@@ -622,9 +622,16 @@ class _OrdersTabBody extends StatelessWidget {
                                   26,
                                 ),
                               ),
-                              const _ProfileSectionHeader(
+                              _ProfileSectionHeader(
                                 title: 'Live Order',
                                 actionLabel: 'Need Help?',
+                                onActionTap: () {
+                                  showOrderIssueSheet(
+                                    context,
+                                    orderId: 'HR-2048',
+                                    restaurantName: 'Burger Station',
+                                  );
+                                },
                               ),
                               SizedBox(
                                 height: _clampDouble(
@@ -4151,11 +4158,13 @@ class _OrderTrackingScreen extends StatelessWidget {
                           label: 'Support chat',
                           filled: true,
                           metrics: trackingMetrics,
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => _CustomerHelpSupportScreen(),
-                            ),
-                          ),
+                          onTap: () {
+                            showOrderIssueSheet(
+                              context,
+                              orderId: orderId,
+                              restaurantName: restaurantName,
+                            );
+                          },
                         ),
                       ],
                     ),

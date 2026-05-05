@@ -634,6 +634,7 @@ class _UploadedVideoPlayerScreenState
                                           onToggleLike: _toggleLike,
                                           onOpenComments: _openComments,
                                           onShare: () {},
+                                          onReport: () {},
                                         ),
                                       ],
                                     ),
@@ -2918,6 +2919,28 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
     return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value.trim());
   }
 
+  bool _isValidRestaurantName(String value) {
+    return RegExp(r"^[A-Za-z0-9][A-Za-z0-9\s'.&-]{1,79}$").hasMatch(
+      value.trim(),
+    );
+  }
+
+  bool _isValidLocationText(String value) {
+    return RegExp(r"^[A-Za-z0-9][A-Za-z0-9\s'.,#/-]{1,79}$").hasMatch(
+      value.trim(),
+    );
+  }
+
+  bool _isValidPhone(String value) {
+    final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    return digits.length >= 6 && digits.length <= 15;
+  }
+
+  bool _isValidPostalCode(String value) {
+    final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    return digits.length >= 3 && digits.length <= 10;
+  }
+
   void _handleFormChanged() {
     final hasChanges = !_currentData.matches(widget.initialData);
     if (hasChanges == _hasChanges) {
@@ -3004,6 +3027,52 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
       return;
     }
 
+    if (!_isValidRestaurantName(data.restaurantName)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Please enter a valid restaurant name using letters, numbers, and basic punctuation.',
+          ),
+          backgroundColor: Color(0xFFB7372B),
+        ),
+      );
+      return;
+    }
+
+    if (!_isValidPhone(data.phone)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a valid phone number.'),
+          backgroundColor: Color(0xFFB7372B),
+        ),
+      );
+      return;
+    }
+
+    if (!_isValidPostalCode(data.postalCode)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a valid postal code.'),
+          backgroundColor: Color(0xFFB7372B),
+        ),
+      );
+      return;
+    }
+
+    if (!_isValidLocationText(data.country) ||
+        !_isValidLocationText(data.city) ||
+        !_isValidLocationText(data.street)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Please use valid location text for country, city, and street.',
+          ),
+          backgroundColor: Color(0xFFB7372B),
+        ),
+      );
+      return;
+    }
+
     Navigator.of(context).pop(data);
   }
 
@@ -3080,12 +3149,22 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
                 label: 'Restaurant Name',
                 hint: 'The Pizza Hub',
                 controller: _restaurantNameController,
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(
+                    RegExp(r"[A-Za-z0-9\s'.&-]"),
+                  ),
+                  LengthLimitingTextInputFormatter(80),
+                ],
               ),
               const SizedBox(height: 12),
               _EditProfileField(
                 label: 'Cuisine Type',
                 hint: 'Italian',
                 controller: _cuisineTypeController,
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r"[A-Za-z\s&/-]")),
+                  LengthLimitingTextInputFormatter(60),
+                ],
               ),
               const SizedBox(height: 12),
               _EditProfileField(
@@ -3100,6 +3179,10 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
                 hint: '+961 03 123 456',
                 keyboardType: TextInputType.phone,
                 controller: _phoneController,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(15),
+                ],
               ),
               const SizedBox(height: 12),
               Row(
@@ -3109,6 +3192,12 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
                       label: 'Country',
                       hint: 'Lebanon',
                       controller: _countryController,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r"[A-Za-z\s'-]"),
+                        ),
+                        LengthLimitingTextInputFormatter(40),
+                      ],
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -3117,6 +3206,12 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
                       label: 'City',
                       hint: 'Beirut',
                       controller: _cityController,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r"[A-Za-z\s'-]"),
+                        ),
+                        LengthLimitingTextInputFormatter(40),
+                      ],
                     ),
                   ),
                 ],
@@ -3126,6 +3221,9 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
                 label: 'Street',
                 hint: 'Hamra St, Bldg 42',
                 controller: _streetController,
+                inputFormatters: [
+                  LengthLimitingTextInputFormatter(80),
+                ],
               ),
               const SizedBox(height: 12),
               _EditProfileField(
@@ -3133,6 +3231,10 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
                 hint: '1103',
                 keyboardType: TextInputType.number,
                 controller: _postalCodeController,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(10),
+                ],
               ),
             ],
           ),
@@ -3308,12 +3410,14 @@ class _EditProfileField extends StatelessWidget {
     required this.hint,
     required this.controller,
     this.keyboardType,
+    this.inputFormatters,
   });
 
   final String label;
   final String hint;
   final TextEditingController controller;
   final TextInputType? keyboardType;
+  final List<TextInputFormatter>? inputFormatters;
 
   @override
   Widget build(BuildContext context) {
@@ -3339,6 +3443,7 @@ class _EditProfileField extends StatelessWidget {
           child: TextField(
             controller: controller,
             keyboardType: keyboardType,
+            inputFormatters: inputFormatters,
             decoration: InputDecoration(
               border: InputBorder.none,
               hintText: hint,

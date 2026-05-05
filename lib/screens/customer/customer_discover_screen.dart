@@ -165,9 +165,11 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
   }
 
   Future<void> _openDiscoverSearch(BuildContext context) async {
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const SearchScreen()));
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const SearchScreen(allowFriendActions: true),
+      ),
+    );
   }
 
   Future<void> _openDiscoverFilters(BuildContext context) async {
@@ -476,14 +478,6 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
     });
   }
 
-  Future<void> _openLocationMap(BuildContext context) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => _DiscoverMapPreviewScreen(spots: _filteredPopularSpots),
-      ),
-    );
-  }
-
   Future<void> _openCuisineDetails(
     BuildContext context,
     _DiscoverCategoryData category,
@@ -755,14 +749,6 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                               onTapSearch: () => _openDiscoverSearch(context),
                             ),
                           ),
-                          SizedBox(
-                            width: _clampDouble(12 * metrics.scale, 10, 12),
-                          ),
-                          _ProfileIconButton(
-                            icon: Icons.place_outlined,
-                            metrics: metrics,
-                            onTap: () => _openLocationMap(context),
-                          ),
                         ],
                       ),
                       SizedBox(
@@ -774,10 +760,8 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              _ProfileSectionHeader(
+                              const _ProfileSectionHeader(
                                 title: 'Browse Cuisines',
-                                actionLabel: 'View Map',
-                                onActionTap: () => _openLocationMap(context),
                               ),
                               SizedBox(
                                 height: _clampDouble(
@@ -1073,7 +1057,7 @@ class _DiscoverSearchBar extends StatelessWidget {
               SizedBox(width: _clampDouble(10 * metrics.scale, 8, 10)),
               Expanded(
                 child: Text(
-                  'Search restaurants or dishes',
+                  'Search users or restaurants',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -1724,116 +1708,6 @@ class _DiscoverSpotsCatalogScreen extends StatelessWidget {
                         itemCount: spots.length,
                         separatorBuilder: (context, index) =>
                             const SizedBox(height: 12),
-                        itemBuilder: (context, index) {
-                          return _DiscoverSpotPreviewTile(spot: spots[index]);
-                        },
-                      ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _DiscoverMapPreviewScreen extends StatelessWidget {
-  const _DiscoverMapPreviewScreen({required this.spots});
-
-  final List<_DiscoverSpotData> spots;
-
-  @override
-  Widget build(BuildContext context) {
-    const pinOffsets = <Offset>[
-      Offset(0.2, 0.22),
-      Offset(0.72, 0.3),
-      Offset(0.34, 0.58),
-      Offset(0.64, 0.72),
-    ];
-
-    return Scaffold(
-      backgroundColor: const Color(0xFFFFFBF7),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFFFFFBF7),
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        title: const Text(
-          'Nearby Map',
-          style: TextStyle(
-            color: Color(0xFF231A16),
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-      ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 8, 18, 18),
-          child: Column(
-            children: [
-              Container(
-                height: 230,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF9E9D7),
-                  borderRadius: BorderRadius.circular(28),
-                  border: Border.all(color: const Color(0xFFECCFB7)),
-                ),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    return Stack(
-                      children: List.generate(spots.length.clamp(0, 4), (
-                        index,
-                      ) {
-                        final pinPosition = pinOffsets[index];
-                        final spot = spots[index];
-                        return Positioned(
-                          left: constraints.maxWidth * pinPosition.dx - 44,
-                          top: constraints.maxHeight * pinPosition.dy - 20,
-                          child: Material(
-                            color: const Color(0xFFFF7E4D),
-                            borderRadius: BorderRadius.circular(18),
-                            child: InkWell(
-                              onTap: () =>
-                                  _openDiscoverRestaurantProfile(context, spot),
-                              borderRadius: BorderRadius.circular(18),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                child: Text(
-                                  spot.title,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 11.5,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: 14),
-              Expanded(
-                child: spots.isEmpty
-                    ? const Center(
-                        child: Text(
-                          'No restaurants match your filters.',
-                          style: TextStyle(
-                            color: Color(0xFF7D6C60),
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      )
-                    : ListView.separated(
-                        itemCount: spots.length,
-                        physics: const BouncingScrollPhysics(),
-                        separatorBuilder: (context, index) =>
-                            const SizedBox(height: 10),
                         itemBuilder: (context, index) {
                           return _DiscoverSpotPreviewTile(spot: spots[index]);
                         },
