@@ -205,7 +205,10 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
               if (value == null) {
                 return 'Any';
               }
-              return '\$' * value;
+              if (value == 1) {
+                return '\$';
+              }
+              return 'LL';
             }
 
             return SafeArea(
@@ -379,7 +382,7 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                     Builder(
                       builder: (_) {
                         final chips = <Widget>[];
-                        for (final value in const <int?>[null, 1, 2, 3]) {
+                        for (final value in const <int?>[null, 1, 2]) {
                           final isSelected = maximumPriceTier == value;
                           chips.add(
                             ChoiceChip(
@@ -811,7 +814,7 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                                 ),
                               ),
                               _ProfileSectionHeader(
-                                title: 'Popular Near You',
+                                title: 'Popular Restaurants',
                                 actionLabel: 'See All',
                                 onActionTap: () =>
                                     _openPopularSpotList(context),
@@ -1643,7 +1646,7 @@ class _DiscoverPopularSpotsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _DiscoverSpotsCatalogScreen(
-      title: 'Popular Near You',
+      title: 'Popular Restaurants',
       subtitle: 'Top picks around your area',
       spots: spots,
     );
