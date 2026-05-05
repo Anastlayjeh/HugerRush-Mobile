@@ -8,6 +8,7 @@ import '../models/auth_session.dart';
 import '../services/auth_api_service.dart';
 import '../services/auth_session_service.dart';
 import '../widgets/auth_social_buttons.dart';
+import 'frontend_placeholder_screen.dart';
 import 'registration_screen.dart';
 import 'restaurant_feed_screen.dart';
 import 'user_home_screen.dart';
@@ -354,6 +355,15 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  void _openPlaceholderPage({required String title, required String message}) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            FrontendPlaceholderScreen(title: title, message: message),
+      ),
+    );
+  }
+
   Future<void> _handleSuccessfulAuth(
     AuthResult result, {
     String? fallbackEmail,
@@ -664,7 +674,11 @@ class _LoginScreenState extends State<LoginScreen> {
                         alignment: Alignment.centerRight,
                         margin: const EdgeInsets.only(top: 8, right: 4),
                         child: TextButton(
-                          onPressed: () {},
+                          onPressed: () => _openPlaceholderPage(
+                            title: 'Forgot Password',
+                            message:
+                                'Password reset is not connected yet. Please contact support from your profile after login.',
+                          ),
                           style: TextButton.styleFrom(
                             foregroundColor: const Color(0xFFA08E80),
                             padding: EdgeInsets.zero,
@@ -758,8 +772,15 @@ class _LoginScreenState extends State<LoginScreen> {
                                 : const GoogleMark(),
                           ),
                           const SizedBox(width: 16),
-                          const AuthSocialButton(
-                            child: Icon(
+                          AuthSocialButton(
+                            onPressed: _isBusy
+                                ? null
+                                : () => _openPlaceholderPage(
+                                    title: 'Apple Sign In',
+                                    message:
+                                        'Apple sign-in is not connected yet. Use email/password or Google sign-in for now.',
+                                  ),
+                            child: const Icon(
                               Icons.apple,
                               color: Colors.black,
                               size: 24,
