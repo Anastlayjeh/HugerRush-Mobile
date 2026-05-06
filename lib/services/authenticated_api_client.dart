@@ -1,10 +1,7 @@
-import 'dart:async';
-import 'dart:convert';
-
 import 'package:http/http.dart' as http;
 
-import '../config/app_config.dart';
 import '../models/auth_session.dart';
+import 'api_client.dart';
 import 'auth_api_service.dart';
 import 'auth_session_service.dart';
 
@@ -19,13 +16,13 @@ class AuthenticatedApiClient {
        _authSessionService = authSessionService,
        _onSessionUpdated = onSessionUpdated,
        _onSessionExpired = onSessionExpired,
-       _client = client ?? http.Client();
+       _apiClient = ApiClient(client: client);
 
   final AuthApiService _authApiService;
   final AuthSessionService _authSessionService;
   final Future<void> Function(AuthSession session)? _onSessionUpdated;
   final Future<void> Function()? _onSessionExpired;
-  final http.Client _client;
+  final ApiClient _apiClient;
 
   Future<AuthSession>? _refreshingSessionFuture;
 
@@ -38,14 +35,12 @@ class AuthenticatedApiClient {
     Duration timeout = const Duration(seconds: 20),
   }) async {
     final normalizedMethod = method.trim().toUpperCase();
-    final normalizedBody = _normalizeBody(body);
-
     final initialResponse = await _sendWithAuth(
       method: normalizedMethod,
       endpoint: endpoint,
       token: session.token,
       headers: headers,
-      body: normalizedBody,
+      body: body,
       timeout: timeout,
     );
 
@@ -63,7 +58,7 @@ class AuthenticatedApiClient {
       endpoint: endpoint,
       token: refreshedSession.token,
       headers: headers,
-      body: normalizedBody,
+      body: body,
       timeout: timeout,
     );
 
@@ -79,13 +74,6 @@ class AuthenticatedApiClient {
       session: refreshedSession,
       usedRefreshFlow: true,
     );
-  }
-
-  Object? _normalizeBody(Object? body) {
-    if (body == null || body is String || body is List<int>) {
-      return body;
-    }
-    return jsonEncode(body);
   }
 
   Future<AuthSession> _refreshSession(AuthSession session) async {
@@ -168,49 +156,18 @@ class AuthenticatedApiClient {
     Map<String, String>? headers,
     Object? body,
   }) async {
-    final uri = AppConfig.apiUri(endpoint);
-    final hasBody = body != null;
-    final requestHeaders = <String, String>{
-      'Accept': 'application/json',
-      if (hasBody) 'Content-Type': 'application/json',
-      ...?headers,
-      'Authorization': 'Bearer $token',
-    };
-
     try {
-      switch (method) {
-        case 'GET':
-          return await _client
-              .get(uri, headers: requestHeaders)
-              .timeout(timeout);
-        case 'POST':
-          return await _client
-              .post(uri, headers: requestHeaders, body: body)
-              .timeout(timeout);
-        case 'PUT':
-          return await _client
-              .put(uri, headers: requestHeaders, body: body)
-              .timeout(timeout);
-        case 'PATCH':
-          return await _client
-              .patch(uri, headers: requestHeaders, body: body)
-              .timeout(timeout);
-        case 'DELETE':
-          return await _client
-              .delete(uri, headers: requestHeaders, body: body)
-              .timeout(timeout);
-      }
-    } on TimeoutException {
-      throw const AuthApiException(
-        'Request timed out. Please check your connection and try again.',
+      return await _apiClient.request(
+        method: method,
+        endpoint: endpoint,
+        token: token,
+        headers: headers,
+        body: body,
+        timeout: timeout,
       );
-    } catch (_) {
-      throw const AuthApiException(
-        'Unable to reach the server. Check your API URL and internet connection.',
-      );
+    } on ApiClientException catch (error) {
+      throw AuthApiException(error.message);
     }
-
-    throw AuthApiException('Unsupported HTTP method "$method".');
   }
 }
 

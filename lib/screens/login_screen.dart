@@ -3,7 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
-import '../config/app_config.dart';
+import '../config/api_config.dart';
 import '../models/auth_session.dart';
 import '../services/auth_api_service.dart';
 import '../services/auth_session_service.dart';
@@ -486,9 +486,9 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     _googleSignInInitialization ??= GoogleSignIn.instance.initialize(
-      serverClientId: AppConfig.googleServerClientId.trim().isEmpty
+      serverClientId: ApiConfig.googleServerClientId.trim().isEmpty
           ? null
-          : AppConfig.googleServerClientId.trim(),
+          : ApiConfig.googleServerClientId.trim(),
     );
 
     try {

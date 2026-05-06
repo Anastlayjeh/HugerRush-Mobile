@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
-import 'config/app_config.dart';
+import 'config/api_config.dart';
 import 'screens/app_shell.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  AppConfig.validate();
+  ApiConfig.validate();
   runApp(const HungerRushApp());
 }
 

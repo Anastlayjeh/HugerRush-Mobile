@@ -26,89 +26,6 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   static const int _messagesTabIndex = 3;
   static const int _profileTabIndex = 4;
   static const int _profileMenuTabIndex = 1;
-  static const List<RestaurantMenuItem> _fallbackMenuItems = [
-    RestaurantMenuItem(
-      id: 'margherita-special',
-      title: 'Margherita Special',
-      description:
-          'Fresh basil, mozzarella, tomato sauce, and olive oil drizzle.',
-      price: 11.00,
-      imageUrl:
-          'https://images.unsplash.com/photo-1604382354936-07c5d9983bd3?auto=format&fit=crop&w=900&q=80',
-      category: 'Pizza',
-      isAvailable: true,
-      isPopular: true,
-      rating: 4.8,
-      ordersCount: 148,
-    ),
-    RestaurantMenuItem(
-      id: 'crispy-wings',
-      title: 'Crispy Wings (6pcs)',
-      description: 'Golden fried wings served with spicy dipping sauce.',
-      price: 9.50,
-      imageUrl:
-          'https://images.unsplash.com/photo-1562967916-eb82221dfb92?auto=format&fit=crop&w=900&q=80',
-      category: 'Starters',
-      isAvailable: true,
-      isPopular: false,
-      rating: 4.6,
-      ordersCount: 96,
-    ),
-    RestaurantMenuItem(
-      id: 'creamy-carbonara',
-      title: 'Creamy Carbonara',
-      description: 'Spaghetti tossed in creamy parmesan sauce and herbs.',
-      price: 13.25,
-      imageUrl:
-          'https://images.unsplash.com/photo-1621996346565-e3dbc646d9a9?auto=format&fit=crop&w=900&q=80',
-      category: 'Pasta',
-      isAvailable: true,
-      isPopular: true,
-      rating: 4.9,
-      ordersCount: 121,
-    ),
-    RestaurantMenuItem(
-      id: 'smoked-bbq-burger',
-      title: 'Smoked BBQ Burger',
-      description: 'Beef patty, cheddar, caramelized onions, and BBQ sauce.',
-      price: 12.75,
-      imageUrl:
-          'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=900&q=80',
-      category: 'Burgers',
-      isAvailable: true,
-      isPopular: true,
-      rating: 4.7,
-      ordersCount: 134,
-    ),
-    RestaurantMenuItem(
-      id: 'garden-caesar-salad',
-      title: 'Garden Caesar Salad',
-      description:
-          'Romaine lettuce, parmesan flakes, croutons, and Caesar dressing.',
-      price: 8.40,
-      imageUrl:
-          'https://images.unsplash.com/photo-1546793665-c74683f339c1?auto=format&fit=crop&w=900&q=80',
-      category: 'Salads',
-      isAvailable: true,
-      isPopular: false,
-      rating: 4.4,
-      ordersCount: 58,
-    ),
-    RestaurantMenuItem(
-      id: 'double-chocolate-brownie',
-      title: 'Double Chocolate Brownie',
-      description:
-          'Warm brownie served with chocolate sauce and vanilla cream.',
-      price: 6.80,
-      imageUrl:
-          'https://images.unsplash.com/photo-1606313564200-e75d5e30476c?auto=format&fit=crop&w=900&q=80',
-      category: 'Desserts',
-      isAvailable: true,
-      isPopular: false,
-      rating: 4.8,
-      ordersCount: 73,
-    ),
-  ];
   static const List<_FeedVideoPostData> _feedVideos = [
     _FeedVideoPostData(
       videoAssetPath: 'assets/videos/home_video_1.mp4',
@@ -255,8 +172,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   bool get _isDashboardTabSelected =>
       _selectedBottomIndex == _dashboardTabIndex;
   bool get _isMessagesTabSelected => _selectedBottomIndex == _messagesTabIndex;
-  List<RestaurantMenuItem> get _menuItemsForDisplay =>
-      _restaurantMenuItems.isEmpty ? _fallbackMenuItems : _restaurantMenuItems;
+  List<RestaurantMenuItem> get _menuItemsForDisplay => _restaurantMenuItems;
 
   void _addSampleProfileVideo() {
     if (_uploadedVideos.isNotEmpty) {
@@ -856,7 +772,25 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     _profileScaffoldKey.currentState?.openEndDrawer();
   }
 
-  void _logoutToLogin() {
+  Future<void> _logoutToLogin() async {
+    final parentLogout = widget.onLogout;
+    if (parentLogout != null) {
+      await parentLogout();
+      return;
+    }
+
+    final token = widget.authToken?.trim();
+    if (token != null && token.isNotEmpty) {
+      try {
+        await AuthApiService().logout(token: token);
+      } on AuthApiException {
+        // Local logout must still complete if the server token is invalid.
+      }
+    }
+    await AuthSessionService().clearSession();
+    if (!mounted) {
+      return;
+    }
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute<void>(builder: (_) => LoginScreen()),
       (route) => false,
@@ -874,7 +808,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     final token = widget.authToken?.trim() ?? '';
     if (token.isEmpty) {
       setState(() {
-        _restaurantMenuItems = _fallbackMenuItems;
+        _restaurantMenuItems = const <RestaurantMenuItem>[];
         _hasLoadedMenu = true;
         _isRefreshingMenu = false;
         _menuSyncError = 'Missing auth token. Please log in again.';
@@ -893,19 +827,17 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         return;
       }
       setState(() {
-        _restaurantMenuItems = items.isEmpty ? _fallbackMenuItems : items;
+        _restaurantMenuItems = items;
         _hasLoadedMenu = true;
         _isRefreshingMenu = false;
-        _menuSyncError = items.isEmpty
-            ? 'No backend menu items were returned, so sample dishes are shown.'
-            : null;
+        _menuSyncError = items.isEmpty ? 'No menu items available yet.' : null;
       });
     } on RestaurantMenuApiException catch (e) {
       if (!mounted) {
         return;
       }
       setState(() {
-        _restaurantMenuItems = _fallbackMenuItems;
+        _restaurantMenuItems = const <RestaurantMenuItem>[];
         _hasLoadedMenu = true;
         _isRefreshingMenu = false;
         _menuSyncError = e.message;

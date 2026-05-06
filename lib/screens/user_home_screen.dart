@@ -11,6 +11,7 @@ import '../models/demo_app_models.dart';
 import '../services/auth_api_service.dart';
 import '../services/auth_session_service.dart';
 import '../services/authenticated_api_client.dart';
+import '../services/customer_restaurant_api_service.dart';
 import '../services/customer_video_feed_api_service.dart';
 import '../services/demo_app_repository.dart';
 import '../services/restaurant_menu_api_service.dart';

@@ -3,6 +3,9 @@ part of '../user_home_screen.dart';
 class _DiscoverTabBody extends StatefulWidget {
   const _DiscoverTabBody({
     required this.userName,
+    required this.authSession,
+    required this.onSessionUpdated,
+    required this.onSessionExpired,
     required this.favoriteSpotTitles,
     required this.onSetSpotFavorite,
     required this.selectedBottomIndex,
@@ -10,6 +13,9 @@ class _DiscoverTabBody extends StatefulWidget {
   });
 
   final String userName;
+  final AuthSession? authSession;
+  final Future<void> Function(AuthSession session)? onSessionUpdated;
+  final Future<void> Function()? onSessionExpired;
   final Set<String> favoriteSpotTitles;
   final void Function(_DiscoverSpotData spot, bool isFavorite)
   onSetSpotFavorite;
@@ -130,13 +136,21 @@ class _DiscoverTabBody extends StatefulWidget {
 }
 
 class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
+  final _authSessionService = AuthSessionService();
+  late final CustomerRestaurantApiService _restaurantApiService;
+  AuthSession? _session;
+  List<_DiscoverSpotData> _restaurantSpots = const <_DiscoverSpotData>[];
+  final Map<String, List<RestaurantMenuItem>> _menuItemsByRestaurantId =
+      <String, List<RestaurantMenuItem>>{};
+  bool _isLoadingRestaurants = true;
+  String? _restaurantError;
   Set<String> _activeCuisineFilters = <String>{};
   double _minimumRatingFilter = 0;
   int? _maximumDeliveryMinutesFilter;
   int? _maximumPriceTierFilter;
 
   List<_DiscoverSpotData> get _filteredPopularSpots {
-    return _DiscoverTabBody._popularSpots
+    return _restaurantSpots
         .where((spot) {
           if (_activeCuisineFilters.isNotEmpty &&
               !_activeCuisineFilters.contains(spot.categoryTitle)) {
@@ -159,9 +173,118 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
   }
 
   List<_DiscoverSpotData> _spotsForCuisine(String cuisineTitle) {
-    return _DiscoverTabBody._popularSpots
+    final matches = _restaurantSpots
         .where((spot) => spot.categoryTitle == cuisineTitle)
         .toList(growable: false);
+    return matches.isEmpty ? _restaurantSpots : matches;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _session = widget.authSession;
+    _restaurantApiService = CustomerRestaurantApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+        onSessionUpdated: widget.onSessionUpdated,
+        onSessionExpired: widget.onSessionExpired,
+      ),
+    );
+    unawaited(_loadRestaurants());
+  }
+
+  @override
+  void didUpdateWidget(covariant _DiscoverTabBody oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.authSession?.token != widget.authSession?.token) {
+      _session = widget.authSession;
+      unawaited(_loadRestaurants());
+    }
+  }
+
+  Future<AuthSession?> _resolveSession() async {
+    final current = _session;
+    if (current != null && current.token.trim().isNotEmpty) {
+      return current;
+    }
+    final restored = await _authSessionService.readSession();
+    if (restored != null && restored.token.trim().isNotEmpty) {
+      _session = restored;
+    }
+    return restored;
+  }
+
+  Future<void> _loadRestaurants() async {
+    setState(() {
+      _isLoadingRestaurants = true;
+      _restaurantError = null;
+    });
+
+    final session = await _resolveSession();
+    if (session == null) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoadingRestaurants = false;
+        _restaurantSpots = const <_DiscoverSpotData>[];
+        _restaurantError = 'Please log in again to load restaurants.';
+      });
+      return;
+    }
+
+    try {
+      final page = await _restaurantApiService.fetchRestaurants(
+        session: session,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _restaurantSpots = page.restaurants
+            .where((restaurant) => restaurant.status.toLowerCase() == 'active')
+            .map(_spotFromRestaurant)
+            .toList(growable: false);
+        _isLoadingRestaurants = false;
+        _restaurantError = null;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoadingRestaurants = false;
+        _restaurantSpots = const <_DiscoverSpotData>[];
+        _restaurantError = 'Unable to load restaurants. Please try again.';
+      });
+    }
+  }
+
+  _DiscoverSpotData _spotFromRestaurant(CustomerRestaurantItem restaurant) {
+    final category = restaurant.categoryLabel.trim();
+    final description = restaurant.description.trim();
+    final rating = restaurant.averageRating;
+    return _DiscoverSpotData(
+      id: restaurant.id,
+      title: restaurant.name,
+      handle: restaurant.id.isNotEmpty
+          ? 'restaurant-${restaurant.id}'
+          : restaurant.name.replaceAll(RegExp(r'\s+'), '').toLowerCase(),
+      categoryTitle: category.isEmpty ? 'Restaurants' : category,
+      subtitle: description.isNotEmpty
+          ? description
+          : (restaurant.address.isNotEmpty
+                ? restaurant.address
+                : 'Live restaurant on HungerRush'),
+      deliveryLabel: '30 min',
+      ratingLabel: rating == null ? '0.0' : rating.toStringAsFixed(1),
+      priceTier: 2,
+      badge: restaurant.menuItemsCount > 0
+          ? '${restaurant.menuItemsCount} items'
+          : 'Open',
+      imageUrl: restaurant.profilePhotoUrl,
+    );
   }
 
   Future<void> _openDiscoverSearch(BuildContext context) async {
@@ -513,7 +636,10 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
     BuildContext context,
     _DiscoverSpotData spot,
   ) async {
-    final menuItems = _discoverMenuItemsForSpot(spot);
+    final menuItems = await _discoverMenuItemsForSpot(spot);
+    if (!mounted || !context.mounted) {
+      return;
+    }
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => _DiscoverRestaurantMenuScreen(
@@ -526,7 +652,33 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
     );
   }
 
-  List<RestaurantMenuItem> _discoverMenuItemsForSpot(_DiscoverSpotData spot) {
+  Future<List<RestaurantMenuItem>> _discoverMenuItemsForSpot(
+    _DiscoverSpotData spot,
+  ) async {
+    final restaurantId = spot.id.trim();
+    if (restaurantId.isNotEmpty) {
+      final cached = _menuItemsByRestaurantId[restaurantId];
+      if (cached != null) {
+        return cached;
+      }
+      final session = await _resolveSession();
+      if (session == null) {
+        _showDiscoverSnackBar('Please log in again to load this menu.');
+        return const <RestaurantMenuItem>[];
+      }
+      try {
+        final menuItems = await _restaurantApiService.fetchRestaurantMenu(
+          session: session,
+          restaurantId: restaurantId,
+        );
+        _menuItemsByRestaurantId[restaurantId] = menuItems;
+        return menuItems;
+      } catch (_) {
+        _showDiscoverSnackBar('Unable to load restaurant menu. Try again.');
+        return const <RestaurantMenuItem>[];
+      }
+    }
+
     final category = spot.categoryTitle.trim().toLowerCase();
     switch (category) {
       case 'pizza':
@@ -540,6 +692,16 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
       default:
         return _discoverPizzaMenuItems;
     }
+  }
+
+  void _showDiscoverSnackBar(String message) {
+    if (!mounted) {
+      return;
+    }
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _openDiscoverMenuItemDetails(
@@ -839,14 +1001,53 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                                   14,
                                 ),
                               ),
-                              if (popularSpots.isEmpty)
+                              if (_isLoadingRestaurants)
+                                _ProfilePanel(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(
+                                      _clampDouble(18 * metrics.scale, 14, 18),
+                                    ),
+                                    child: const Center(
+                                      child: CircularProgressIndicator(
+                                        color: Color(0xFFFF7E4D),
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              else if (_restaurantError != null)
+                                _ProfilePanel(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(
+                                      _clampDouble(18 * metrics.scale, 14, 18),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          _restaurantError!,
+                                          style: const TextStyle(
+                                            color: Color(0xFF7D6C60),
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 12),
+                                        TextButton(
+                                          onPressed: _loadRestaurants,
+                                          child: const Text('Retry'),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                )
+                              else if (popularSpots.isEmpty)
                                 _ProfilePanel(
                                   child: Padding(
                                     padding: EdgeInsets.all(
                                       _clampDouble(18 * metrics.scale, 14, 18),
                                     ),
                                     child: const Text(
-                                      'No restaurants match your filters yet.',
+                                      'No restaurants available yet.',
                                       style: TextStyle(
                                         color: Color(0xFF7D6C60),
                                         fontWeight: FontWeight.w600,
@@ -2616,6 +2817,7 @@ class _DiscoverCategoryData {
 
 class _DiscoverSpotData {
   const _DiscoverSpotData({
+    this.id = '',
     required this.title,
     required this.handle,
     required this.categoryTitle,
@@ -2627,6 +2829,7 @@ class _DiscoverSpotData {
     required this.imageUrl,
   });
 
+  final String id;
   final String title;
   final String handle;
   final String categoryTitle;
@@ -2894,4 +3097,3 @@ class _DiscoverFiltersState {
   final int? maximumDeliveryMinutes;
   final int? maximumPriceTier;
 }
-

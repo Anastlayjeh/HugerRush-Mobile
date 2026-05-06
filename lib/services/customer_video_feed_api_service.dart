@@ -1,7 +1,6 @@
-import 'dart:convert';
-
 import '../models/auth_session.dart';
 import '../models/customer_video_feed_models.dart';
+import 'api_client.dart';
 import 'auth_api_service.dart';
 import 'authenticated_api_client.dart';
 
@@ -18,7 +17,7 @@ class CustomerVideoFeedApiService {
     String? query,
     bool debug = false,
   }) async {
-    final endpoint = _endpoint('/api/v1/customer/videos/feed', <String, String>{
+    final endpoint = _endpoint('/v1/customer/videos/feed', <String, String>{
       'page': page.toString(),
       'per_page': perPage.clamp(1, 30).toString(),
       if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
@@ -35,7 +34,13 @@ class CustomerVideoFeedApiService {
       payload,
       fallback: 'Failed to load your video feed.',
     );
-    return CustomerVideoFeedPage.fromJson(payload);
+    final parsedPage = CustomerVideoFeedPage.fromJson(payload);
+    return CustomerVideoFeedPage(
+      items: parsedPage.items
+          .where((item) => item.isApprovedForFeed)
+          .toList(growable: false),
+      meta: parsedPage.meta,
+    );
   }
 
   Future<void> recordSearch({
@@ -50,7 +55,7 @@ class CustomerVideoFeedApiService {
     await _requestVoid(
       session: session,
       method: 'POST',
-      endpoint: '/api/v1/customer/videos/searches',
+      endpoint: '/v1/customer/videos/searches',
       body: <String, dynamic>{'query': cleaned, 'context': context},
       fallback: 'Failed to record search.',
     );
@@ -68,7 +73,7 @@ class CustomerVideoFeedApiService {
     await _requestVoid(
       session: session,
       method: 'POST',
-      endpoint: '/api/v1/customer/videos/$cleanedVideoId/engagements',
+      endpoint: '/v1/customer/videos/$cleanedVideoId/engagements',
       body: <String, dynamic>{'type': type},
       fallback: 'Failed to update video engagement.',
     );
@@ -87,8 +92,7 @@ class CustomerVideoFeedApiService {
     await _requestVoid(
       session: session,
       method: 'DELETE',
-      endpoint:
-          '/api/v1/customer/videos/$cleanedVideoId/engagements/$cleanedType',
+      endpoint: '/v1/customer/videos/$cleanedVideoId/engagements/$cleanedType',
       fallback: 'Failed to update video engagement.',
     );
   }
@@ -104,7 +108,7 @@ class CustomerVideoFeedApiService {
     final result = await _apiClient.request(
       session: session,
       method: 'GET',
-      endpoint: '/api/v1/customer/videos/$cleanedVideoId/comments',
+      endpoint: '/v1/customer/videos/$cleanedVideoId/comments',
     );
     final payload = _decodeMap(result.response.body);
     _throwForFailure(
@@ -130,7 +134,7 @@ class CustomerVideoFeedApiService {
     final result = await _apiClient.request(
       session: session,
       method: 'POST',
-      endpoint: '/api/v1/customer/videos/$cleanedVideoId/comments',
+      endpoint: '/v1/customer/videos/$cleanedVideoId/comments',
       body: <String, dynamic>{'body': cleanedBody},
     );
     final payload = _decodeMap(result.response.body);
@@ -152,7 +156,7 @@ class CustomerVideoFeedApiService {
     final result = await _apiClient.request(
       session: session,
       method: 'GET',
-      endpoint: '/api/v1/customer/restaurants/following',
+      endpoint: '/v1/customer/restaurants/following',
     );
     final payload = _decodeMap(result.response.body);
     _throwForFailure(
@@ -176,7 +180,7 @@ class CustomerVideoFeedApiService {
     await _requestVoid(
       session: session,
       method: 'POST',
-      endpoint: '/api/v1/customer/restaurants/$cleanedRestaurantId/follow',
+      endpoint: '/v1/customer/restaurants/$cleanedRestaurantId/follow',
       fallback: 'Failed to follow restaurant.',
     );
   }
@@ -192,7 +196,7 @@ class CustomerVideoFeedApiService {
     await _requestVoid(
       session: session,
       method: 'DELETE',
-      endpoint: '/api/v1/customer/restaurants/$cleanedRestaurantId/follow',
+      endpoint: '/v1/customer/restaurants/$cleanedRestaurantId/follow',
       fallback: 'Failed to unfollow restaurant.',
     );
   }
@@ -231,18 +235,7 @@ class CustomerVideoFeedApiService {
   }
 
   Map<String, dynamic> _decodeMap(String body) {
-    if (body.isEmpty) {
-      return <String, dynamic>{};
-    }
-    try {
-      final decoded = jsonDecode(body);
-      if (decoded is Map<String, dynamic>) {
-        return decoded;
-      }
-    } on FormatException {
-      return <String, dynamic>{};
-    }
-    return <String, dynamic>{};
+    return ApiClient.decodeMap(body);
   }
 
   List<Map<String, dynamic>> _extractList(Map<String, dynamic> payload) {
@@ -277,32 +270,18 @@ class CustomerVideoFeedApiService {
     if (statusCode >= 200 && statusCode < 300) {
       return;
     }
-    if (statusCode == 401 || statusCode == 403) {
+    if (statusCode == 401) {
       throw const AuthApiException(
         'Your session expired. Please log in again.',
       );
     }
+    if (statusCode == 403) {
+      throw const AuthApiException(
+        'You do not have permission to perform this action.',
+      );
+    }
     throw AuthApiException(
-      '${_extractError(payload) ?? fallback} (HTTP $statusCode)',
+      '${ApiClient.errorMessageForStatus(statusCode, payload, fallback: fallback)} (HTTP $statusCode)',
     );
-  }
-
-  String? _extractError(Map<String, dynamic> payload) {
-    final message = payload['message'];
-    if (message is String && message.trim().isNotEmpty) {
-      return message.trim();
-    }
-    final errors = payload['errors'];
-    if (errors is Map<String, dynamic>) {
-      for (final value in errors.values) {
-        if (value is List && value.isNotEmpty) {
-          final first = value.first;
-          if (first is String && first.trim().isNotEmpty) {
-            return first.trim();
-          }
-        }
-      }
-    }
-    return null;
   }
 }

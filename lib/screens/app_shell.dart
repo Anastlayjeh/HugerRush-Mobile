@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/auth_session.dart';
+import '../services/auth_api_service.dart';
 import '../services/auth_session_service.dart';
 import 'login_screen.dart';
 import 'restaurant_feed_screen.dart';
@@ -23,6 +24,7 @@ class _AppShellState extends State<AppShell> {
   };
 
   final _authSessionService = AuthSessionService();
+  final _authApiService = AuthApiService();
   AuthSession? _session;
   bool _isBootstrapping = true;
   bool _isClearingInvalidSession = false;
@@ -154,6 +156,14 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<void> _handleLogout() async {
+    final token = _session?.token.trim();
+    if (token != null && token.isNotEmpty) {
+      try {
+        await _authApiService.logout(token: token);
+      } on AuthApiException {
+        // Local logout must still complete if the token is already invalid.
+      }
+    }
     await _authSessionService.clearSession();
     if (!mounted) {
       return;

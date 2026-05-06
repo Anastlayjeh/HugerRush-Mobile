@@ -1124,6 +1124,15 @@ class _UserProfileMenuDrawer extends StatelessWidget {
                     child: TextButton(
                       onPressed: () async {
                         final authSessionService = AuthSessionService();
+                        final session = await authSessionService.readSession();
+                        final token = session?.token.trim();
+                        if (token != null && token.isNotEmpty) {
+                          try {
+                            await AuthApiService().logout(token: token);
+                          } on AuthApiException {
+                            // Local logout must still complete if the token is invalid.
+                          }
+                        }
                         await authSessionService.clearSession();
                         if (!context.mounted) {
                           return;

@@ -45,6 +45,8 @@ class CustomerVideoFeedItem {
     required this.id,
     required this.title,
     required this.description,
+    required this.status,
+    required this.moderationStatus,
     required this.mediaUrl,
     required this.thumbnailUrl,
     required this.streamUid,
@@ -52,6 +54,9 @@ class CustomerVideoFeedItem {
     required this.streamStatus,
     required this.streamReady,
     required this.streamHlsUrl,
+    required this.hlsUrl,
+    required this.playbackUrlValue,
+    required this.videoUrl,
     required this.streamDashUrl,
     required this.streamPreviewUrl,
     required this.restaurant,
@@ -64,6 +69,8 @@ class CustomerVideoFeedItem {
   final String id;
   final String title;
   final String description;
+  final String status;
+  final String moderationStatus;
   final String mediaUrl;
   final String thumbnailUrl;
   final String streamUid;
@@ -71,6 +78,9 @@ class CustomerVideoFeedItem {
   final String streamStatus;
   final bool streamReady;
   final String streamHlsUrl;
+  final String hlsUrl;
+  final String playbackUrlValue;
+  final String videoUrl;
   final String streamDashUrl;
   final String streamPreviewUrl;
   final CustomerRestaurantSummary? restaurant;
@@ -80,17 +90,50 @@ class CustomerVideoFeedItem {
   final DateTime? publishedAt;
 
   String get playbackUrl {
-    if (streamHlsUrl.trim().isNotEmpty) {
-      return streamHlsUrl.trim();
+    final candidates =
+        <String>[streamHlsUrl, hlsUrl, playbackUrlValue, videoUrl, mediaUrl]
+            .map((url) => url.trim())
+            .where((url) => url.isNotEmpty)
+            .toList(growable: false);
+    if (candidates.isEmpty) {
+      return '';
     }
-    return mediaUrl.trim();
+    for (final candidate in candidates) {
+      if (_isHlsUrl(candidate)) {
+        return candidate;
+      }
+    }
+    return candidates.first;
+  }
+
+  bool get isApprovedForFeed {
+    if (!streamReady || playbackUrl.isEmpty) {
+      return false;
+    }
+    final normalizedStatus = status.trim().toLowerCase();
+    if (normalizedStatus.isNotEmpty && normalizedStatus != 'published') {
+      return false;
+    }
+    final normalizedModerationStatus = moderationStatus.trim().toLowerCase();
+    if (normalizedModerationStatus.isNotEmpty &&
+        normalizedModerationStatus != 'approved') {
+      return false;
+    }
+    return true;
   }
 
   factory CustomerVideoFeedItem.fromJson(Map<String, dynamic> json) {
+    final moderation = _stringMap(json['moderation']);
     return CustomerVideoFeedItem(
       id: _readString(json['id']) ?? '',
       title: _readString(json['title']) ?? '',
       description: _readString(json['description']) ?? '',
+      status: _readString(json['status']) ?? '',
+      moderationStatus:
+          _readString(json['moderation_status']) ??
+          _readString(json['moderationStatus']) ??
+          _readString(moderation['status']) ??
+          '',
       mediaUrl: _readString(json['media_url']) ?? '',
       thumbnailUrl: _readString(json['thumbnail_url']) ?? '',
       streamUid: _readString(json['stream_uid']) ?? '',
@@ -98,6 +141,9 @@ class CustomerVideoFeedItem {
       streamStatus: _readString(json['stream_status']) ?? '',
       streamReady: _readBool(json['stream_ready']) ?? false,
       streamHlsUrl: _readString(json['stream_hls_url']) ?? '',
+      hlsUrl: _readString(json['hls_url']) ?? '',
+      playbackUrlValue: _readString(json['playback_url']) ?? '',
+      videoUrl: _readString(json['video_url']) ?? '',
       streamDashUrl: _readString(json['stream_dash_url']) ?? '',
       streamPreviewUrl: _readString(json['stream_preview_url']) ?? '',
       restaurant: json['restaurant'] is Map
@@ -315,4 +361,8 @@ DateTime? _readDateTime(dynamic value) {
     return DateTime.tryParse(value.trim());
   }
   return null;
+}
+
+bool _isHlsUrl(String value) {
+  return value.toLowerCase().contains('.m3u8');
 }
