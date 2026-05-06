@@ -582,10 +582,14 @@ class RestaurantVideoItem {
     required this.mediaUrl,
     required this.thumbnailUrl,
     required this.streamHlsUrl,
+    required this.hlsUrl,
+    required this.playbackUrlValue,
+    required this.videoUrl,
     required this.streamPreviewUrl,
     required this.status,
     required this.moderationStatus,
     required this.moderationReason,
+    required this.streamReady,
     required this.viewsCount,
     required this.likesCount,
     required this.sharesCount,
@@ -599,10 +603,14 @@ class RestaurantVideoItem {
   final String mediaUrl;
   final String thumbnailUrl;
   final String streamHlsUrl;
+  final String hlsUrl;
+  final String playbackUrlValue;
+  final String videoUrl;
   final String streamPreviewUrl;
   final String status;
   final String moderationStatus;
   final String moderationReason;
+  final bool streamReady;
   final int viewsCount;
   final int likesCount;
   final int sharesCount;
@@ -610,7 +618,20 @@ class RestaurantVideoItem {
   final DateTime? publishedAt;
 
   String get playbackUrl {
-    for (final value in <String>[streamHlsUrl, mediaUrl]) {
+    final candidates = <String>[
+      streamHlsUrl,
+      hlsUrl,
+      playbackUrlValue,
+      videoUrl,
+      mediaUrl,
+    ];
+    for (final value in candidates.where(_isHlsUrl)) {
+      final cleaned = value.trim();
+      if (cleaned.isNotEmpty) {
+        return cleaned;
+      }
+    }
+    for (final value in candidates) {
       final cleaned = value.trim();
       if (cleaned.isNotEmpty) {
         return cleaned;
@@ -638,7 +659,8 @@ class RestaurantVideoItem {
   bool get canAppearPublished {
     final normalizedStatus = status.trim().toLowerCase();
     final normalizedModeration = moderationStatus.trim().toLowerCase();
-    return normalizedStatus == 'published' &&
+    return streamReady &&
+        normalizedStatus == 'published' &&
         (normalizedModeration.isEmpty || normalizedModeration == 'approved');
   }
 
@@ -650,10 +672,14 @@ class RestaurantVideoItem {
       mediaUrl: _readString(json['media_url']) ?? '',
       thumbnailUrl: _readString(json['thumbnail_url']) ?? '',
       streamHlsUrl: _readString(json['stream_hls_url']) ?? '',
+      hlsUrl: _readString(json['hls_url']) ?? '',
+      playbackUrlValue: _readString(json['playback_url']) ?? '',
+      videoUrl: _readString(json['video_url']) ?? '',
       streamPreviewUrl: _readString(json['stream_preview_url']) ?? '',
       status: _readString(json['status']) ?? '',
       moderationStatus: _readString(json['moderation_status']) ?? '',
       moderationReason: _readString(json['moderation_reason']) ?? '',
+      streamReady: _readBool(json['stream_ready']) ?? true,
       viewsCount: _readInt(json['views_count']) ?? 0,
       likesCount: _readInt(json['likes_count']) ?? 0,
       sharesCount: _readInt(json['shares_count']) ?? 0,
@@ -831,6 +857,25 @@ double? _readDouble(dynamic value) {
   return null;
 }
 
+bool? _readBool(dynamic value) {
+  if (value is bool) {
+    return value;
+  }
+  if (value is num) {
+    return value != 0;
+  }
+  if (value is String) {
+    final normalized = value.trim().toLowerCase();
+    if (normalized == 'true' || normalized == '1' || normalized == 'yes') {
+      return true;
+    }
+    if (normalized == 'false' || normalized == '0' || normalized == 'no') {
+      return false;
+    }
+  }
+  return null;
+}
+
 DateTime? _readDate(dynamic value) {
   if (value is DateTime) {
     return value;
@@ -839,4 +884,8 @@ DateTime? _readDate(dynamic value) {
     return DateTime.tryParse(value.trim())?.toLocal();
   }
   return null;
+}
+
+bool _isHlsUrl(String value) {
+  return value.toLowerCase().contains('.m3u8');
 }

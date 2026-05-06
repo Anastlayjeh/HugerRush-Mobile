@@ -7,11 +7,13 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../models/auth_session.dart';
+import '../models/customer_video_feed_models.dart';
 import '../models/demo_app_models.dart';
 import '../services/auth_api_service.dart';
 import '../services/auth_session_service.dart';
 import '../services/authenticated_api_client.dart';
 import '../services/conversation_api_service.dart';
+import '../services/customer_video_feed_api_service.dart';
 import '../services/demo_app_repository.dart';
 import '../services/moderation_support_models.dart';
 import '../services/order_api_service.dart';
@@ -55,4 +57,17 @@ String _feedCreatorLabel(String restaurantName) {
       .take(2)
       .join(' ');
   return (label.isEmpty ? 'HR' : label).toUpperCase();
+}
+
+String _feedHandleFromName(String value) {
+  final cleaned = value.trim().toLowerCase().replaceAll(
+    RegExp(r'[^a-z0-9]+'),
+    '',
+  );
+  return cleaned.isEmpty ? 'restaurant' : cleaned;
+}
+
+String _feedTagFromName(String value) {
+  final cleaned = _feedHandleFromName(value);
+  return cleaned == 'restaurant' ? '#food' : '#$cleaned';
 }

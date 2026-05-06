@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -9,7 +11,9 @@ import 'services/push_notification_service.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  DartPluginRegistrant.ensureInitialized();
   await Firebase.initializeApp();
+  await PushNotificationService.showBackgroundMessage(message);
   if (kDebugMode) {
     debugPrint('Background FCM message received: ${message.messageId}');
   }

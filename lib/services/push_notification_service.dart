@@ -19,6 +19,8 @@ class PushNotificationService {
   final FirebaseMessaging _messaging = FirebaseMessaging.instance;
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
+  static final FlutterLocalNotificationsPlugin _backgroundLocalNotifications =
+      FlutterLocalNotificationsPlugin();
   final AuthSessionService _authSessionService = AuthSessionService();
   late final AuthenticatedApiClient _authenticatedApiClient =
       AuthenticatedApiClient(
@@ -30,6 +32,7 @@ class PushNotificationService {
   StreamSubscription<RemoteMessage>? _openedMessageSubscription;
   StreamSubscription<String>? _tokenRefreshSubscription;
   bool _isInitialized = false;
+  static bool _backgroundNotificationsReady = false;
 
   static const AndroidNotificationChannel _androidChannel =
       AndroidNotificationChannel(
@@ -56,8 +59,59 @@ class PushNotificationService {
       _listenForForegroundMessages();
       _listenForOpenedMessages();
       _listenForTokenRefresh();
+      await _handleInitialMessage();
     } catch (error, stackTrace) {
       _debugLog('Failed to initialize push notifications.', error, stackTrace);
+    }
+  }
+
+  static Future<void> showBackgroundMessage(RemoteMessage message) async {
+    if (!_supportsFirebaseMessagingStatic || message.notification != null) {
+      return;
+    }
+
+    try {
+      final title = _messageTitle(message);
+      final body = _messageBody(message);
+      if ((title == null || title.isEmpty) && (body == null || body.isEmpty)) {
+        return;
+      }
+
+      await _setupBackgroundLocalNotifications();
+      await _backgroundLocalNotifications.show(
+        id: _notificationId(message),
+        title: title ?? 'HungerRush',
+        body: body ?? '',
+        notificationDetails: NotificationDetails(
+          android: AndroidNotificationDetails(
+            _androidChannel.id,
+            _androidChannel.name,
+            channelDescription: _androidChannel.description,
+            importance: Importance.high,
+            priority: Priority.high,
+            playSound: true,
+            enableVibration: true,
+            visibility: NotificationVisibility.public,
+          ),
+          iOS: const DarwinNotificationDetails(
+            presentAlert: true,
+            presentBadge: true,
+            presentSound: true,
+          ),
+          macOS: const DarwinNotificationDetails(
+            presentAlert: true,
+            presentBadge: true,
+            presentSound: true,
+          ),
+        ),
+        payload: message.data.isEmpty ? null : message.data.toString(),
+      );
+    } catch (error, stackTrace) {
+      if (kDebugMode) {
+        debugPrint('Failed to show background notification.');
+        debugPrint('$error');
+        debugPrint('$stackTrace');
+      }
     }
   }
 
@@ -95,6 +149,33 @@ class PushNotificationService {
     await androidNotifications?.requestNotificationsPermission();
   }
 
+  static Future<void> _setupBackgroundLocalNotifications() async {
+    if (_backgroundNotificationsReady) {
+      return;
+    }
+    _backgroundNotificationsReady = true;
+
+    const androidSettings = AndroidInitializationSettings(
+      '@mipmap/ic_launcher',
+    );
+    const darwinSettings = DarwinInitializationSettings();
+    const initializationSettings = InitializationSettings(
+      android: androidSettings,
+      iOS: darwinSettings,
+      macOS: darwinSettings,
+    );
+
+    await _backgroundLocalNotifications.initialize(
+      settings: initializationSettings,
+    );
+
+    final androidNotifications = _backgroundLocalNotifications
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
+    await androidNotifications?.createNotificationChannel(_androidChannel);
+  }
+
   void _listenForForegroundMessages() {
     _foregroundMessageSubscription ??= FirebaseMessaging.onMessage.listen((
       message,
@@ -111,6 +192,14 @@ class PushNotificationService {
         debugPrint('Notification opened: ${message.data}');
       }
     });
+  }
+
+  Future<void> _handleInitialMessage() async {
+    final initialMessage = await _messaging.getInitialMessage();
+    if (initialMessage == null || !kDebugMode) {
+      return;
+    }
+    debugPrint('Notification launched app: ${initialMessage.data}');
   }
 
   void _listenForTokenRefresh() {
@@ -249,6 +338,9 @@ class PushNotificationService {
             channelDescription: _androidChannel.description,
             importance: Importance.high,
             priority: Priority.high,
+            playSound: true,
+            enableVibration: true,
+            visibility: NotificationVisibility.public,
           ),
           iOS: const DarwinNotificationDetails(
             presentAlert: true,
@@ -268,12 +360,12 @@ class PushNotificationService {
     }
   }
 
-  int _notificationId(RemoteMessage message) {
+  static int _notificationId(RemoteMessage message) {
     final source = message.messageId ?? DateTime.now().microsecondsSinceEpoch;
     return source.hashCode & 0x7fffffff;
   }
 
-  String? _messageTitle(RemoteMessage message) {
+  static String? _messageTitle(RemoteMessage message) {
     return _firstNonEmptyString(<Object?>[
       message.notification?.title,
       message.data['title'],
@@ -282,7 +374,7 @@ class PushNotificationService {
     ]);
   }
 
-  String? _messageBody(RemoteMessage message) {
+  static String? _messageBody(RemoteMessage message) {
     return _firstNonEmptyString(<Object?>[
       message.notification?.body,
       message.data['body'],
@@ -292,7 +384,7 @@ class PushNotificationService {
     ]);
   }
 
-  String? _firstNonEmptyString(Iterable<Object?> values) {
+  static String? _firstNonEmptyString(Iterable<Object?> values) {
     for (final value in values) {
       if (value is String && value.trim().isNotEmpty) {
         return value.trim();
@@ -302,6 +394,10 @@ class PushNotificationService {
   }
 
   bool get _supportsFirebaseMessaging {
+    return _supportsFirebaseMessagingStatic;
+  }
+
+  static bool get _supportsFirebaseMessagingStatic {
     if (kIsWeb) {
       return false;
     }

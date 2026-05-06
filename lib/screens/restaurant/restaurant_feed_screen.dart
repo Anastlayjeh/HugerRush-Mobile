@@ -26,16 +26,6 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   static const int _messagesTabIndex = 3;
   static const int _profileTabIndex = 4;
   static const int _profileMenuTabIndex = 1;
-  static const List<_FeedVideoPostData> _feedVideos = [
-    _FeedVideoPostData(
-      videoAssetPath: 'assets/videos/home_video_1.mp4',
-      postId: 'for-you',
-    ),
-    _FeedVideoPostData(
-      videoAssetPath: 'assets/videos/home_video_2.mp4',
-      postId: 'vendor-feed',
-    ),
-  ];
   // ignore: unused_field
   static const String _sampleProfileVideoAssetPath =
       'assets/videos/home_video_2.mp4';
@@ -51,20 +41,25 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   int _selectedTopTab = 1;
   int _selectedProfileTabIndex = _profileMenuTabIndex;
   late final RestaurantOwnerApiService _ownerApiService;
+  late final CustomerVideoFeedApiService _videoFeedApiService;
   late final RestaurantOrderApiService _restaurantOrderApiService;
   PlatformFile? _selectedPostVideo;
   bool _isPickingPostVideo = false;
   bool _isCreatingPost = false;
+  bool _isLoadingFeedVideos = true;
   final List<_UploadedRestaurantVideo> _uploadedVideos =
       <_UploadedRestaurantVideo>[];
-  late final List<VideoPlayerController> _videoControllers;
-  late final List<bool> _videoErrorLogged;
+  final List<_FeedVideoPostData> _feedVideos = <_FeedVideoPostData>[];
+  final List<VideoPlayerController> _videoControllers =
+      <VideoPlayerController>[];
+  final List<bool> _videoErrorLogged = <bool>[];
   int _currentVideoIndex = 0;
   int _videoPlaybackSyncVersion = 0;
   int _nextLikeBurstId = 0;
   bool _isVideoHoldActive = false;
   _VideoHoldAction _videoHoldAction = _VideoHoldAction.none;
   bool _isVideoManuallyPaused = false;
+  String? _feedVideosError;
 
   late _RestaurantProfileInfo _profileInfo;
   bool _isRefreshingProfile = false;
@@ -87,6 +82,13 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         onSessionExpired: widget.onLogout,
       ),
     );
+    _videoFeedApiService = CustomerVideoFeedApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+        onSessionExpired: widget.onLogout,
+      ),
+    );
     _restaurantOrderApiService = RestaurantOrderApiService(
       apiClient: AuthenticatedApiClient(
         authApiService: AuthApiService(),
@@ -94,42 +96,6 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         onSessionExpired: widget.onLogout,
       ),
     );
-    _syncFeedPosts();
-    _videoControllers = List<VideoPlayerController>.generate(
-      _feedVideos.length,
-      (index) => VideoPlayerController.asset(_feedVideos[index].videoAssetPath),
-    );
-    _videoErrorLogged = List<bool>.filled(_videoControllers.length, false);
-    for (var i = 0; i < _videoControllers.length; i++) {
-      final controller = _videoControllers[i];
-      controller.addListener(() {
-        if (_videoErrorLogged[i]) {
-          return;
-        }
-        if (controller.value.hasError) {
-          _videoErrorLogged[i] = true;
-          debugPrint(
-            'Restaurant feed video playback error for index $i: ${controller.value.errorDescription}',
-          );
-        }
-      });
-      controller.setLooping(true);
-      controller.setVolume(1.0);
-      controller
-          .initialize()
-          .then((_) {
-            if (!mounted) {
-              return;
-            }
-            setState(() {});
-            unawaited(_syncVideoPlayback());
-          })
-          .catchError((error) {
-            debugPrint(
-              'Restaurant feed video init failed for index $i: $error',
-            );
-          });
-    }
     _profileInfo = _RestaurantProfileInfo.fromData(
       primary: widget.initialUserData,
       fallbackName: widget.restaurantName,
@@ -207,6 +173,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   bool get _isDashboardTabSelected =>
       _selectedBottomIndex == _dashboardTabIndex;
   bool get _isMessagesTabSelected => _selectedBottomIndex == _messagesTabIndex;
+  bool get _isFollowingFeedSelected => _selectedTopTab == 0;
   List<RestaurantMenuItem> get _menuItemsForDisplay => _restaurantMenuItems;
 
   // ignore: unused_element
@@ -217,21 +184,156 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   Future<void> _refreshRestaurantVideos() async {
     final session = await _resolveSession();
     if (session == null) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoadingFeedVideos = false;
+        _feedVideosError = 'Please log in again to load restaurant videos.';
+      });
       return;
     }
+    if (mounted) {
+      setState(() {
+        _isLoadingFeedVideos = true;
+        _feedVideosError = null;
+      });
+    }
+    var ownerVideos = const <RestaurantVideoItem>[];
     try {
-      final videos = await _ownerApiService.fetchVideos(session: session);
+      ownerVideos = await _ownerApiService.fetchVideos(session: session);
+    } catch (error) {
+      debugPrint('Restaurant owner videos refresh failed: $error');
+    }
+
+    try {
+      var feedPage = await _videoFeedApiService.fetchFeed(
+        session: session,
+        page: 1,
+        perPage: 15,
+      );
+      var nextFeedPage = feedPage.meta.currentPage + 1;
+      var hasMoreFeed = feedPage.meta.hasMore;
+      var visibleItems = _visibleFeedItems(feedPage.items);
+
+      while (_isFollowingFeedSelected && visibleItems.isEmpty && hasMoreFeed) {
+        feedPage = await _videoFeedApiService.fetchFeed(
+          session: session,
+          page: nextFeedPage,
+          perPage: 15,
+        );
+        nextFeedPage = feedPage.meta.currentPage + 1;
+        hasMoreFeed = feedPage.meta.hasMore;
+        visibleItems = _visibleFeedItems(feedPage.items);
+      }
       if (!mounted) {
         return;
       }
       setState(() {
         _uploadedVideos
           ..clear()
-          ..addAll(videos.map(_uploadedVideoFromApiItem));
+          ..addAll(ownerVideos.map(_uploadedVideoFromApiItem));
+        _replaceFeedVideos(visibleItems);
+        _isLoadingFeedVideos = false;
+        _feedVideosError = null;
       });
     } catch (error) {
-      debugPrint('Restaurant videos refresh failed: $error');
+      debugPrint('Restaurant global feed refresh failed: $error');
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _uploadedVideos
+          ..clear()
+          ..addAll(ownerVideos.map(_uploadedVideoFromApiItem));
+        _replaceFeedVideos(const <CustomerVideoFeedItem>[]);
+        _isLoadingFeedVideos = false;
+        _feedVideosError = 'Unable to load feed videos. Please try again.';
+      });
     }
+  }
+
+  List<CustomerVideoFeedItem> _visibleFeedItems(
+    List<CustomerVideoFeedItem> items,
+  ) {
+    return items
+        .where(_isFeedItemVisibleForSelectedTopTab)
+        .toList(growable: false);
+  }
+
+  bool _isFeedItemVisibleForSelectedTopTab(CustomerVideoFeedItem item) {
+    if (!item.isApprovedForFeed || item.playbackUrl.isEmpty) {
+      return false;
+    }
+    if (!_isFollowingFeedSelected) {
+      return true;
+    }
+    return item.viewerState.isFollowingRestaurant;
+  }
+
+  void _replaceFeedVideos(List<CustomerVideoFeedItem> videos) {
+    _videoPlaybackSyncVersion++;
+    for (final controller in _videoControllers) {
+      controller.dispose();
+    }
+    _feedVideos.clear();
+    _feedPostsById.clear();
+    _videoControllers.clear();
+    _videoErrorLogged.clear();
+    _currentVideoIndex = 0;
+    _isVideoHoldActive = false;
+    _videoHoldAction = _VideoHoldAction.none;
+    _isVideoManuallyPaused = false;
+
+    for (final item in videos) {
+      if (!_isFeedItemVisibleForSelectedTopTab(item)) {
+        continue;
+      }
+      final video = _FeedVideoPostData.fromFeedItem(item);
+      final post = _postFromFeedItem(item);
+      _feedVideos.add(video);
+      _feedPostsById[video.postId] = post;
+      _videoControllers.add(_buildFeedVideoController(video));
+      _videoErrorLogged.add(false);
+    }
+  }
+
+  VideoPlayerController _buildFeedVideoController(_FeedVideoPostData video) {
+    final source = video.videoUrl.trim();
+    final uri = Uri.tryParse(source);
+    final controller =
+        uri != null && (uri.scheme == 'http' || uri.scheme == 'https')
+        ? VideoPlayerController.networkUrl(uri)
+        : VideoPlayerController.file(File(source));
+    final index = _videoControllers.length;
+    controller.addListener(() {
+      if (index >= _videoErrorLogged.length || _videoErrorLogged[index]) {
+        return;
+      }
+      if (controller.value.hasError) {
+        _videoErrorLogged[index] = true;
+        debugPrint(
+          'Restaurant feed video playback error for ${video.postId}: ${controller.value.errorDescription}',
+        );
+      }
+    });
+    controller.setLooping(true);
+    controller.setVolume(1.0);
+    controller
+        .initialize()
+        .then((_) {
+          if (!mounted) {
+            return;
+          }
+          setState(() {});
+          unawaited(_syncVideoPlayback());
+        })
+        .catchError((error) {
+          debugPrint(
+            'Restaurant feed video init failed for ${video.postId}: $error',
+          );
+        });
+    return controller;
   }
 
   _UploadedRestaurantVideo _uploadedVideoFromApiItem(RestaurantVideoItem item) {
@@ -246,6 +348,51 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       moderationReason: item.moderationReason,
       videoFilePath: item.playbackUrl,
     );
+  }
+
+  DemoFeedPost _postFromFeedItem(CustomerVideoFeedItem item) {
+    final restaurant = item.restaurant;
+    final restaurantName = restaurant?.name.trim().isNotEmpty == true
+        ? restaurant!.name
+        : _restaurantName;
+    final menuName = item.menuItem?.name.trim();
+    final title = item.title.trim();
+    final caption = item.description.trim().isNotEmpty
+        ? item.description.trim()
+        : (title.isNotEmpty
+              ? title
+              : (menuName?.isNotEmpty == true ? menuName! : restaurantName));
+    final tags = <String>[
+      if (menuName != null && menuName.isNotEmpty) _feedTagFromName(menuName),
+      _feedTagFromName(restaurantName),
+    ].join(' ');
+    return DemoFeedPost(
+      id: item.id,
+      restaurantName: restaurantName,
+      restaurantHandle: _feedHandleFromName(restaurantName),
+      followersCount: item.stats.viewsCount,
+      caption: caption,
+      tags: tags,
+      audioLabel: 'Original Audio - $restaurantName',
+      rating: 4.8,
+      likeCount: item.stats.likesCount,
+      commentCount: item.stats.commentsCount,
+      isLiked: item.viewerState.isLiked,
+      isFollowing: item.viewerState.isFollowingRestaurant,
+      restaurantId: restaurant?.id,
+      menuItemName: menuName,
+      menuItemPrice: item.menuItem?.price,
+      thumbnailUrl: item.thumbnailUrl,
+      previewUrl: item.streamPreviewUrl,
+      shareCount: item.stats.sharesCount,
+    );
+  }
+
+  double _ratingValueFromLabel(String label) {
+    return double.tryParse(
+          RegExp(r'\d+(?:\.\d+)?').firstMatch(label)?.group(0) ?? '',
+        ) ??
+        4.8;
   }
 
   Future<void> _refreshDashboardData() async {
@@ -280,22 +427,30 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   }
 
   DemoFeedPost get _activeFeedPost {
+    if (_feedVideos.isEmpty) {
+      return _loadPostForId('restaurant-feed');
+    }
     final index = _currentVideoIndex.clamp(0, _feedVideos.length - 1);
     final video = _feedVideos[index];
     return _postForVideo(video);
   }
 
   DemoFeedPost _loadPostForId(String postId) {
-    final post = postId == 'vendor-feed'
-        ? _demoRepository.getFeedPost(following: true, vendorView: true)
-        : _demoRepository.getFeedPost(following: false);
-    return post;
-  }
-
-  void _syncFeedPosts() {
-    for (final video in _feedVideos) {
-      _feedPostsById[video.postId] = _loadPostForId(video.postId);
-    }
+    return DemoFeedPost(
+      id: postId,
+      restaurantName: _restaurantName,
+      restaurantHandle: _profileInfo.handle,
+      followersCount: 0,
+      caption: 'Restaurant video',
+      tags: _profileInfo.cuisineSummary,
+      audioLabel: 'Original Audio - $_restaurantName',
+      rating: _ratingValueFromLabel(_profileInfo.ratingLabel),
+      likeCount: 0,
+      commentCount: 0,
+      isLiked: false,
+      isFollowing: true,
+      restaurantId: _profileInfo.id,
+    );
   }
 
   DemoFeedPost _postForVideo(_FeedVideoPostData video) {
@@ -381,11 +536,16 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     }
     _pendingDoubleTapLikePostIds.add(post.id);
     try {
-      final updated = await _demoRepository.toggleLike(post.id);
       if (!mounted) {
         return;
       }
-      setState(() => _feedPostsById[post.id] = updated);
+      final current = _feedPostsById[post.id] ?? post;
+      setState(() {
+        _feedPostsById[post.id] = current.copyWith(
+          isLiked: true,
+          likeCount: current.likeCount + 1,
+        );
+      });
     } finally {
       _pendingDoubleTapLikePostIds.remove(post.id);
     }
@@ -571,12 +731,18 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
   Future<void> _toggleVendorLike([DemoFeedPost? post]) async {
     final targetPost = post ?? _activeFeedPost;
-    final updated = await _demoRepository.toggleLike(targetPost.id);
     if (!mounted) {
       return;
     }
+    final current = _feedPostsById[targetPost.id] ?? targetPost;
+    final nextLiked = !current.isLiked;
     setState(() {
-      _feedPostsById[targetPost.id] = updated;
+      _feedPostsById[targetPost.id] = current.copyWith(
+        isLiked: nextLiked,
+        likeCount: nextLiked
+            ? current.likeCount + 1
+            : (current.likeCount - 1).clamp(0, 1 << 31),
+      );
     });
   }
 
@@ -597,7 +763,10 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       return;
     }
     setState(() {
-      _feedPostsById[targetPost.id] = _loadPostForId(targetPost.id);
+      final current = _feedPostsById[targetPost.id] ?? targetPost;
+      _feedPostsById[targetPost.id] = current.copyWith(
+        commentCount: _demoRepository.getComments(targetPost.id).length,
+      );
     });
   }
 
@@ -844,6 +1013,20 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     if (index == _menuTabIndex || index == _dashboardTabIndex) {
       _refreshRestaurantMenu();
     }
+  }
+
+  void _onTopFeedTabSelected(int index) {
+    if (_selectedTopTab == index) {
+      return;
+    }
+    setState(() => _selectedTopTab = index);
+    unawaited(_refreshRestaurantVideos());
+  }
+
+  String _emptyFeedMessage() {
+    return _isFollowingFeedSelected
+        ? 'No videos from followed restaurants yet.'
+        : 'No published videos available yet.';
   }
 
   void _openMenuSection() {
@@ -1259,6 +1442,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                           Positioned.fill(
                             child: _FeedBackground(
                               controller: _videoControllers[index],
+                              thumbnailUrl: video.thumbnailUrl,
                             ),
                           ),
                           if (!_isVideoHoldActive) ...[
@@ -1381,6 +1565,18 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                   },
                 ),
               ),
+              if (_feedVideos.isEmpty)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  top: 0,
+                  bottom: navBarTotalHeight,
+                  child: _RestaurantFeedStatusOverlay(
+                    isLoading: _isLoadingFeedVideos,
+                    message: _feedVideosError ?? _emptyFeedMessage(),
+                    onRetry: _refreshRestaurantVideos,
+                  ),
+                ),
               Align(
                 alignment: Alignment.bottomCenter,
                 child: _BottomNavBar(
@@ -1408,9 +1604,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                         child: _TopControls(
                           metrics: metrics,
                           selectedTab: _selectedTopTab,
-                          onTabSelected: (index) {
-                            setState(() => _selectedTopTab = index);
-                          },
+                          onTabSelected: _onTopFeedTabSelected,
                           onOpenSearch: _openSearch,
                           onOpenNotifications: _openNotifications,
                         ),
@@ -1921,22 +2115,46 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
 class _FeedVideoPostData {
   const _FeedVideoPostData({
-    required this.videoAssetPath,
+    required this.videoUrl,
     required this.postId,
+    this.thumbnailUrl,
   });
 
-  final String videoAssetPath;
+  factory _FeedVideoPostData.fromFeedItem(CustomerVideoFeedItem item) {
+    return _FeedVideoPostData(
+      videoUrl: item.playbackUrl,
+      postId: item.id,
+      thumbnailUrl: item.thumbnailUrl,
+    );
+  }
+
+  final String videoUrl;
   final String postId;
+  final String? thumbnailUrl;
 }
 
 class _FeedBackground extends StatelessWidget {
-  const _FeedBackground({required this.controller});
+  const _FeedBackground({required this.controller, this.thumbnailUrl});
 
   final VideoPlayerController controller;
+  final String? thumbnailUrl;
 
   @override
   Widget build(BuildContext context) {
     if (!controller.value.isInitialized) {
+      final poster = thumbnailUrl?.trim();
+      if (poster != null && poster.isNotEmpty) {
+        return ColoredBox(
+          color: Colors.black,
+          child: Image.network(
+            poster,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => const DecoratedBox(
+              decoration: BoxDecoration(color: Colors.black),
+            ),
+          ),
+        );
+      }
       return const DecoratedBox(decoration: BoxDecoration(color: Colors.black));
     }
 
@@ -1957,6 +2175,63 @@ class _FeedBackground extends StatelessWidget {
               aspectRatio: aspectRatio,
               child: VideoPlayer(controller),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RestaurantFeedStatusOverlay extends StatelessWidget {
+  const _RestaurantFeedStatusOverlay({
+    required this.isLoading,
+    required this.message,
+    required this.onRetry,
+  });
+
+  final bool isLoading;
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: const Color(0xFF0A2230),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isLoading)
+                const CircularProgressIndicator(color: Color(0xFFFF7E4D))
+              else ...[
+                const Icon(
+                  Icons.video_library_outlined,
+                  color: Colors.white,
+                  size: 42,
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                FilledButton(
+                  onPressed: onRetry,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF7E4D),
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Retry'),
+                ),
+              ],
+            ],
           ),
         ),
       ),
@@ -2096,6 +2371,13 @@ class _TopControls extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  _TopTab(
+                    label: 'Following',
+                    selected: selectedTab == 0,
+                    metrics: metrics,
+                    onTap: () => onTabSelected(0),
+                  ),
+                  SizedBox(width: _clampDouble(18 * metrics.scale, 8, 18)),
                   _TopTab(
                     label: 'For You',
                     selected: selectedTab == 1,

@@ -312,7 +312,6 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
   final List<bool> _videoErrorLogged = <bool>[];
   final Set<String> _pendingDoubleTapLikePostIds = <String>{};
   final Set<String> _pendingLikePostIds = <String>{};
-  final Set<String> _pendingSavePostIds = <String>{};
   final Set<String> _pendingFollowRestaurantIds = <String>{};
   final Set<String> _viewedPostIdsThisSession = <String>{};
   late final CustomerVideoFeedApiService _videoFeedApiService;
@@ -327,8 +326,11 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
   bool _isLoadingMoreFeed = false;
   bool _hasMoreFeed = true;
   bool _isVideoHoldActive = false;
+  bool _isVideoManuallyPaused = false;
   String? _feedError;
   String? _activeSearchQuery;
+
+  bool get _isFollowingFeedSelected => widget.selectedTopTab == 0;
 
   @override
   void initState() {
@@ -358,6 +360,9 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.authSession?.token != widget.authSession?.token) {
       _session = widget.authSession;
+    }
+    if (oldWidget.selectedTopTab != widget.selectedTopTab) {
+      unawaited(_loadInitialFeed(query: _activeSearchQuery));
     }
   }
 
@@ -400,6 +405,8 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
     _videoControllers.clear();
     _videoErrorLogged.clear();
     _currentVideoIndex = 0;
+    _isVideoHoldActive = false;
+    _isVideoManuallyPaused = false;
     final requestId = ++_feedRequestId;
     _nextFeedPage = 1;
     _hasMoreFeed = true;
@@ -441,12 +448,30 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
     }
 
     try {
-      final page = await _videoFeedApiService.fetchFeed(
+      var page = await _videoFeedApiService.fetchFeed(
         session: session,
         page: _nextFeedPage,
         perPage: 15,
         query: _activeSearchQuery,
       );
+      var nextFeedPage = page.meta.currentPage + 1;
+      var hasMoreFeed = page.meta.hasMore;
+      var visibleItems = _visibleItemsForSelectedTopTab(page.items);
+
+      while (_isFollowingFeedSelected &&
+          visibleItems.isEmpty &&
+          hasMoreFeed &&
+          activeRequestId == _feedRequestId) {
+        page = await _videoFeedApiService.fetchFeed(
+          session: session,
+          page: nextFeedPage,
+          perPage: 15,
+          query: _activeSearchQuery,
+        );
+        nextFeedPage = page.meta.currentPage + 1;
+        hasMoreFeed = page.meta.hasMore;
+        visibleItems = _visibleItemsForSelectedTopTab(page.items);
+      }
       if (activeRequestId != _feedRequestId) {
         return;
       }
@@ -454,9 +479,9 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
         return;
       }
       setState(() {
-        _appendFeedItems(page.items);
-        _nextFeedPage = page.meta.currentPage + 1;
-        _hasMoreFeed = page.meta.hasMore;
+        _appendFeedItems(visibleItems);
+        _nextFeedPage = nextFeedPage;
+        _hasMoreFeed = hasMoreFeed;
         _isLoadingFeed = false;
         _isLoadingMoreFeed = false;
         _feedError = null;
@@ -480,7 +505,8 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
 
   void _appendFeedItems(List<CustomerVideoFeedItem> items) {
     for (final item in items) {
-      if (item.id.trim().isEmpty || !item.isApprovedForFeed) {
+      if (item.id.trim().isEmpty ||
+          !_isFeedItemVisibleForSelectedTopTab(item)) {
         continue;
       }
       if (_feedItemsByPostId.containsKey(item.id)) {
@@ -497,6 +523,24 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
       _videoControllers.add(_buildVideoController(video));
       _videoErrorLogged.add(false);
     }
+  }
+
+  List<CustomerVideoFeedItem> _visibleItemsForSelectedTopTab(
+    List<CustomerVideoFeedItem> items,
+  ) {
+    return items
+        .where(_isFeedItemVisibleForSelectedTopTab)
+        .toList(growable: false);
+  }
+
+  bool _isFeedItemVisibleForSelectedTopTab(CustomerVideoFeedItem item) {
+    if (!item.isApprovedForFeed) {
+      return false;
+    }
+    if (!_isFollowingFeedSelected) {
+      return true;
+    }
+    return item.viewerState.isFollowingRestaurant;
   }
 
   VideoPlayerController _buildVideoController(_FeedVideoPostData video) {
@@ -519,7 +563,7 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
       }
     });
     controller.setLooping(true);
-    controller.setVolume(0);
+    controller.setVolume(1.0);
     controller
         .initialize()
         .then((_) {
@@ -621,14 +665,9 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
       allowAddToCart: true,
       menuItems: _menuItemsForPost(post),
       showFollowButton: true,
-      showSaveButton: true,
-      initiallySaved: post.isSaved,
       initiallyFollowing: post.isFollowing,
       onToggleFollow: () {
         _toggleFollow(post);
-      },
-      onToggleSave: (_) {
-        _toggleSave(post);
       },
       reviews: reviewPreviews,
       onOpenReviews: () {
@@ -759,6 +798,9 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
       if (onRestaurantFollowChanged != null) {
         unawaited(onRestaurantFollowChanged());
       }
+      if (_isFollowingFeedSelected && !nextFollowing) {
+        unawaited(_loadInitialFeed(query: _activeSearchQuery));
+      }
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -818,51 +860,6 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
     }
   }
 
-  Future<void> _toggleSave(DemoFeedPost post) async {
-    if (!_pendingSavePostIds.add(post.id)) {
-      return;
-    }
-    final session = await _resolveSession();
-    if (session == null) {
-      _pendingSavePostIds.remove(post.id);
-      _showFeedSnackBar('Please log in again to save videos.');
-      return;
-    }
-    final current = _feedPostsById[post.id] ?? post;
-    final nextSaved = !current.isSaved;
-    final optimistic = current.copyWith(
-      isSaved: nextSaved,
-      saveCount: nextSaved
-          ? current.saveCount + 1
-          : (current.saveCount - 1).clamp(0, 1 << 31),
-    );
-    setState(() => _feedPostsById[post.id] = optimistic);
-    try {
-      CustomerVideoEngagementSummary? summary;
-      if (nextSaved) {
-        summary = await _videoFeedApiService.recordEngagement(
-          session: session,
-          videoId: post.id,
-          type: 'save',
-        );
-      } else {
-        summary = await _videoFeedApiService.removeEngagement(
-          session: session,
-          videoId: post.id,
-          type: 'save',
-        );
-      }
-      _applyEngagementSummary(post.id, summary);
-    } catch (_) {
-      if (mounted) {
-        setState(() => _feedPostsById[post.id] = current);
-        _showFeedSnackBar('Could not update save. Try again.');
-      }
-    } finally {
-      _pendingSavePostIds.remove(post.id);
-    }
-  }
-
   List<RestaurantMenuItem> _menuItemsForPost(DemoFeedPost post) {
     final title = post.menuItemName?.trim();
     if (title == null || title.isEmpty) {
@@ -914,6 +911,18 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
     messenger
       ?..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  String _emptyFeedMessage() {
+    final query = _activeSearchQuery;
+    if (query != null && query.isNotEmpty) {
+      return _isFollowingFeedSelected
+          ? 'No followed restaurant videos matched "$query".'
+          : 'No videos matched "$query".';
+    }
+    return _isFollowingFeedSelected
+        ? 'No videos from followed restaurants yet.'
+        : 'No videos available yet.';
   }
 
   void _rememberDoubleTapPosition(String postId, TapDownDetails details) {
@@ -1222,6 +1231,7 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
     final previousIndex = _currentVideoIndex;
     _currentVideoIndex = index;
     _isVideoHoldActive = false;
+    _isVideoManuallyPaused = false;
     if (previousIndex != index &&
         previousIndex >= 0 &&
         previousIndex < _isOrderNowVisibleByVideoIndex.length &&
@@ -1244,7 +1254,9 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
       if (!controller.value.isInitialized) {
         continue;
       }
-      if (i == _currentVideoIndex && !_isVideoHoldActive) {
+      if (i == _currentVideoIndex &&
+          !_isVideoHoldActive &&
+          !_isVideoManuallyPaused) {
         controller.play();
       } else {
         controller.pause();
@@ -1318,6 +1330,24 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
     _syncVideoPlayback();
   }
 
+  void _toggleVideoTapPlayback(int index) {
+    if (index != _currentVideoIndex || _isVideoHoldActive) {
+      return;
+    }
+    final controller = _videoControllers[index];
+    if (!controller.value.isInitialized) {
+      return;
+    }
+    setState(() => _isVideoManuallyPaused = !_isVideoManuallyPaused);
+    if (_isVideoManuallyPaused) {
+      controller.pause();
+      _viewEngagementTimer?.cancel();
+      return;
+    }
+    _syncVideoPlayback();
+    _scheduleViewEngagementForCurrentVideo();
+  }
+
   @override
   void dispose() {
     _viewEngagementTimer?.cancel();
@@ -1376,6 +1406,7 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
                   final likeBursts = _likeBurstsForPost(post.id);
                   return GestureDetector(
                     behavior: HitTestBehavior.translucent,
+                    onTap: () => _toggleVideoTapPlayback(index),
                     onLongPressStart: (_) => _handleVideoLongPressStart(index),
                     onLongPressEnd: (_) => _handleVideoLongPressEnd(),
                     onDoubleTapDown: (details) =>
@@ -1460,8 +1491,6 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
                                                 _toggleFollow(post),
                                             onToggleLike: () =>
                                                 _toggleLike(post),
-                                            onToggleSave: () =>
-                                                _toggleSave(post),
                                             onOpenComments: () =>
                                                 _openComments(post),
                                             onShare: () => _sharePromo(post),
@@ -1530,11 +1559,7 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
                 bottom: navBarTotalHeight,
                 child: _FeedStatusOverlay(
                   isLoading: _isLoadingFeed,
-                  message:
-                      _feedError ??
-                      (_activeSearchQuery == null
-                          ? 'No videos available yet.'
-                          : 'No videos matched "${_activeSearchQuery!}".'),
+                  message: _feedError ?? _emptyFeedMessage(),
                   onRetry: () => _loadInitialFeed(query: _activeSearchQuery),
                 ),
               ),
@@ -2223,7 +2248,6 @@ class _ActionRail extends StatelessWidget {
     required this.onOpenRestaurant,
     required this.onToggleFollow,
     required this.onToggleLike,
-    required this.onToggleSave,
     required this.onOpenComments,
     required this.onShare,
     required this.onReport,
@@ -2234,7 +2258,6 @@ class _ActionRail extends StatelessWidget {
   final VoidCallback onOpenRestaurant;
   final VoidCallback onToggleFollow;
   final VoidCallback onToggleLike;
-  final VoidCallback onToggleSave;
   final VoidCallback onOpenComments;
   final VoidCallback onShare;
   final VoidCallback onReport;
@@ -2266,16 +2289,6 @@ class _ActionRail extends StatelessWidget {
             value: _formatCompactCount(post.commentCount),
             metrics: metrics,
             onTap: onOpenComments,
-          ),
-          SizedBox(height: metrics.railItemGap),
-          _ActionButton(
-            icon: post.isSaved
-                ? Icons.bookmark_rounded
-                : Icons.bookmark_border_rounded,
-            value: _formatCompactCount(post.saveCount),
-            iconColor: post.isSaved ? const Color(0xFFFFC66D) : Colors.white,
-            metrics: metrics,
-            onTap: onToggleSave,
           ),
           SizedBox(height: metrics.railItemGap),
           _ActionButton(
