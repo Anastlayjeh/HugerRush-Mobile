@@ -152,33 +152,229 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
   int? _maximumPriceTierFilter;
 
   List<_DiscoverSpotData> get _filteredPopularSpots {
-    return _restaurantSpots
-        .where((spot) {
-          if (_activeCuisineFilters.isNotEmpty &&
-              !_activeCuisineFilters.contains(spot.categoryTitle)) {
-            return false;
-          }
-          if (spot.ratingValue < _minimumRatingFilter) {
-            return false;
-          }
-          if (_maximumDeliveryMinutesFilter != null &&
-              spot.deliveryMinutes > _maximumDeliveryMinutesFilter!) {
-            return false;
-          }
-          if (_maximumPriceTierFilter != null &&
-              spot.priceTier > _maximumPriceTierFilter!) {
-            return false;
-          }
-          return true;
-        })
+    final activeCuisineKeys = _activeCuisineFilters
+        .map(_cuisineFilterKey)
+        .where((key) => key.isNotEmpty)
+        .toSet();
+    final spots = _restaurantSpots.where((spot) {
+      if (activeCuisineKeys.isNotEmpty &&
+          !activeCuisineKeys.contains(_cuisineFilterKey(spot.categoryTitle))) {
+        return false;
+      }
+      if (spot.ratingValue < _minimumRatingFilter) {
+        return false;
+      }
+      if (_maximumDeliveryMinutesFilter != null &&
+          spot.deliveryMinutes > _maximumDeliveryMinutesFilter!) {
+        return false;
+      }
+      if (_maximumPriceTierFilter != null &&
+          spot.priceTier > _maximumPriceTierFilter!) {
+        return false;
+      }
+      return true;
+    }).toList();
+    spots.sort(_comparePopularSpots);
+    return spots;
+  }
+
+  int _comparePopularSpots(_DiscoverSpotData a, _DiscoverSpotData b) {
+    final followersCompare = b.followersCount.compareTo(a.followersCount);
+    if (followersCompare != 0) {
+      return followersCompare;
+    }
+
+    final ratingCompare = b.ratingValue.compareTo(a.ratingValue);
+    if (ratingCompare != 0) {
+      return ratingCompare;
+    }
+
+    final reviewsCompare = b.reviewsCount.compareTo(a.reviewsCount);
+    if (reviewsCompare != 0) {
+      return reviewsCompare;
+    }
+
+    final ordersCompare = b.ordersCount.compareTo(a.ordersCount);
+    if (ordersCompare != 0) {
+      return ordersCompare;
+    }
+
+    return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+  }
+
+  List<_DiscoverCategoryData> get _availableCuisineCategories {
+    final titlesByKey = <String, String>{};
+    final countsByKey = <String, int>{};
+
+    for (final spot in _restaurantSpots) {
+      final title = spot.categoryTitle.trim();
+      final key = _cuisineFilterKey(title);
+      if (key.isEmpty) {
+        continue;
+      }
+      titlesByKey.putIfAbsent(key, () => title);
+      countsByKey[key] = (countsByKey[key] ?? 0) + 1;
+    }
+
+    if (titlesByKey.isEmpty) {
+      return _DiscoverTabBody._categories;
+    }
+
+    final entries = titlesByKey.entries.toList()
+      ..sort((a, b) {
+        final countCompare = (countsByKey[b.key] ?? 0).compareTo(
+          countsByKey[a.key] ?? 0,
+        );
+        if (countCompare != 0) {
+          return countCompare;
+        }
+        return a.value.toLowerCase().compareTo(b.value.toLowerCase());
+      });
+
+    return entries
+        .map(
+          (entry) => _categoryDataForCuisine(
+            entry.value,
+            count: countsByKey[entry.key] ?? 0,
+          ),
+        )
         .toList(growable: false);
   }
 
-  List<_DiscoverSpotData> _spotsForCuisine(String cuisineTitle) {
-    final matches = _restaurantSpots
-        .where((spot) => spot.categoryTitle == cuisineTitle)
-        .toList(growable: false);
-    return matches.isEmpty ? _restaurantSpots : matches;
+  String get _restaurantSectionTitle {
+    if (_activeCuisineFilters.isEmpty) {
+      return 'Popular Restaurants';
+    }
+    if (_activeCuisineFilters.length == 1) {
+      return '${_activeCuisineFilters.first} Restaurants';
+    }
+    return 'Filtered Restaurants';
+  }
+
+  String get _restaurantEmptyMessage {
+    if (_activeCuisineFilters.isEmpty) {
+      return 'No restaurants available yet.';
+    }
+    if (_activeCuisineFilters.length == 1) {
+      return 'No ${_activeCuisineFilters.first} restaurants available yet.';
+    }
+    return 'No restaurants match these filters yet.';
+  }
+
+  void _applyCuisineFilter(_DiscoverCategoryData category) {
+    setState(() {
+      if (_activeCuisineFilters.length == 1 &&
+          _cuisineSetContains(_activeCuisineFilters, category.title)) {
+        _activeCuisineFilters = <String>{};
+      } else {
+        _activeCuisineFilters = <String>{category.title};
+      }
+    });
+  }
+
+  bool _isCuisineFilterSelected(String title) {
+    return _cuisineSetContains(_activeCuisineFilters, title);
+  }
+
+  bool _cuisineSetContains(Set<String> cuisines, String title) {
+    final key = _cuisineFilterKey(title);
+    if (key.isEmpty) {
+      return false;
+    }
+    return cuisines.map(_cuisineFilterKey).contains(key);
+  }
+
+  void _removeCuisineFromSet(Set<String> cuisines, String title) {
+    final key = _cuisineFilterKey(title);
+    cuisines.removeWhere((value) => _cuisineFilterKey(value) == key);
+  }
+
+  String _cuisineFilterKey(String value) {
+    return value.trim().toLowerCase();
+  }
+
+  _DiscoverCategoryData _categoryDataForCuisine(String title, {int count = 0}) {
+    return _DiscoverCategoryData(
+      title: title,
+      subtitle: count == 1 ? '1 restaurant' : '$count restaurants',
+      icon: _iconForCuisine(title),
+      backgroundColor: _backgroundColorForCuisine(title),
+      accentColor: _accentColorForCuisine(title),
+    );
+  }
+
+  IconData _iconForCuisine(String title) {
+    switch (_cuisineFilterKey(title)) {
+      case 'pizza':
+      case 'italian':
+        return Icons.local_pizza_rounded;
+      case 'burgers':
+      case 'burger':
+      case 'american':
+        return Icons.lunch_dining_rounded;
+      case 'sushi':
+      case 'japanese':
+      case 'seafood':
+        return Icons.set_meal_rounded;
+      case 'desserts':
+      case 'dessert':
+      case 'bakery':
+        return Icons.icecream_rounded;
+      case 'lebanese':
+      case 'middle eastern':
+      case 'mediterranean':
+        return Icons.kebab_dining_rounded;
+      case 'mexican':
+        return Icons.local_dining_rounded;
+      default:
+        return Icons.restaurant_menu_rounded;
+    }
+  }
+
+  Color _backgroundColorForCuisine(String title) {
+    switch (_cuisineFilterKey(title)) {
+      case 'sushi':
+      case 'japanese':
+      case 'seafood':
+        return const Color(0xFFF2F8F5);
+      case 'desserts':
+      case 'dessert':
+      case 'bakery':
+        return const Color(0xFFFFF1F5);
+      case 'lebanese':
+      case 'middle eastern':
+      case 'mediterranean':
+        return const Color(0xFFF6F2E8);
+      case 'burgers':
+      case 'burger':
+      case 'american':
+        return const Color(0xFFFFF4EC);
+      default:
+        return const Color(0xFFFFF1E7);
+    }
+  }
+
+  Color _accentColorForCuisine(String title) {
+    switch (_cuisineFilterKey(title)) {
+      case 'sushi':
+      case 'japanese':
+      case 'seafood':
+        return const Color(0xFF2F8A7E);
+      case 'desserts':
+      case 'dessert':
+      case 'bakery':
+        return const Color(0xFFE17B91);
+      case 'lebanese':
+      case 'middle eastern':
+      case 'mediterranean':
+        return const Color(0xFF8B6F3E);
+      case 'burgers':
+      case 'burger':
+      case 'american':
+        return const Color(0xFFB56A45);
+      default:
+        return const Color(0xFFFF8D5B);
+    }
   }
 
   @override
@@ -305,11 +501,25 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
       deliveryLabel: '30 min',
       ratingLabel: rating == null ? '0.0' : rating.toStringAsFixed(1),
       priceTier: 2,
-      badge: restaurant.menuItemsCount > 0
-          ? '${restaurant.menuItemsCount} items'
-          : 'Open',
+      badge: _popularBadgeForRestaurant(restaurant),
       imageUrl: restaurant.profilePhotoUrl,
+      followersCount: restaurant.followersCount,
+      reviewsCount: restaurant.reviewsCount,
+      ordersCount: restaurant.ordersCount,
     );
+  }
+
+  String _popularBadgeForRestaurant(CustomerRestaurantItem restaurant) {
+    if (restaurant.followersCount > 0) {
+      return '${_formatCompactCount(restaurant.followersCount)} followers';
+    }
+    if (restaurant.reviewsCount > 0) {
+      return '${restaurant.reviewsCount} reviews';
+    }
+    if (restaurant.menuItemsCount > 0) {
+      return '${restaurant.menuItemsCount} items';
+    }
+    return 'Open';
   }
 
   Future<void> _openDiscoverSearch(BuildContext context) async {
@@ -321,6 +531,7 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
   }
 
   Future<void> _openDiscoverFilters(BuildContext context) async {
+    final cuisineFilterCategories = _availableCuisineCategories;
     final result = await showModalBottomSheet<_DiscoverFiltersState>(
       context: context,
       isScrollControlled: true,
@@ -404,9 +615,10 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
-                      children: _DiscoverTabBody._categories
+                      children: cuisineFilterCategories
                           .map((category) {
-                            final isSelected = selectedCuisines.contains(
+                            final isSelected = _cuisineSetContains(
+                              selectedCuisines,
                               category.title,
                             );
                             return FilterChip(
@@ -417,7 +629,10 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                                   if (selected) {
                                     selectedCuisines.add(category.title);
                                   } else {
-                                    selectedCuisines.remove(category.title);
+                                    _removeCuisineFromSet(
+                                      selectedCuisines,
+                                      category.title,
+                                    );
                                   }
                                 });
                               },
@@ -627,20 +842,6 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
       _maximumDeliveryMinutesFilter = result.maximumDeliveryMinutes;
       _maximumPriceTierFilter = result.maximumPriceTier;
     });
-  }
-
-  Future<void> _openCuisineDetails(
-    BuildContext context,
-    _DiscoverCategoryData category,
-  ) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => _DiscoverCuisineDetailsScreen(
-          category: category,
-          spots: _spotsForCuisine(category.title),
-        ),
-      ),
-    );
   }
 
   Future<void> _openPopularSpot(
@@ -929,6 +1130,7 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
     final greetingName = trimmedName.isEmpty
         ? 'Explorer'
         : trimmedName.split(RegExp(r'\s+')).first;
+    final cuisineCategories = _availableCuisineCategories;
     final popularSpots = _filteredPopularSpots;
 
     return LayoutBuilder(
@@ -1049,8 +1251,7 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                                 child: ListView.separated(
                                   scrollDirection: Axis.horizontal,
                                   physics: const BouncingScrollPhysics(),
-                                  itemCount:
-                                      _DiscoverTabBody._categories.length,
+                                  itemCount: cuisineCategories.length,
                                   separatorBuilder: (context, index) =>
                                       SizedBox(
                                         width: _clampDouble(
@@ -1060,15 +1261,15 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                                         ),
                                       ),
                                   itemBuilder: (context, index) {
-                                    final category =
-                                        _DiscoverTabBody._categories[index];
+                                    final category = cuisineCategories[index];
                                     return _DiscoverCuisineChip(
                                       data: category,
                                       metrics: metrics,
-                                      onTap: () => _openCuisineDetails(
-                                        context,
-                                        category,
+                                      isSelected: _isCuisineFilterSelected(
+                                        category.title,
                                       ),
+                                      onTap: () =>
+                                          _applyCuisineFilter(category),
                                     );
                                   },
                                 ),
@@ -1081,10 +1282,16 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                                 ),
                               ),
                               _ProfileSectionHeader(
-                                title: 'Popular Restaurants',
-                                actionLabel: 'See All',
-                                onActionTap: () =>
-                                    _openPopularSpotList(context),
+                                title: _restaurantSectionTitle,
+                                actionLabel: _activeCuisineFilters.isEmpty
+                                    ? 'See All'
+                                    : 'Clear',
+                                onActionTap: _activeCuisineFilters.isEmpty
+                                    ? () => _openPopularSpotList(context)
+                                    : () => setState(
+                                        () =>
+                                            _activeCuisineFilters = <String>{},
+                                      ),
                               ),
                               SizedBox(
                                 height: _clampDouble(
@@ -1138,9 +1345,9 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                                     padding: EdgeInsets.all(
                                       _clampDouble(18 * metrics.scale, 14, 18),
                                     ),
-                                    child: const Text(
-                                      'No restaurants available yet.',
-                                      style: TextStyle(
+                                    child: Text(
+                                      _restaurantEmptyMessage,
+                                      style: const TextStyle(
                                         color: Color(0xFF7D6C60),
                                         fontWeight: FontWeight.w600,
                                       ),
@@ -1389,11 +1596,13 @@ class _DiscoverCuisineChip extends StatelessWidget {
   const _DiscoverCuisineChip({
     required this.data,
     required this.metrics,
+    required this.isSelected,
     required this.onTap,
   });
 
   final _DiscoverCategoryData data;
   final _ResponsiveMetrics metrics;
+  final bool isSelected;
   final VoidCallback onTap;
 
   @override
@@ -1416,7 +1625,19 @@ class _DiscoverCuisineChip extends StatelessWidget {
           decoration: BoxDecoration(
             color: data.backgroundColor,
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: const Color(0xFFF3DFCF)),
+            border: Border.all(
+              color: isSelected ? data.accentColor : const Color(0xFFF3DFCF),
+              width: isSelected ? 2 : 1,
+            ),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: data.accentColor.withValues(alpha: 0.18),
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
+                    ),
+                  ]
+                : null,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1449,7 +1670,7 @@ class _DiscoverCuisineChip extends StatelessWidget {
                 style: TextStyle(
                   color: const Color(0xFF231A16),
                   fontSize: _clampDouble(15 * metrics.scale, 12, 15),
-                  fontWeight: FontWeight.w800,
+                  fontWeight: isSelected ? FontWeight.w900 : FontWeight.w800,
                 ),
               ),
               SizedBox(height: _clampDouble(2 * metrics.scale, 1, 2)),
@@ -1924,25 +2145,6 @@ Future<void> _openDiscoverRestaurantProfile(
       );
     },
   );
-}
-
-class _DiscoverCuisineDetailsScreen extends StatelessWidget {
-  const _DiscoverCuisineDetailsScreen({
-    required this.category,
-    required this.spots,
-  });
-
-  final _DiscoverCategoryData category;
-  final List<_DiscoverSpotData> spots;
-
-  @override
-  Widget build(BuildContext context) {
-    return _DiscoverSpotsCatalogScreen(
-      title: category.title,
-      subtitle: category.subtitle,
-      spots: spots,
-    );
-  }
 }
 
 class _DiscoverPopularSpotsScreen extends StatelessWidget {
@@ -2810,6 +3012,9 @@ class _DiscoverSpotData {
     required this.priceTier,
     required this.badge,
     required this.imageUrl,
+    this.followersCount = 0,
+    this.reviewsCount = 0,
+    this.ordersCount = 0,
   });
 
   final String id;
@@ -2822,6 +3027,9 @@ class _DiscoverSpotData {
   final int priceTier;
   final String badge;
   final String imageUrl;
+  final int followersCount;
+  final int reviewsCount;
+  final int ordersCount;
 
   int get deliveryMinutes =>
       int.tryParse(deliveryLabel.split(' ').first.trim()) ?? 999;

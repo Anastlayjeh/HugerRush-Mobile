@@ -334,6 +334,7 @@ class CustomerRestaurantItem {
     required this.phone,
     required this.averageRating,
     required this.reviewsCount,
+    required this.followersCount,
     required this.menuItemsCount,
     required this.ordersCount,
     required this.isFollowing,
@@ -349,6 +350,7 @@ class CustomerRestaurantItem {
   final String phone;
   final double? averageRating;
   final int reviewsCount;
+  final int followersCount;
   final int menuItemsCount;
   final int ordersCount;
   final bool isFollowing;
@@ -382,6 +384,11 @@ class CustomerRestaurantItem {
       phone: _readString(json['phone']) ?? '',
       averageRating: _readDouble(json['average_rating']),
       reviewsCount: _readInt(json['reviews_count']) ?? 0,
+      followersCount:
+          _readInt(json['followers_count']) ??
+          _readInt(json['follows_count']) ??
+          _readInt(json['followers']) ??
+          0,
       menuItemsCount: _readInt(json['menu_items_count']) ?? 0,
       ordersCount: _readInt(json['orders_count']) ?? 0,
       isFollowing:
