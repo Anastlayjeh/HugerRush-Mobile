@@ -48,42 +48,23 @@ class AuthApiService {
 
     http.Response response;
     try {
-      response = await _client
-          .post(
-            AppConfig.apiUri('/api/forgot-password'),
-            headers: const {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode(<String, dynamic>{'email': cleanedEmail}),
-          )
-          .timeout(const Duration(seconds: 20));
-    } on TimeoutException {
-      throw const AuthApiException(
-        'Request timed out. Please check your connection and try again.',
+      response = await _apiClient.request(
+        method: 'POST',
+        endpoint: '/api/forgot-password',
+        body: <String, dynamic>{'email': cleanedEmail},
       );
-    } catch (error) {
-      throw AuthApiException(
-        'Unable to reach ${AppConfig.apiBaseUrl}. '
-        'Check your API URL and network access. '
-        'Details: $error',
-      );
+    } on ApiClientException catch (error) {
+      throw AuthApiException(error.message);
     }
 
-    Map<String, dynamic> data = <String, dynamic>{};
-    if (response.body.isNotEmpty) {
-      try {
-        final decoded = jsonDecode(response.body);
-        if (decoded is Map<String, dynamic>) {
-          data = decoded;
-        }
-      } on FormatException {
-        if (response.statusCode >= 200 && response.statusCode < 300) {
-          throw const AuthApiException(
-            'Server returned an unreadable response format.',
-          );
-        }
-      }
+    final data = ApiClient.decodeMap(response.body);
+    if (data.isEmpty &&
+        response.body.isNotEmpty &&
+        response.statusCode >= 200 &&
+        response.statusCode < 300) {
+      throw const AuthApiException(
+        'Server returned an unreadable response format.',
+      );
     }
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
@@ -91,7 +72,7 @@ class AuthApiService {
     }
 
     throw AuthApiException(
-      '${_extractError(data)} (HTTP ${response.statusCode})',
+      '${ApiClient.errorMessageForStatus(response.statusCode, data, fallback: 'Could not send reset password link. Please try again.')} (HTTP ${response.statusCode})',
     );
   }
 
