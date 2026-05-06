@@ -315,7 +315,9 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
   final Set<String> _pendingFollowRestaurantIds = <String>{};
   final Set<String> _viewedPostIdsThisSession = <String>{};
   late final CustomerVideoFeedApiService _videoFeedApiService;
+  late final CustomerRestaurantApiService _restaurantApiService;
   late final CustomerCartApiService _cartApiService;
+  late final LoyaltyApiService _loyaltyApiService;
   AuthSession? _session;
   Timer? _viewEngagementTimer;
   int _currentVideoIndex = 0;
@@ -345,6 +347,22 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
       ),
     );
     _cartApiService = CustomerCartApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+        onSessionUpdated: _handleApiSessionUpdated,
+        onSessionExpired: widget.onSessionExpired,
+      ),
+    );
+    _restaurantApiService = CustomerRestaurantApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+        onSessionUpdated: _handleApiSessionUpdated,
+        onSessionExpired: widget.onSessionExpired,
+      ),
+    );
+    _loyaltyApiService = LoyaltyApiService(
       apiClient: AuthenticatedApiClient(
         authApiService: AuthApiService(),
         authSessionService: _authSessionService,
@@ -654,6 +672,35 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
 
   Future<void> _openRestaurantDetails(DemoFeedPost post) async {
     final reviewPreviews = <RestaurantProfileReviewPreview>[];
+    var menuItems = _menuItemsForPost(post);
+    String? loyaltyPointsLabel;
+    final restaurantId = post.restaurantId?.trim();
+    if (restaurantId != null && restaurantId.isNotEmpty) {
+      final session = await _resolveSession();
+      if (session != null) {
+        try {
+          final liveMenuItems = await _restaurantApiService.fetchRestaurantMenu(
+            session: session,
+            restaurantId: restaurantId,
+          );
+          menuItems = liveMenuItems;
+        } catch (_) {
+          // Keep the feed-preview item fallback.
+        }
+        try {
+          final points = await _loyaltyApiService.fetchCustomerRestaurantPoints(
+            session: session,
+            restaurantId: restaurantId,
+          );
+          loyaltyPointsLabel = 'Your loyalty points: ${points.pointsBalance}';
+        } catch (_) {
+          loyaltyPointsLabel = null;
+        }
+      }
+    }
+    if (!mounted || !context.mounted) {
+      return;
+    }
     await showRestaurantProfilePopup(
       context,
       restaurantName: post.restaurantName,
@@ -662,8 +709,9 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
       caption: post.caption,
       followersCountLabel:
           '${_formatCompactCount(post.followersCount)} followers',
+      loyaltyPointsLabel: loyaltyPointsLabel,
       allowAddToCart: true,
-      menuItems: _menuItemsForPost(post),
+      menuItems: menuItems,
       showFollowButton: true,
       initiallyFollowing: post.isFollowing,
       onToggleFollow: () {

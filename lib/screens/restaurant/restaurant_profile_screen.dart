@@ -1064,6 +1064,7 @@ class _ProfileSection extends StatelessWidget {
     required this.selectedTabIndex,
     required this.onTabSelected,
     required this.uploadedVideos,
+    required this.menuItems,
     required this.onOpenUploadedVideo,
   });
 
@@ -1079,34 +1080,11 @@ class _ProfileSection extends StatelessWidget {
   final int selectedTabIndex;
   final ValueChanged<int> onTabSelected;
   final List<_UploadedRestaurantVideo> uploadedVideos;
+  final List<RestaurantMenuItem> menuItems;
   final ValueChanged<_UploadedRestaurantVideo> onOpenUploadedVideo;
 
   static const int _videosTabIndex = 0;
   static const int _reviewsTabIndex = 2;
-
-  static const List<_PopularMenuItemData> _popularItems = [
-    _PopularMenuItemData(
-      title: 'Pepperoni Feast',
-      subtitle: 'Extra cheese, smoky beef, chili flakes',
-      price: '\$14.99',
-      imageUrl:
-          'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=1000&q=80',
-    ),
-    _PopularMenuItemData(
-      title: 'Classic Burger',
-      subtitle: 'Beef patty, lettuce, cheddar, special sauce',
-      price: '\$12.40',
-      imageUrl:
-          'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=1000&q=80',
-    ),
-    _PopularMenuItemData(
-      title: 'Creamy Carbonara',
-      subtitle: 'Fresh pasta, parmesan, black pepper',
-      price: '\$13.25',
-      imageUrl:
-          'https://images.unsplash.com/photo-1612874742237-6526221588e3?auto=format&fit=crop&w=1000&q=80',
-    ),
-  ];
 
   static const List<_RestaurantReviewData> _sampleReviews = [
     _RestaurantReviewData(
@@ -1210,6 +1188,22 @@ class _ProfileSection extends StatelessWidget {
     required double popularCardHeight,
     required double itemGap,
   }) {
+    final menuPool = menuItems.where((item) => item.isAvailable).toList();
+    final popularItems = menuPool.where((item) => item.isPopular).toList();
+    final rankedMenuItems = (popularItems.isNotEmpty ? popularItems : menuPool)
+      ..sort((a, b) {
+        final byOrders = (b.ordersCount ?? 0).compareTo(a.ordersCount ?? 0);
+        if (byOrders != 0) {
+          return byOrders;
+        }
+        final byRating = (b.rating ?? 0).compareTo(a.rating ?? 0);
+        if (byRating != 0) {
+          return byRating;
+        }
+        return a.title.compareTo(b.title);
+      });
+    final topItems = rankedMenuItems.take(3).toList(growable: false);
+
     return [
       Text(
         'Popular Choices',
@@ -1221,7 +1215,7 @@ class _ProfileSection extends StatelessWidget {
       ),
       SizedBox(height: _clampDouble(10 * metrics.scale, 7, 10)),
       Text(
-        'Best performing dishes this week',
+        'Live menu highlights from your restaurant',
         style: TextStyle(
           color: const Color(0xFF8E7E72),
           fontSize: subtitleSize,
@@ -1229,25 +1223,31 @@ class _ProfileSection extends StatelessWidget {
         ),
       ),
       SizedBox(height: _clampDouble(12 * metrics.scale, 8, 12)),
-      SizedBox(
-        height: popularCardHeight,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          physics: const BouncingScrollPhysics(),
-          itemCount: _popularItems.length,
-          separatorBuilder: (_, index) => SizedBox(width: itemGap),
-          itemBuilder: (context, index) {
-            final popularItem = _popularItems[index];
-            return _PopularMenuCard(
-              metrics: metrics,
-              item: popularItem,
-              onTap: () => onOpenMenuItemDetails(
-                popularItem.toRestaurantMenuItem(index),
-              ),
-            );
-          },
+      if (topItems.isEmpty)
+        _ProfileTabEmptyState(
+          metrics: metrics,
+          icon: Icons.restaurant_menu_rounded,
+          title: 'No Menu Items Yet',
+          message: 'Add items from Menu to show live dishes on your profile.',
+        )
+      else
+        SizedBox(
+          height: popularCardHeight,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            itemCount: topItems.length,
+            separatorBuilder: (_, index) => SizedBox(width: itemGap),
+            itemBuilder: (context, index) {
+              final popularItem = topItems[index];
+              return _PopularMenuCard(
+                metrics: metrics,
+                item: popularItem,
+                onTap: () => onOpenMenuItemDetails(popularItem),
+              );
+            },
+          ),
         ),
-      ),
       SizedBox(height: sectionGap),
       SizedBox(
         width: double.infinity,
@@ -2149,6 +2149,7 @@ class _ProfileSettingsDrawer extends StatelessWidget {
     this.profileImagePath,
     required this.onEditProfile,
     required this.onManageMenu,
+    required this.onManageLoyaltyOffers,
     required this.onOpenFollowers,
     required this.onLogout,
   });
@@ -2158,6 +2159,7 @@ class _ProfileSettingsDrawer extends StatelessWidget {
   final String? profileImagePath;
   final VoidCallback onEditProfile;
   final VoidCallback onManageMenu;
+  final VoidCallback onManageLoyaltyOffers;
   final VoidCallback onOpenFollowers;
   final VoidCallback onLogout;
 
@@ -2191,6 +2193,14 @@ class _ProfileSettingsDrawer extends StatelessWidget {
         onTap: () {
           Navigator.of(context).pop();
           onManageMenu();
+        },
+      ),
+      _ProfileSettingsItemData(
+        title: 'Loyalty Offers',
+        icon: Icons.workspace_premium_rounded,
+        onTap: () {
+          Navigator.of(context).pop();
+          onManageLoyaltyOffers();
         },
       ),
       _ProfileSettingsItemData(
@@ -2498,6 +2508,355 @@ class _ProfileSettingsItemData {
   final VoidCallback? onTap;
 }
 
+class _RestaurantLoyaltyOffersScreen extends StatefulWidget {
+  const _RestaurantLoyaltyOffersScreen({
+    required this.authSession,
+    required this.loyaltyApiService,
+  });
+
+  final AuthSession authSession;
+  final LoyaltyApiService loyaltyApiService;
+
+  @override
+  State<_RestaurantLoyaltyOffersScreen> createState() =>
+      _RestaurantLoyaltyOffersScreenState();
+}
+
+class _RestaurantLoyaltyOffersScreenState
+    extends State<_RestaurantLoyaltyOffersScreen> {
+  List<LoyaltyOffer> _offers = const <LoyaltyOffer>[];
+  bool _isLoading = true;
+  bool _isUpdating = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadOffers());
+  }
+
+  Future<void> _loadOffers() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    try {
+      final offers = await widget.loyaltyApiService.fetchOwnerLoyaltyOffers(
+        session: widget.authSession,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _offers = offers;
+        _isLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _error = error.toString();
+      });
+    }
+  }
+
+  Future<void> _openCreateOfferSheet() async {
+    final titleController = TextEditingController();
+    final descriptionController = TextEditingController();
+    final pointsController = TextEditingController();
+    var isActive = true;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFFFFFBF7),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) {
+        final bottomInset = MediaQuery.viewInsetsOf(sheetContext).bottom;
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return SafeArea(
+              top: false,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(16, 14, 16, bottomInset + 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Create Loyalty Offer',
+                      style: TextStyle(
+                        color: Color(0xFF231A16),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: titleController,
+                      decoration: const InputDecoration(
+                        labelText: 'Title',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: descriptionController,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: 'Description',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: pointsController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Required points',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SwitchListTile(
+                      value: isActive,
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Active offer'),
+                      onChanged: (value) =>
+                          setSheetState(() => isActive = value),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: () async {
+                          final title = titleController.text.trim();
+                          final requiredPoints = int.tryParse(
+                            pointsController.text.trim(),
+                          );
+                          if (title.isEmpty || requiredPoints == null) {
+                            final messenger = ScaffoldMessenger.maybeOf(
+                              context,
+                            );
+                            messenger
+                              ?..hideCurrentSnackBar()
+                              ..showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Please add title and required points.',
+                                  ),
+                                ),
+                              );
+                            return;
+                          }
+
+                          try {
+                            await widget.loyaltyApiService
+                                .createOwnerLoyaltyOffer(
+                                  session: widget.authSession,
+                                  title: title,
+                                  description: descriptionController.text
+                                      .trim(),
+                                  requiredPoints: requiredPoints,
+                                  isActive: isActive,
+                                );
+                            if (!mounted || !sheetContext.mounted) {
+                              return;
+                            }
+                            Navigator.of(sheetContext).pop();
+                            await _loadOffers();
+                          } catch (error) {
+                            if (!mounted || !sheetContext.mounted) {
+                              return;
+                            }
+                            final messenger = ScaffoldMessenger.maybeOf(
+                              sheetContext,
+                            );
+                            messenger
+                              ?..hideCurrentSnackBar()
+                              ..showSnackBar(
+                                SnackBar(content: Text(error.toString())),
+                              );
+                          }
+                        },
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFFFF7E4D),
+                          minimumSize: const Size.fromHeight(46),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: const Text(
+                          'Create Offer',
+                          style: TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _toggleOfferStatus(LoyaltyOffer offer, bool nextValue) async {
+    if (_isUpdating) {
+      return;
+    }
+    setState(() => _isUpdating = true);
+    try {
+      await widget.loyaltyApiService.updateOwnerLoyaltyOffer(
+        session: widget.authSession,
+        offerId: offer.id,
+        body: <String, dynamic>{'is_active': nextValue},
+      );
+      await _loadOffers();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    } finally {
+      if (mounted) {
+        setState(() => _isUpdating = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFFFFBF7),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFFFFBF7),
+        surfaceTintColor: Colors.transparent,
+        title: const Text(
+          'Loyalty Offers',
+          style: TextStyle(
+            color: Color(0xFF231A16),
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _openCreateOfferSheet,
+        backgroundColor: const Color(0xFFFF7E4D),
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('New Offer'),
+      ),
+      body: SafeArea(
+        top: false,
+        child: RefreshIndicator(
+          onRefresh: _loadOffers,
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : _error != null
+              ? ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(16, 22, 16, 20),
+                  children: [
+                    Text(
+                      _error!,
+                      style: const TextStyle(
+                        color: Color(0xFF7D3D34),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                )
+              : _offers.isEmpty
+              ? ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(16, 22, 16, 20),
+                  children: const [
+                    Text(
+                      'No loyalty offers yet. Create your first offer.',
+                      style: TextStyle(
+                        color: Color(0xFF7D6C60),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                )
+              : ListView.separated(
+                  physics: const BouncingScrollPhysics(
+                    parent: AlwaysScrollableScrollPhysics(),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 88),
+                  itemCount: _offers.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    final offer = _offers[index];
+                    return Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEFCFA),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFE6DBD0)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  offer.title,
+                                  style: const TextStyle(
+                                    color: Color(0xFF231A16),
+                                    fontSize: 15.5,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                              Switch(
+                                value: offer.isActive,
+                                onChanged: _isUpdating
+                                    ? null
+                                    : (value) =>
+                                          _toggleOfferStatus(offer, value),
+                              ),
+                            ],
+                          ),
+                          if (offer.description.trim().isNotEmpty) ...[
+                            const SizedBox(height: 5),
+                            Text(
+                              offer.description,
+                              style: const TextStyle(
+                                color: Color(0xFF7C6A5F),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 8),
+                          Text(
+                            'Required points: ${offer.requiredPoints}',
+                            style: const TextStyle(
+                              color: Color(0xFF2F8A4E),
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ),
+    );
+  }
+}
+
 class _RestaurantHelpSupportScreen extends StatefulWidget {
   const _RestaurantHelpSupportScreen();
 
@@ -2517,7 +2876,7 @@ class _RestaurantHelpSupportScreenState
     _SupportFaqItemData(
       question: 'How do loyalty points work?',
       answer:
-          'Points are added after successful orders. You can apply available points during checkout for a discount.',
+          'Customers earn points for your restaurant after successful completed orders and can redeem active loyalty offers when they meet the required points.',
     ),
     _SupportFaqItemData(
       question: 'Can I change delivery time after placing an order?',
@@ -3694,8 +4053,15 @@ class _PopularMenuCard extends StatelessWidget {
   });
 
   final _ResponsiveMetrics metrics;
-  final _PopularMenuItemData item;
+  final RestaurantMenuItem item;
   final VoidCallback onTap;
+
+  String _priceLabel(double? value) {
+    if (value == null) {
+      return '--';
+    }
+    return '\$${value.toStringAsFixed(2)}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -3763,7 +4129,7 @@ class _PopularMenuCard extends StatelessWidget {
                             border: Border.all(color: const Color(0xD8E8DED5)),
                           ),
                           child: Text(
-                            item.price,
+                            _priceLabel(item.price),
                             style: TextStyle(
                               color: const Color(0xFF2D251F),
                               fontSize: _clampDouble(12 * metrics.scale, 9, 12),
@@ -3788,7 +4154,7 @@ class _PopularMenuCard extends StatelessWidget {
                 ),
                 SizedBox(height: _clampDouble(5 * metrics.scale, 3, 5)),
                 Text(
-                  item.subtitle,
+                  item.description,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -3803,41 +4169,6 @@ class _PopularMenuCard extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _PopularMenuItemData {
-  const _PopularMenuItemData({
-    required this.title,
-    required this.subtitle,
-    required this.price,
-    required this.imageUrl,
-  });
-
-  final String title;
-  final String subtitle;
-  final String price;
-  final String imageUrl;
-
-  RestaurantMenuItem toRestaurantMenuItem(int index) {
-    final parsedPrice = double.tryParse(
-      price.replaceAll(RegExp(r'[^0-9.]'), ''),
-    );
-    final normalizedId = title
-        .trim()
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
-        .replaceAll(RegExp(r'^-+|-+$'), '');
-    return RestaurantMenuItem(
-      id: 'popular-$index-$normalizedId',
-      title: title,
-      description: subtitle,
-      price: parsedPrice,
-      imageUrl: imageUrl,
-      category: 'Popular',
-      isAvailable: true,
-      isPopular: true,
     );
   }
 }

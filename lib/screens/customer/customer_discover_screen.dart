@@ -139,6 +139,7 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
   final _authSessionService = AuthSessionService();
   late final CustomerRestaurantApiService _restaurantApiService;
   late final CustomerCartApiService _cartApiService;
+  late final LoyaltyApiService _loyaltyApiService;
   AuthSession? _session;
   List<_DiscoverSpotData> _restaurantSpots = const <_DiscoverSpotData>[];
   final Map<String, List<RestaurantMenuItem>> _menuItemsByRestaurantId =
@@ -194,6 +195,14 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
       ),
     );
     _cartApiService = CustomerCartApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+        onSessionUpdated: widget.onSessionUpdated,
+        onSessionExpired: widget.onSessionExpired,
+      ),
+    );
+    _loyaltyApiService = LoyaltyApiService(
       apiClient: AuthenticatedApiClient(
         authApiService: AuthApiService(),
         authSessionService: _authSessionService,
@@ -647,10 +656,32 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
     BuildContext context,
     _DiscoverSpotData spot,
   ) async {
-    await _openDiscoverRestaurantProfile(context, spot);
-    if (!mounted) {
+    final menuItems = await _discoverMenuItemsForSpot(spot);
+    String? loyaltyPointsLabel;
+    final restaurantId = spot.id.trim();
+    if (restaurantId.isNotEmpty) {
+      final session = await _resolveSession();
+      if (session != null) {
+        try {
+          final points = await _loyaltyApiService.fetchCustomerRestaurantPoints(
+            session: session,
+            restaurantId: restaurantId,
+          );
+          loyaltyPointsLabel = 'Your loyalty points: ${points.pointsBalance}';
+        } catch (_) {
+          loyaltyPointsLabel = null;
+        }
+      }
+    }
+    if (!mounted || !context.mounted) {
       return;
     }
+    await _openDiscoverRestaurantProfile(
+      context,
+      spot,
+      menuItems: menuItems,
+      loyaltyPointsLabel: loyaltyPointsLabel,
+    );
     setState(() {});
   }
 
@@ -1887,6 +1918,8 @@ Future<void> _openDiscoverRestaurantProfile(
   BuildContext context,
   _DiscoverSpotData spot, {
   int initialTabIndex = 0,
+  List<RestaurantMenuItem>? menuItems,
+  String? loyaltyPointsLabel,
 }) {
   final reviewPreviews = _buildDemoRestaurantReviews(
     restaurantName: spot.title,
@@ -1901,7 +1934,11 @@ Future<void> _openDiscoverRestaurantProfile(
     initialTabIndex: initialTabIndex,
     followersCountLabel:
         '${_formatCompactCount(8400 + (spot.deliveryMinutes * 28))} followers',
+    loyaltyPointsLabel: loyaltyPointsLabel,
     allowAddToCart: true,
+    menuItems:
+        menuItems ??
+        (spot.id.trim().isNotEmpty ? const <RestaurantMenuItem>[] : null),
     showFollowButton: true,
     showSaveButton: true,
     reviews: reviewPreviews,

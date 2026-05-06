@@ -51,6 +51,7 @@ class _ProfileTabBody extends StatelessWidget {
     final notificationService = NotificationApiService(
       apiClient: authenticatedClient,
     );
+    final loyaltyApiService = LoyaltyApiService(apiClient: authenticatedClient);
 
     final results = await Future.wait<Object>([
       profileService.fetchProfile(session: session),
@@ -58,6 +59,20 @@ class _ProfileTabBody extends StatelessWidget {
       restaurantService.fetchFollowing(session: session),
       notificationService.fetchNotifications(session: session),
     ]);
+    CustomerLoyaltyOverview loyalty;
+    try {
+      loyalty = await loyaltyApiService.fetchCustomerLoyaltyPoints(
+        session: session,
+      );
+    } catch (error) {
+      debugPrint('Customer loyalty summary load failed: $error');
+      loyalty = const CustomerLoyaltyOverview(
+        restaurants: <CustomerRestaurantLoyaltyPoints>[],
+        totalPointsBalance: 0,
+        totalPointsEarned: 0,
+        totalPointsRedeemed: 0,
+      );
+    }
     final profile = results[0] as CustomerProfile;
     final orders = results[1] as List<AppOrder>;
     final following = results[2] as List<CustomerRestaurantItem>;
@@ -69,8 +84,9 @@ class _ProfileTabBody extends StatelessWidget {
       notificationsCount:
           profile.notificationsCount ??
           notifications.where((item) => !item.isRead).length,
-      points: profile.points ?? 0,
-      rewardsCount: profile.rewardsCount ?? 0,
+      totalLoyaltyPoints: profile.points ?? loyalty.totalPointsBalance,
+      loyaltyRestaurantsCount: loyalty.restaurants.length,
+      loyaltyByRestaurant: loyalty.restaurants,
       recentOrders: orders
           .take(2)
           .map(_pastOrderEntryFromAppOrder)
@@ -98,8 +114,11 @@ class _ProfileTabBody extends StatelessWidget {
       future: _loadLiveSummary(),
       builder: (context, snapshot) {
         final summary = snapshot.data;
-        final points = summary?.points ?? 0;
-        final rewards = summary?.rewardsCount ?? 0;
+        final points = summary?.totalLoyaltyPoints ?? 0;
+        final loyaltyRestaurants = summary?.loyaltyRestaurantsCount ?? 0;
+        final loyaltyByRestaurant =
+            summary?.loyaltyByRestaurant ??
+            const <CustomerRestaurantLoyaltyPoints>[];
         final recentOrders =
             summary?.recentOrders ?? const <_PastOrderEntryData>[];
         return Column(
@@ -128,30 +147,58 @@ class _ProfileTabBody extends StatelessWidget {
               children: [
                 Expanded(
                   child: _ProfileStatCard(
-                    title: 'Points Balance',
+                    title: 'Loyalty Points',
                     value: _formatCompactCount(points),
                     subtitle: points == 0
-                        ? 'No live points yet'
-                        : 'Live points balance',
+                        ? 'No points earned yet'
+                        : 'Across your restaurant history',
                     accentColor: const Color(0xFFFF7E4D),
-                    icon: Icons.stars_rounded,
+                    icon: Icons.workspace_premium_rounded,
                     metrics: metrics,
                   ),
                 ),
                 SizedBox(width: _clampDouble(14 * metrics.scale, 10, 14)),
                 Expanded(
                   child: _ProfileStatCard(
-                    title: 'Rewards',
-                    value: _formatCompactCount(rewards),
-                    subtitle: rewards == 0
-                        ? 'No active rewards yet'
-                        : 'Active perks to use',
+                    title: 'Restaurants',
+                    value: _formatCompactCount(loyaltyRestaurants),
+                    subtitle: loyaltyRestaurants == 0
+                        ? 'No tracked loyalty yet'
+                        : 'With loyalty history',
                     accentColor: const Color(0xFF2F8A7E),
-                    icon: Icons.local_offer_rounded,
+                    icon: Icons.storefront_rounded,
                     metrics: metrics,
                   ),
                 ),
               ],
+            ),
+            SizedBox(height: _clampDouble(14 * metrics.scale, 10, 14)),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => _CustomerLoyaltyPointsScreen(
+                        initialEntries: loyaltyByRestaurant,
+                      ),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.loyalty_rounded),
+                label: const Text('Loyalty Points'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF2F8A7E),
+                  foregroundColor: Colors.white,
+                  minimumSize: Size(
+                    double.infinity,
+                    _clampDouble(48 * metrics.scale, 42, 48),
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
             ),
             SizedBox(height: _clampDouble(28 * metrics.scale, 20, 28)),
             const _ProfileSectionHeader(
@@ -461,6 +508,7 @@ class _FollowingRestaurantsScreenState
     extends State<_FollowingRestaurantsScreen> {
   final _authSessionService = AuthSessionService();
   late final CustomerRestaurantApiService _restaurantApiService;
+  late final LoyaltyApiService _loyaltyApiService;
   late List<DemoFeedPost> _followedRestaurants;
 
   @override
@@ -468,6 +516,12 @@ class _FollowingRestaurantsScreenState
     super.initState();
     _followedRestaurants = _followingRestaurantsFromPosts(widget.initialPosts);
     _restaurantApiService = CustomerRestaurantApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+      ),
+    );
+    _loyaltyApiService = LoyaltyApiService(
       apiClient: AuthenticatedApiClient(
         authApiService: AuthApiService(),
         authSessionService: _authSessionService,
@@ -621,6 +675,28 @@ class _FollowingRestaurantsScreenState
       restaurantName: post.restaurantName,
       rating: post.rating,
     );
+    final session = await _resolveSession();
+    List<RestaurantMenuItem> menuItems = const <RestaurantMenuItem>[];
+    String? loyaltyPointsLabel;
+    final restaurantId = post.restaurantId?.trim();
+    if (session != null && restaurantId != null && restaurantId.isNotEmpty) {
+      try {
+        menuItems = await _restaurantApiService.fetchRestaurantMenu(
+          session: session,
+          restaurantId: restaurantId,
+        );
+      } catch (_) {}
+      try {
+        final points = await _loyaltyApiService.fetchCustomerRestaurantPoints(
+          session: session,
+          restaurantId: restaurantId,
+        );
+        loyaltyPointsLabel = 'Your loyalty points: ${points.pointsBalance}';
+      } catch (_) {}
+    }
+    if (!mounted || !context.mounted) {
+      return;
+    }
     await showRestaurantProfilePopup(
       context,
       restaurantName: post.restaurantName,
@@ -629,7 +705,9 @@ class _FollowingRestaurantsScreenState
       caption: post.caption,
       followersCountLabel:
           '${_formatCompactCount(post.followersCount)} followers',
+      loyaltyPointsLabel: loyaltyPointsLabel,
       allowAddToCart: true,
+      menuItems: menuItems,
       showFollowButton: true,
       showSaveButton: true,
       initiallyFollowing: post.isFollowing,
@@ -1877,7 +1955,7 @@ class _CustomerHelpSupportScreenState
     _SupportFaqItemData(
       question: 'How do loyalty points work?',
       answer:
-          'Points are added after successful orders. You can apply available points during checkout for a discount.',
+          'Points are tracked separately for each restaurant and are added after successful completed orders. Redeem active offers from that same restaurant when you have enough points.',
     ),
     _SupportFaqItemData(
       question: 'Can I change delivery time after placing an order?',
@@ -3651,8 +3729,9 @@ class _CustomerProfileLiveSummary {
     required this.ordersCount,
     required this.followingCount,
     required this.notificationsCount,
-    required this.points,
-    required this.rewardsCount,
+    required this.totalLoyaltyPoints,
+    required this.loyaltyRestaurantsCount,
+    required this.loyaltyByRestaurant,
     required this.recentOrders,
   });
 
@@ -3660,9 +3739,524 @@ class _CustomerProfileLiveSummary {
   final int ordersCount;
   final int followingCount;
   final int notificationsCount;
-  final int points;
-  final int rewardsCount;
+  final int totalLoyaltyPoints;
+  final int loyaltyRestaurantsCount;
+  final List<CustomerRestaurantLoyaltyPoints> loyaltyByRestaurant;
   final List<_PastOrderEntryData> recentOrders;
+}
+
+class _CustomerLoyaltyPointsScreen extends StatefulWidget {
+  const _CustomerLoyaltyPointsScreen({required this.initialEntries});
+
+  final List<CustomerRestaurantLoyaltyPoints> initialEntries;
+
+  @override
+  State<_CustomerLoyaltyPointsScreen> createState() =>
+      _CustomerLoyaltyPointsScreenState();
+}
+
+class _CustomerLoyaltyPointsScreenState
+    extends State<_CustomerLoyaltyPointsScreen> {
+  final _authSessionService = AuthSessionService();
+  late final LoyaltyApiService _loyaltyApiService;
+
+  List<CustomerRestaurantLoyaltyPoints> _entries =
+      const <CustomerRestaurantLoyaltyPoints>[];
+  bool _isLoading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _entries = widget.initialEntries;
+    _loyaltyApiService = LoyaltyApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+      ),
+    );
+    unawaited(_refreshLoyalty());
+  }
+
+  Future<AuthSession?> _resolveSession() async {
+    final session = await _authSessionService.readSession();
+    if (session != null && session.token.trim().isNotEmpty) {
+      return session;
+    }
+    return null;
+  }
+
+  Future<void> _refreshLoyalty() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    final session = await _resolveSession();
+    if (session == null) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _error = 'Please log in again to load loyalty points.';
+      });
+      return;
+    }
+    try {
+      final overview = await _loyaltyApiService.fetchCustomerLoyaltyPoints(
+        session: session,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _entries = overview.restaurants;
+        _isLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _error = error.toString();
+      });
+    }
+  }
+
+  Future<void> _openOffers(CustomerRestaurantLoyaltyPoints entry) async {
+    final session = await _resolveSession();
+    if (session == null) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please log in again to view offers.')),
+      );
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFFFFFBF7),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) {
+        return _RestaurantLoyaltyOffersSheet(
+          restaurantName: entry.restaurantName,
+          currentPoints: entry.pointsBalance,
+          loadOffers: () => _loyaltyApiService.fetchActiveOffersForRestaurant(
+            session: session,
+            restaurantId: entry.restaurantId,
+          ),
+          onRedeem: (offer) async {
+            await _loyaltyApiService.redeemOffer(
+              session: session,
+              offerId: offer.id,
+            );
+            await _refreshLoyalty();
+          },
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFFFF8F1),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFFFF8F1),
+        surfaceTintColor: Colors.transparent,
+        title: const Text(
+          'Loyalty Points',
+          style: TextStyle(
+            color: Color(0xFF231A16),
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      ),
+      body: SafeArea(
+        top: false,
+        child: RefreshIndicator(
+          onRefresh: _refreshLoyalty,
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : _error != null
+              ? ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(18, 24, 18, 24),
+                  children: [
+                    Text(
+                      _error!,
+                      style: const TextStyle(
+                        color: Color(0xFF7D3D34),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                )
+              : _entries.isEmpty
+              ? ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(18, 24, 18, 24),
+                  children: const [
+                    Text(
+                      'No loyalty points yet. Place completed orders to start earning.',
+                      style: TextStyle(
+                        color: Color(0xFF7D6C60),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                )
+              : ListView.separated(
+                  physics: const BouncingScrollPhysics(
+                    parent: AlwaysScrollableScrollPhysics(),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
+                  itemCount: _entries.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 12),
+                  itemBuilder: (context, index) {
+                    final entry = _entries[index];
+                    return Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEFCFA),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE6DBD0)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            entry.restaurantName,
+                            style: const TextStyle(
+                              color: Color(0xFF231A16),
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          if (entry.restaurantAddress.trim().isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              entry.restaurantAddress,
+                              style: const TextStyle(
+                                color: Color(0xFF7C6A5F),
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _LoyaltyMetricChip(
+                                  label: 'Balance',
+                                  value: '${entry.pointsBalance} pts',
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: _LoyaltyMetricChip(
+                                  label: 'Earned',
+                                  value: '${entry.totalEarned} pts',
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: _LoyaltyMetricChip(
+                                  label: 'Redeemed',
+                                  value: '${entry.totalRedeemed} pts',
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: () => _openOffers(entry),
+                              icon: const Icon(Icons.local_offer_rounded),
+                              label: const Text('View Offers'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFF2F8A7E),
+                                side: const BorderSide(
+                                  color: Color(0xFF2F8A7E),
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RestaurantLoyaltyOffersSheet extends StatefulWidget {
+  const _RestaurantLoyaltyOffersSheet({
+    required this.restaurantName,
+    required this.currentPoints,
+    required this.loadOffers,
+    required this.onRedeem,
+  });
+
+  final String restaurantName;
+  final int currentPoints;
+  final Future<List<LoyaltyOffer>> Function() loadOffers;
+  final Future<void> Function(LoyaltyOffer offer) onRedeem;
+
+  @override
+  State<_RestaurantLoyaltyOffersSheet> createState() =>
+      _RestaurantLoyaltyOffersSheetState();
+}
+
+class _RestaurantLoyaltyOffersSheetState
+    extends State<_RestaurantLoyaltyOffersSheet> {
+  List<LoyaltyOffer> _offers = const <LoyaltyOffer>[];
+  bool _isLoading = true;
+  bool _isRedeeming = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadOffers());
+  }
+
+  Future<void> _loadOffers() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    try {
+      final offers = await widget.loadOffers();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _offers = offers.where((item) => item.isActive).toList(growable: false);
+        _isLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _error = error.toString();
+      });
+    }
+  }
+
+  Future<void> _redeemOffer(LoyaltyOffer offer) async {
+    if (_isRedeeming) {
+      return;
+    }
+    setState(() => _isRedeeming = true);
+    try {
+      await widget.onRedeem(offer);
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Redeemed "${offer.title}".')));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    } finally {
+      if (mounted) {
+        setState(() => _isRedeeming = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(16, 14, 16, bottomInset + 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.restaurantName,
+              style: const TextStyle(
+                color: Color(0xFF231A16),
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Your balance: ${widget.currentPoints} pts',
+              style: const TextStyle(
+                color: Color(0xFF2F8A4E),
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (_isLoading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_error != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Text(
+                  _error!,
+                  style: const TextStyle(
+                    color: Color(0xFF7D3D34),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              )
+            else if (_offers.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 10),
+                child: Text(
+                  'No active offers for this restaurant right now.',
+                  style: TextStyle(
+                    color: Color(0xFF7D6C60),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              )
+            else
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 360),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: _offers.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    final offer = _offers[index];
+                    final canRedeem =
+                        widget.currentPoints >= offer.requiredPoints;
+                    return Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEFCFA),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFE6DBD0)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            offer.title,
+                            style: const TextStyle(
+                              color: Color(0xFF231A16),
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          if (offer.description.trim().isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              offer.description,
+                              style: const TextStyle(
+                                color: Color(0xFF7C6A5F),
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Text(
+                                '${offer.requiredPoints} pts',
+                                style: const TextStyle(
+                                  color: Color(0xFF2F8A4E),
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const Spacer(),
+                              TextButton(
+                                onPressed: !canRedeem || _isRedeeming
+                                    ? null
+                                    : () => _redeemOffer(offer),
+                                child: Text(
+                                  canRedeem ? 'Redeem' : 'Not enough',
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LoyaltyMetricChip extends StatelessWidget {
+  const _LoyaltyMetricChip({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F0EB),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: const TextStyle(
+              color: Color(0xFF231A16),
+              fontSize: 12.5,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xFF8A7A6E),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ProfileSettingsItemData {

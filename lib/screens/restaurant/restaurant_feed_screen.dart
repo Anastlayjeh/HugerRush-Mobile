@@ -41,6 +41,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   int _selectedTopTab = 1;
   int _selectedProfileTabIndex = _profileMenuTabIndex;
   late final RestaurantOwnerApiService _ownerApiService;
+  late final LoyaltyApiService _loyaltyApiService;
   late final CustomerVideoFeedApiService _videoFeedApiService;
   late final RestaurantOrderApiService _restaurantOrderApiService;
   PlatformFile? _selectedPostVideo;
@@ -76,6 +77,13 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   void initState() {
     super.initState();
     _ownerApiService = RestaurantOwnerApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+        onSessionExpired: widget.onLogout,
+      ),
+    );
+    _loyaltyApiService = LoyaltyApiService(
       apiClient: AuthenticatedApiClient(
         authApiService: AuthApiService(),
         authSessionService: _authSessionService,
@@ -1034,6 +1042,34 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     _refreshRestaurantMenu(force: true);
   }
 
+  Future<void> _openLoyaltyOffersScreen() async {
+    final session = await _resolveSession();
+    if (session == null) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please log in again to manage loyalty offers.'),
+        ),
+      );
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _RestaurantLoyaltyOffersScreen(
+          authSession: session,
+          loyaltyApiService: _loyaltyApiService,
+        ),
+      ),
+    );
+  }
+
   void _onProfileTabSelected(int index) {
     setState(() => _selectedProfileTabIndex = index);
   }
@@ -1629,6 +1665,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         profileImagePath: _profileInfo.localProfileImagePath,
         onEditProfile: _openEditProfile,
         onManageMenu: _openMenuSection,
+        onManageLoyaltyOffers: _openLoyaltyOffersScreen,
         onOpenFollowers: () =>
             _openFollowersList(restaurantName: _profileInfo.name),
         onLogout: _logoutToLogin,
@@ -1675,6 +1712,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                       selectedTabIndex: _selectedProfileTabIndex,
                       onTabSelected: _onProfileTabSelected,
                       uploadedVideos: _uploadedVideos,
+                      menuItems: _menuItemsForDisplay,
                       onOpenUploadedVideo: _openUploadedVideo,
                     ),
                   ),

@@ -15,6 +15,7 @@ import '../services/authenticated_api_client.dart';
 import '../services/conversation_api_service.dart';
 import '../services/customer_video_feed_api_service.dart';
 import '../services/demo_app_repository.dart';
+import '../services/loyalty_api_service.dart';
 import '../services/moderation_support_models.dart';
 import '../services/order_api_service.dart';
 import '../services/post_share_service.dart';

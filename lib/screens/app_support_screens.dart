@@ -12,6 +12,7 @@ import '../services/authenticated_api_client.dart';
 import '../services/conversation_api_service.dart';
 import '../services/customer_restaurant_api_service.dart';
 import '../services/demo_app_repository.dart';
+import '../services/loyalty_api_service.dart';
 import '../services/moderation_support_models.dart';
 import '../services/notification_api_service.dart';
 import '../services/order_api_service.dart';
@@ -591,6 +592,7 @@ Future<void> showRestaurantProfilePopup(
   String? phoneLabel,
   String? locationLabel,
   String? followersCountLabel,
+  String? loyaltyPointsLabel,
   VoidCallback? onOpenFollowers,
   String? profileImageUrl,
   List<RestaurantMenuItem>? menuItems,
@@ -642,6 +644,7 @@ Future<void> showRestaurantProfilePopup(
         phoneLabel: phoneLabel,
         locationLabel: locationLabel,
         followersCountLabel: followersCountLabel,
+        loyaltyPointsLabel: loyaltyPointsLabel,
         onOpenFollowers: onOpenFollowers,
         profileImageUrl: profileImageUrl,
         menuItems: menuItems,
@@ -1078,6 +1081,7 @@ class _RestaurantProfilePopup extends StatelessWidget {
     this.phoneLabel,
     this.locationLabel,
     this.followersCountLabel,
+    this.loyaltyPointsLabel,
     this.onOpenFollowers,
     this.profileImageUrl,
     this.menuItems,
@@ -1106,6 +1110,7 @@ class _RestaurantProfilePopup extends StatelessWidget {
   final String? phoneLabel;
   final String? locationLabel;
   final String? followersCountLabel;
+  final String? loyaltyPointsLabel;
   final VoidCallback? onOpenFollowers;
   final String? profileImageUrl;
   final List<RestaurantMenuItem>? menuItems;
@@ -1277,7 +1282,7 @@ class _RestaurantProfilePopup extends StatelessWidget {
   }
 
   List<RestaurantMenuItem> get _resolvedMenuItems {
-    if (menuItems == null || menuItems!.isEmpty) {
+    if (menuItems == null) {
       return _fallbackMenuItems;
     }
     return menuItems!;
@@ -1353,6 +1358,7 @@ class _RestaurantProfilePopup extends StatelessWidget {
                   phoneLabel: phoneLabel ?? 'Phone unavailable',
                   locationLabel: locationLabel ?? 'Location unavailable',
                   followersCountLabel: followersCountLabel ?? '0',
+                  loyaltyPointsLabel: loyaltyPointsLabel,
                   onOpenFollowers: onOpenFollowers,
                   coverImageUrl: profileImageUrl ?? _defaultProfileImage,
                   initials: _initials,
@@ -1452,6 +1458,7 @@ class _PopupRestaurantHero extends StatefulWidget {
     required this.phoneLabel,
     required this.locationLabel,
     required this.followersCountLabel,
+    this.loyaltyPointsLabel,
     this.onOpenFollowers,
     required this.coverImageUrl,
     required this.initials,
@@ -1473,6 +1480,7 @@ class _PopupRestaurantHero extends StatefulWidget {
   final String phoneLabel;
   final String locationLabel;
   final String followersCountLabel;
+  final String? loyaltyPointsLabel;
   final VoidCallback? onOpenFollowers;
   final String coverImageUrl;
   final String initials;
@@ -1539,7 +1547,9 @@ class _PopupRestaurantHeroState extends State<_PopupRestaurantHero> {
   @override
   Widget build(BuildContext context) {
     const coverHeight = 220.0;
-    final cardHeight = widget.showFollowButton ? 336.0 : 286.0;
+    final hasLoyalty = (widget.loyaltyPointsLabel ?? '').trim().isNotEmpty;
+    final cardHeight =
+        (widget.showFollowButton ? 336.0 : 286.0) + (hasLoyalty ? 54.0 : 0.0);
     const cardTop = coverHeight - 40;
     const avatarSize = 92.0;
     final totalHeight = cardTop + cardHeight;
@@ -1735,6 +1745,41 @@ class _PopupRestaurantHeroState extends State<_PopupRestaurantHero> {
                       ),
                     ),
                   ),
+                  if ((widget.loyaltyPointsLabel ?? '').trim().isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 9,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEAF7EF),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFCBE5D2)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.workspace_premium_rounded,
+                            color: Color(0xFF2F8A4E),
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              widget.loyaltyPointsLabel!.trim(),
+                              style: const TextStyle(
+                                color: Color(0xFF2A6F3E),
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   if (widget.showFollowButton) ...[
                     const SizedBox(height: 10),
                     _PopupFollowButton(
@@ -4773,6 +4818,7 @@ class _SearchScreenState extends State<SearchScreen> {
   final _authSessionService = AuthSessionService();
   late final TextEditingController _controller;
   late final CustomerRestaurantApiService _restaurantApiService;
+  late final LoyaltyApiService _loyaltyApiService;
   int _activeSearchRequestId = 0;
 
   List<DemoSearchResult> _results = const <DemoSearchResult>[];
@@ -4795,6 +4841,12 @@ class _SearchScreenState extends State<SearchScreen> {
   void initState() {
     super.initState();
     _restaurantApiService = CustomerRestaurantApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+      ),
+    );
+    _loyaltyApiService = LoyaltyApiService(
       apiClient: AuthenticatedApiClient(
         authApiService: AuthApiService(),
         authSessionService: _authSessionService,
@@ -4976,6 +5028,7 @@ class _SearchScreenState extends State<SearchScreen> {
   ) async {
     final session = await _authSessionService.readSession();
     List<RestaurantMenuItem> menuItems = const <RestaurantMenuItem>[];
+    String? loyaltyPointsLabel;
     if (session != null && session.token.trim().isNotEmpty) {
       try {
         menuItems = await _restaurantApiService.fetchRestaurantMenu(
@@ -4984,6 +5037,15 @@ class _SearchScreenState extends State<SearchScreen> {
         );
       } catch (error) {
         debugPrint('Search restaurant menu load failed: $error');
+      }
+      try {
+        final points = await _loyaltyApiService.fetchCustomerRestaurantPoints(
+          session: session,
+          restaurantId: restaurantId,
+        );
+        loyaltyPointsLabel = 'Your loyalty points: ${points.pointsBalance}';
+      } catch (error) {
+        debugPrint('Search loyalty points load failed: $error');
       }
     }
     if (!mounted) {
@@ -4998,6 +5060,7 @@ class _SearchScreenState extends State<SearchScreen> {
       cuisineSummary: result.subtitle,
       phoneLabel: result.phoneLabel,
       locationLabel: result.locationLabel,
+      loyaltyPointsLabel: loyaltyPointsLabel,
       profileImageUrl: result.imageUrl,
       menuItems: menuItems,
       showFollowButton: true,
