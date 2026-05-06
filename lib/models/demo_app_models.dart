@@ -266,10 +266,24 @@ class DemoSearchResult {
     required this.title,
     required this.subtitle,
     required this.categoryLabel,
+    this.restaurantId,
+    this.handle,
+    this.imageUrl,
+    this.rating,
+    this.phoneLabel,
+    this.locationLabel,
+    this.isFollowingRestaurant = false,
   });
 
   final String id;
   final String title;
   final String subtitle;
   final String categoryLabel;
+  final String? restaurantId;
+  final String? handle;
+  final String? imageUrl;
+  final double? rating;
+  final String? phoneLabel;
+  final String? locationLabel;
+  final bool isFollowingRestaurant;
 }

@@ -142,6 +142,7 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
   List<_DiscoverSpotData> _restaurantSpots = const <_DiscoverSpotData>[];
   final Map<String, List<RestaurantMenuItem>> _menuItemsByRestaurantId =
       <String, List<RestaurantMenuItem>>{};
+  final Set<String> _pendingFavoriteRestaurantIds = <String>{};
   bool _isLoadingRestaurants = true;
   String? _restaurantError;
   Set<String> _activeCuisineFilters = <String>{};
@@ -243,7 +244,7 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
       }
       setState(() {
         _restaurantSpots = page.restaurants
-            .where((restaurant) => restaurant.status.toLowerCase() == 'active')
+            .where(_isVisibleRestaurant)
             .map(_spotFromRestaurant)
             .toList(growable: false);
         _isLoadingRestaurants = false;
@@ -259,6 +260,21 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
         _restaurantError = 'Unable to load restaurants. Please try again.';
       });
     }
+  }
+
+  bool _isVisibleRestaurant(CustomerRestaurantItem restaurant) {
+    final status = restaurant.status.trim().toLowerCase();
+    if (status.isEmpty) {
+      return true;
+    }
+    return const <String>{
+      'active',
+      'approved',
+      'open',
+      'published',
+      'enabled',
+      'online',
+    }.contains(status);
   }
 
   _DiscoverSpotData _spotFromRestaurant(CustomerRestaurantItem restaurant) {
@@ -718,6 +734,8 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
           price: selectedItem.price ?? 0,
           quantity: 1,
           restaurantName: spot.title,
+          restaurantId: spot.id,
+          menuItemId: selectedItem.id,
         );
         Navigator.of(context).push(
           MaterialPageRoute<void>(
@@ -751,9 +769,44 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
     return savedFromDiscoverHeart || savedFromProfileHeart;
   }
 
-  void _toggleSpotFavorite(_DiscoverSpotData spot) {
+  Future<void> _toggleSpotFavorite(_DiscoverSpotData spot) async {
+    final restaurantId = spot.id.trim();
+    if (restaurantId.isNotEmpty &&
+        !_pendingFavoriteRestaurantIds.add(restaurantId)) {
+      return;
+    }
     final nextSaved = !_isSpotSaved(spot);
     widget.onSetSpotFavorite(spot, nextSaved);
+    if (restaurantId.isEmpty) {
+      return;
+    }
+    try {
+      final session = await _resolveSession();
+      if (session == null) {
+        throw const AuthApiException('Please log in again.');
+      }
+      if (nextSaved) {
+        await _restaurantApiService.followRestaurant(
+          session: session,
+          restaurantId: restaurantId,
+        );
+      } else {
+        await _restaurantApiService.unfollowRestaurant(
+          session: session,
+          restaurantId: restaurantId,
+        );
+      }
+    } catch (error) {
+      debugPrint('Discover restaurant follow failed: $error');
+      if (mounted) {
+        widget.onSetSpotFavorite(spot, !nextSaved);
+        _showDiscoverSnackBar('Could not update follow status. Try again.');
+      }
+    } finally {
+      if (restaurantId.isNotEmpty) {
+        _pendingFavoriteRestaurantIds.remove(restaurantId);
+      }
+    }
   }
 
   void _openQuickCravingDetails(BuildContext context, _DiscoverDealData deal) {
@@ -1071,8 +1124,9 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                                             _openPopularSpot(context, spot),
                                         onViewMenuTap: () =>
                                             _openPopularSpotMenu(context, spot),
-                                        onFavoriteTap: () =>
-                                            _toggleSpotFavorite(spot),
+                                        onFavoriteTap: () => unawaited(
+                                          _toggleSpotFavorite(spot),
+                                        ),
                                       );
                                     },
                                   ),

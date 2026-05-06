@@ -518,9 +518,9 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   Future<void> _openCompletedOrders() async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => OrderListScreen(
+        builder: (_) => const LiveRestaurantOrdersScreen(
           title: 'Completed Orders',
-          orders: _demoRepository.getOrders(completed: true),
+          filter: RestaurantOrderFilter.completed,
         ),
       ),
     );
@@ -545,9 +545,9 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   Future<void> _openActiveOrders() async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => OrderListScreen(
+        builder: (_) => const LiveRestaurantOrdersScreen(
           title: 'Orders In Progress',
-          orders: _demoRepository.getOrders(completed: false),
+          filter: RestaurantOrderFilter.active,
         ),
       ),
     );
@@ -556,19 +556,25 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   Future<void> _openOrderManagement() async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            OrderManagementScreen(orders: _demoRepository.getOrders()),
+        builder: (_) => const LiveRestaurantOrdersScreen(
+          title: 'Order Management',
+          filter: RestaurantOrderFilter.all,
+        ),
       ),
     );
   }
 
   Future<void> _openOrderDetails(String orderId) async {
-    final order = _demoRepository.findOrder(orderId);
-    if (order == null) {
+    final cleanedOrderId = orderId.trim();
+    if (cleanedOrderId.isEmpty || cleanedOrderId.startsWith('#')) {
+      await _openOrderManagement();
       return;
     }
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => OrderDetailScreen(order: order)),
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            LiveRestaurantOrderDetailScreen(orderId: cleanedOrderId),
+      ),
     );
   }
 
@@ -1020,15 +1026,15 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                                                   _openRestaurantDetails(post),
                                               onToggleLike: () =>
                                                   _toggleVendorLike(post),
-                                            onOpenComments: () =>
-                                                _openVendorComments(post),
-                                            onShare: () =>
-                                                _shareVendorPromo(post),
-                                            onReport: () =>
-                                                _reportFeedPost(post),
-                                          ),
-                                        ],
-                                      ),
+                                              onOpenComments: () =>
+                                                  _openVendorComments(post),
+                                              onShare: () =>
+                                                  _shareVendorPromo(post),
+                                              onReport: () =>
+                                                  _reportFeedPost(post),
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ),
                                     SizedBox(
@@ -2504,7 +2510,8 @@ class _FeedCommentsBottomSheetState extends State<_FeedCommentsBottomSheet> {
                                               if (value == 'report') {
                                                 showReportSheet(
                                                   context,
-                                                  itemType: ReportItemType.comment,
+                                                  itemType:
+                                                      ReportItemType.comment,
                                                   itemId: comment.id,
                                                   itemTitle: comment.authorName,
                                                 );

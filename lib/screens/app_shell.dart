@@ -206,6 +206,8 @@ class _AppShellState extends State<AppShell> {
     if (_isRestaurantRole(session.role)) {
       return RestaurantFeedScreen(
         restaurantName: session.restaurantName,
+        authToken: session.token,
+        initialUserData: session.user,
         onLogout: _handleLogout,
       );
     }

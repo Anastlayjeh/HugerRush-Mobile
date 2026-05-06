@@ -26,15 +26,37 @@ class UserHomeScreen extends StatefulWidget {
 
 class _UserHomeScreenState extends State<UserHomeScreen> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
+  final _authSessionService = AuthSessionService();
   int _selectedTopTab = 1;
   int _selectedBottomIndex = 0;
   final Set<String> _favoriteDiscoverSpotTitles = <String>{};
+  List<CustomerRestaurantItem> _followedRestaurants =
+      const <CustomerRestaurantItem>[];
   late _EditableCustomerProfileData _customerProfileData;
+  late final CustomerRestaurantApiService _restaurantApiService;
+  bool _isRefreshingFollowedRestaurants = false;
 
   @override
   void initState() {
     super.initState();
+    _restaurantApiService = CustomerRestaurantApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+        onSessionUpdated: widget.onSessionUpdated,
+        onSessionExpired: widget.onSessionExpired,
+      ),
+    );
     _customerProfileData = _EditableCustomerProfileData.fromUserHome(widget);
+    unawaited(_refreshFollowedRestaurants());
+  }
+
+  @override
+  void didUpdateWidget(covariant UserHomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.authSession?.token != widget.authSession?.token) {
+      unawaited(_refreshFollowedRestaurants());
+    }
   }
 
   String get _userHandle {
@@ -90,6 +112,87 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
         _favoriteDiscoverSpotTitles.remove(key);
       }
     });
+    if (spot.id.trim().isNotEmpty) {
+      unawaited(_refreshFollowedRestaurants());
+    }
+  }
+
+  Future<AuthSession?> _resolveSession() async {
+    final session = widget.authSession;
+    if (session != null && session.token.trim().isNotEmpty) {
+      return session;
+    }
+    return _authSessionService.readSession();
+  }
+
+  Future<void> _refreshFollowedRestaurants() async {
+    if (_isRefreshingFollowedRestaurants) {
+      return;
+    }
+    _isRefreshingFollowedRestaurants = true;
+    try {
+      final session = await _resolveSession();
+      if (session == null || session.token.trim().isEmpty) {
+        if (mounted) {
+          setState(() {
+            _followedRestaurants = const <CustomerRestaurantItem>[];
+          });
+        }
+        return;
+      }
+      final restaurants = await _restaurantApiService.fetchFollowing(
+        session: session,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() => _followedRestaurants = restaurants);
+    } catch (error) {
+      debugPrint('Followed restaurants refresh failed: $error');
+    } finally {
+      _isRefreshingFollowedRestaurants = false;
+    }
+  }
+
+  List<DemoFeedPost> _followedRestaurantPosts() {
+    return _followedRestaurants
+        .map(_postFromFollowedRestaurant)
+        .toList(growable: false);
+  }
+
+  DemoFeedPost _postFromFollowedRestaurant(CustomerRestaurantItem restaurant) {
+    final name = restaurant.name.trim().isEmpty
+        ? 'Restaurant'
+        : restaurant.name.trim();
+    final handle = restaurant.id.trim().isNotEmpty
+        ? 'restaurant-${restaurant.id}'
+        : name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+    return DemoFeedPost(
+      id: 'restaurant-${restaurant.id}',
+      restaurantName: name,
+      restaurantHandle: handle,
+      followersCount: restaurant.reviewsCount + restaurant.ordersCount,
+      caption: restaurant.description.trim().isNotEmpty
+          ? restaurant.description.trim()
+          : restaurant.categoryLabel,
+      tags:
+          '#${restaurant.categoryLabel.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '')}',
+      audioLabel: 'Restaurant',
+      rating: restaurant.averageRating ?? 0,
+      likeCount: 0,
+      commentCount: restaurant.reviewsCount,
+      isLiked: false,
+      isFollowing: true,
+      restaurantId: restaurant.id,
+      thumbnailUrl: restaurant.profilePhotoUrl,
+    );
+  }
+
+  void _handleBottomNavSelected(int index) {
+    setState(() => _selectedBottomIndex = index);
+    if (index == 4) {
+      unawaited(_refreshFollowedRestaurants());
+    }
   }
 
   @override
@@ -102,6 +205,7 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
       repository: DemoAppRepository.instance,
       favoriteSpotTitles: _favoriteDiscoverSpotTitles,
     );
+    final followedRestaurantPosts = _followedRestaurantPosts();
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: showProfile || showDiscover || showOrders || showMessages
@@ -123,11 +227,10 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
               userAvatarBytes: _customerProfileData.profilePhotoBytes,
               accountLabel: _customerProfileData.resolvedAccountLabel,
               savedPlaces: savedPlaces,
+              followedRestaurants: followedRestaurantPosts,
               selectedBottomIndex: _selectedBottomIndex,
               onOpenMenu: _openProfileMenu,
-              onBottomNavSelected: (index) {
-                setState(() => _selectedBottomIndex = index);
-              },
+              onBottomNavSelected: _handleBottomNavSelected,
             )
           : showDiscover
           ? _DiscoverTabBody(
@@ -138,25 +241,19 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
               favoriteSpotTitles: _favoriteDiscoverSpotTitles,
               onSetSpotFavorite: _setDiscoverSpotFavorite,
               selectedBottomIndex: _selectedBottomIndex,
-              onBottomNavSelected: (index) {
-                setState(() => _selectedBottomIndex = index);
-              },
+              onBottomNavSelected: _handleBottomNavSelected,
             )
           : showOrders
           ? _OrdersTabBody(
               userName: widget.userName,
               selectedBottomIndex: _selectedBottomIndex,
-              onBottomNavSelected: (index) {
-                setState(() => _selectedBottomIndex = index);
-              },
+              onBottomNavSelected: _handleBottomNavSelected,
             )
           : showMessages
           ? _MessagesTabBody(
               userName: widget.userName,
               selectedBottomIndex: _selectedBottomIndex,
-              onBottomNavSelected: (index) {
-                setState(() => _selectedBottomIndex = index);
-              },
+              onBottomNavSelected: _handleBottomNavSelected,
             )
           : _FeedTabBody(
               authSession: widget.authSession,
@@ -167,9 +264,8 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
               onTopTabSelected: (index) {
                 setState(() => _selectedTopTab = index);
               },
-              onBottomNavSelected: (index) {
-                setState(() => _selectedBottomIndex = index);
-              },
+              onBottomNavSelected: _handleBottomNavSelected,
+              onRestaurantFollowChanged: _refreshFollowedRestaurants,
             ),
     );
   }
@@ -184,6 +280,7 @@ class _FeedTabBody extends StatefulWidget {
     required this.selectedBottomIndex,
     required this.onTopTabSelected,
     required this.onBottomNavSelected,
+    this.onRestaurantFollowChanged,
   });
 
   final AuthSession? authSession;
@@ -193,6 +290,7 @@ class _FeedTabBody extends StatefulWidget {
   final int selectedBottomIndex;
   final ValueChanged<int> onTopTabSelected;
   final ValueChanged<int> onBottomNavSelected;
+  final Future<void> Function()? onRestaurantFollowChanged;
 
   @override
   State<_FeedTabBody> createState() => _FeedTabBodyState();
@@ -607,6 +705,10 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
           restaurantId: restaurantId,
         );
       }
+      final onRestaurantFollowChanged = widget.onRestaurantFollowChanged;
+      if (onRestaurantFollowChanged != null) {
+        unawaited(onRestaurantFollowChanged());
+      }
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -879,6 +981,8 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
       price: video.cartItemPrice,
       quantity: 1,
       restaurantName: post.restaurantName,
+      restaurantId: post.restaurantId ?? '',
+      menuItemId: video.menuItemId,
     );
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -1450,6 +1554,7 @@ class _FeedVideoPostData {
     required this.cartItemSubtitle,
     required this.cartItemImageUrl,
     required this.cartItemPrice,
+    required this.menuItemId,
   });
 
   factory _FeedVideoPostData.fromFeedItem(
@@ -1474,6 +1579,7 @@ class _FeedVideoPostData {
           ? item.thumbnailUrl.trim()
           : 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=900&q=80',
       cartItemPrice: price ?? 0,
+      menuItemId: item.menuItem?.id.trim() ?? '',
     );
   }
 
@@ -1486,6 +1592,7 @@ class _FeedVideoPostData {
   final String cartItemSubtitle;
   final String cartItemImageUrl;
   final double cartItemPrice;
+  final String menuItemId;
 }
 
 class _FeedBackground extends StatelessWidget {
@@ -3134,7 +3241,8 @@ class _FeedCommentsBottomSheetState extends State<_FeedCommentsBottomSheet> {
                                               if (value == 'report') {
                                                 showReportSheet(
                                                   context,
-                                                  itemType: ReportItemType.comment,
+                                                  itemType:
+                                                      ReportItemType.comment,
                                                   itemId: comment.id,
                                                   itemTitle: comment.authorName,
                                                 );

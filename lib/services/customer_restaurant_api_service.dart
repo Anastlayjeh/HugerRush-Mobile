@@ -14,6 +14,7 @@ class CustomerRestaurantApiService {
     required AuthSession session,
     int page = 1,
     int perPage = 20,
+    String? query,
   }) async {
     final result = await _apiClient.request(
       session: session,
@@ -21,6 +22,7 @@ class CustomerRestaurantApiService {
       endpoint: _endpoint('/v1/customer/restaurants', <String, String>{
         'page': page.toString(),
         'per_page': perPage.clamp(1, 30).toString(),
+        if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
       }),
     );
     final payload = ApiClient.decodeMap(result.response.body);
@@ -30,12 +32,66 @@ class CustomerRestaurantApiService {
       fallback: 'Failed to load restaurants.',
     );
 
-    final restaurants = _extractList(
-      payload,
-    ).map(CustomerRestaurantItem.fromJson).toList(growable: false);
+    final restaurants = _extractList(payload)
+        .map(_restaurantPayloadFromNode)
+        .map(CustomerRestaurantItem.fromJson)
+        .toList(growable: false);
     return CustomerRestaurantPage(
       restaurants: restaurants,
-      meta: CustomerRestaurantMeta.fromJson(_stringMap(payload['meta'])),
+      meta: CustomerRestaurantMeta.fromJson(_extractMeta(payload)),
+    );
+  }
+
+  Future<List<CustomerRestaurantItem>> fetchFollowing({
+    required AuthSession session,
+  }) async {
+    final result = await _apiClient.request(
+      session: session,
+      method: 'GET',
+      endpoint: '/v1/customer/restaurants/following',
+    );
+    final payload = ApiClient.decodeMap(result.response.body);
+    _throwForFailure(
+      result.response.statusCode,
+      payload,
+      fallback: 'Failed to load followed restaurants.',
+    );
+
+    return _extractList(payload)
+        .map(_restaurantPayloadFromNode)
+        .map(CustomerRestaurantItem.fromJson)
+        .toList(growable: false);
+  }
+
+  Future<void> followRestaurant({
+    required AuthSession session,
+    required String restaurantId,
+  }) {
+    final cleanedRestaurantId = restaurantId.trim();
+    if (cleanedRestaurantId.isEmpty) {
+      return Future<void>.value();
+    }
+    return _requestVoid(
+      session: session,
+      method: 'POST',
+      endpoint: '/v1/customer/restaurants/$cleanedRestaurantId/follow',
+      fallback: 'Failed to follow restaurant.',
+    );
+  }
+
+  Future<void> unfollowRestaurant({
+    required AuthSession session,
+    required String restaurantId,
+  }) {
+    final cleanedRestaurantId = restaurantId.trim();
+    if (cleanedRestaurantId.isEmpty) {
+      return Future<void>.value();
+    }
+    return _requestVoid(
+      session: session,
+      method: 'DELETE',
+      endpoint: '/v1/customer/restaurants/$cleanedRestaurantId/follow',
+      fallback: 'Failed to unfollow restaurant.',
     );
   }
 
@@ -99,6 +155,24 @@ class CustomerRestaurantApiService {
           .map(_stringMap)
           .toList(growable: false);
     }
+    if (data is Map && data['restaurants'] is List) {
+      return (data['restaurants'] as List)
+          .whereType<Map>()
+          .map(_stringMap)
+          .toList(growable: false);
+    }
+    if (data is Map && data['items'] is List) {
+      return (data['items'] as List)
+          .whereType<Map>()
+          .map(_stringMap)
+          .toList(growable: false);
+    }
+    if (payload['restaurants'] is List) {
+      return (payload['restaurants'] as List)
+          .whereType<Map>()
+          .map(_stringMap)
+          .toList(growable: false);
+    }
     return const <Map<String, dynamic>>[];
   }
 
@@ -132,6 +206,40 @@ class CustomerRestaurantApiService {
       }
     });
     return result;
+  }
+
+  Map<String, dynamic> _restaurantPayloadFromNode(Map<String, dynamic> node) {
+    final restaurant = node['restaurant'];
+    if (restaurant is Map) {
+      final mapped = _stringMap(restaurant);
+      mapped['is_following'] = true;
+      return mapped;
+    }
+    return node;
+  }
+
+  Map<String, dynamic> _extractMeta(Map<String, dynamic> payload) {
+    final direct = _stringMap(payload['meta']);
+    if (direct.isNotEmpty) {
+      return direct;
+    }
+    final data = _stringMap(payload['data']);
+    return _stringMap(data['meta']);
+  }
+
+  Future<void> _requestVoid({
+    required AuthSession session,
+    required String method,
+    required String endpoint,
+    required String fallback,
+  }) async {
+    final result = await _apiClient.request(
+      session: session,
+      method: method,
+      endpoint: endpoint,
+    );
+    final payload = ApiClient.decodeMap(result.response.body);
+    _throwForFailure(result.response.statusCode, payload, fallback: fallback);
   }
 
   void _throwForFailure(
@@ -201,6 +309,7 @@ class CustomerRestaurantItem {
     required this.reviewsCount,
     required this.menuItemsCount,
     required this.ordersCount,
+    required this.isFollowing,
   });
 
   final String id;
@@ -215,6 +324,7 @@ class CustomerRestaurantItem {
   final int reviewsCount;
   final int menuItemsCount;
   final int ordersCount;
+  final bool isFollowing;
 
   factory CustomerRestaurantItem.fromJson(Map<String, dynamic> json) {
     final settings = _stringMap(json['settings']);
@@ -247,6 +357,11 @@ class CustomerRestaurantItem {
       reviewsCount: _readInt(json['reviews_count']) ?? 0,
       menuItemsCount: _readInt(json['menu_items_count']) ?? 0,
       ordersCount: _readInt(json['orders_count']) ?? 0,
+      isFollowing:
+          _readBool(json['is_following']) ??
+          _readBool(json['is_following_restaurant']) ??
+          _readBool(json['followed']) ??
+          false,
     );
   }
 }
@@ -304,6 +419,25 @@ double? _readDouble(dynamic value) {
   }
   if (value is String) {
     return double.tryParse(value.trim());
+  }
+  return null;
+}
+
+bool? _readBool(dynamic value) {
+  if (value is bool) {
+    return value;
+  }
+  if (value is num) {
+    return value != 0;
+  }
+  if (value is String) {
+    final normalized = value.trim().toLowerCase();
+    if (normalized == 'true' || normalized == '1' || normalized == 'yes') {
+      return true;
+    }
+    if (normalized == 'false' || normalized == '0' || normalized == 'no') {
+      return false;
+    }
   }
   return null;
 }

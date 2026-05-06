@@ -9,6 +9,7 @@ class _ProfileTabBody extends StatelessWidget {
     this.userAvatarBytes,
     this.accountLabel,
     required this.savedPlaces,
+    required this.followedRestaurants,
     required this.selectedBottomIndex,
     required this.onOpenMenu,
     required this.onBottomNavSelected,
@@ -21,6 +22,7 @@ class _ProfileTabBody extends StatelessWidget {
   final Uint8List? userAvatarBytes;
   final String? accountLabel;
   final List<_SavedPlaceData> savedPlaces;
+  final List<DemoFeedPost> followedRestaurants;
   final int selectedBottomIndex;
   final VoidCallback onOpenMenu;
   final ValueChanged<int> onBottomNavSelected;
@@ -125,9 +127,7 @@ class _ProfileTabBody extends StatelessWidget {
             maxHeight: safeHeight > 0 ? safeHeight : constraints.maxHeight,
           ),
         );
-        final followedRestaurants = _followingRestaurantsFromPosts(
-          _customerFeedPostsSnapshot(DemoAppRepository.instance),
-        );
+        final followedRestaurants = this.followedRestaurants;
         final navBarBottomInset = safeAreaPadding.bottom;
         final navBarTotalHeight = metrics.navHeight + navBarBottomInset;
         return Stack(
@@ -392,37 +392,101 @@ class _FollowingRestaurantsScreen extends StatefulWidget {
 
 class _FollowingRestaurantsScreenState
     extends State<_FollowingRestaurantsScreen> {
-  final DemoAppRepository _repository = DemoAppRepository.instance;
+  final _authSessionService = AuthSessionService();
+  late final CustomerRestaurantApiService _restaurantApiService;
   late List<DemoFeedPost> _followedRestaurants;
 
   @override
   void initState() {
     super.initState();
     _followedRestaurants = _followingRestaurantsFromPosts(widget.initialPosts);
-    _refreshFollowedRestaurants();
-  }
-
-  List<DemoFeedPost> _currentFollowedRestaurants() {
-    return _followingRestaurantsFromPosts(
-      _customerFeedPostsSnapshot(_repository),
+    _restaurantApiService = CustomerRestaurantApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+      ),
     );
+    unawaited(_refreshFollowedRestaurants());
   }
 
-  void _refreshFollowedRestaurants() {
+  Future<AuthSession?> _resolveSession() async {
+    final restored = await _authSessionService.readSession();
+    if (restored != null && restored.token.trim().isNotEmpty) {
+      return restored;
+    }
+    return null;
+  }
+
+  Future<void> _refreshFollowedRestaurants() async {
+    final session = await _resolveSession();
+    if (session == null) {
+      if (mounted) {
+        setState(() => _followedRestaurants = const <DemoFeedPost>[]);
+      }
+      return;
+    }
+    final restaurants = await _restaurantApiService.fetchFollowing(
+      session: session,
+    );
     if (!mounted) {
       return;
     }
     setState(() {
-      _followedRestaurants = _currentFollowedRestaurants();
+      _followedRestaurants = restaurants
+          .map(_postFromRestaurant)
+          .toList(growable: false);
     });
   }
 
   Future<void> _toggleFollow(DemoFeedPost post) async {
-    await _repository.toggleFollow(post.id);
-    if (!mounted) {
+    final restaurantId = post.restaurantId?.trim();
+    if (restaurantId == null || restaurantId.isEmpty) {
       return;
     }
-    _refreshFollowedRestaurants();
+    final session = await _resolveSession();
+    if (session == null) {
+      throw const AuthApiException('Please log in again.');
+    }
+    if (post.isFollowing) {
+      await _restaurantApiService.unfollowRestaurant(
+        session: session,
+        restaurantId: restaurantId,
+      );
+    } else {
+      await _restaurantApiService.followRestaurant(
+        session: session,
+        restaurantId: restaurantId,
+      );
+    }
+    await _refreshFollowedRestaurants();
+  }
+
+  DemoFeedPost _postFromRestaurant(CustomerRestaurantItem restaurant) {
+    final name = restaurant.name.trim().isEmpty
+        ? 'Restaurant'
+        : restaurant.name.trim();
+    final handle = restaurant.id.trim().isNotEmpty
+        ? 'restaurant-${restaurant.id}'
+        : name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+    return DemoFeedPost(
+      id: 'restaurant-${restaurant.id}',
+      restaurantName: name,
+      restaurantHandle: handle,
+      followersCount: restaurant.reviewsCount + restaurant.ordersCount,
+      caption: restaurant.description.trim().isNotEmpty
+          ? restaurant.description.trim()
+          : restaurant.categoryLabel,
+      tags:
+          '#${restaurant.categoryLabel.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '')}',
+      audioLabel: 'Restaurant',
+      rating: restaurant.averageRating ?? 0,
+      likeCount: 0,
+      commentCount: restaurant.reviewsCount,
+      isLiked: false,
+      isFollowing: true,
+      restaurantId: restaurant.id,
+      thumbnailUrl: restaurant.profilePhotoUrl,
+    );
   }
 
   Future<void> _confirmAndUnfollow(DemoFeedPost post) async {
@@ -486,9 +550,9 @@ class _FollowingRestaurantsScreenState
   }
 
   Future<void> _openRestaurant(DemoFeedPost post) async {
-    final reviewPreviews = _reviewPreviewsFromComments(
-      comments: _repository.getComments(post.id),
-      baseRating: post.rating,
+    final reviewPreviews = _buildDemoRestaurantReviews(
+      restaurantName: post.restaurantName,
+      rating: post.rating,
     );
     await showRestaurantProfilePopup(
       context,
@@ -502,7 +566,7 @@ class _FollowingRestaurantsScreenState
       showFollowButton: true,
       showSaveButton: true,
       initiallyFollowing: post.isFollowing,
-      onToggleFollow: () => _toggleFollow(post),
+      onToggleFollow: () => unawaited(_toggleFollow(post)),
       reviews: reviewPreviews,
       onOpenReviews: () {
         openRestaurantReviewsPage(
@@ -527,7 +591,7 @@ class _FollowingRestaurantsScreenState
     if (!mounted) {
       return;
     }
-    _refreshFollowedRestaurants();
+    unawaited(_refreshFollowedRestaurants());
   }
 
   @override
@@ -3162,7 +3226,9 @@ class _CustomerEditProfileScreenState
                       controller: _countryController,
                       textCapitalization: TextCapitalization.words,
                       inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r"[A-Za-z\s'-]")),
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r"[A-Za-z\s'-]"),
+                        ),
                         LengthLimitingTextInputFormatter(40),
                       ],
                     ),
@@ -3175,7 +3241,9 @@ class _CustomerEditProfileScreenState
                       controller: _cityController,
                       textCapitalization: TextCapitalization.words,
                       inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r"[A-Za-z\s'-]")),
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r"[A-Za-z\s'-]"),
+                        ),
                         LengthLimitingTextInputFormatter(40),
                       ],
                     ),

@@ -1532,6 +1532,9 @@ class _OrdersCartScreenState extends State<_OrdersCartScreen> {
     final placed = await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(
         builder: (_) => _OrdersCheckoutScreen(
+          items: List<_CartLineItemData>.from(_items),
+          restaurantId: _firstRestaurantIdFromItems(_items),
+          restaurantName: _restaurantName,
           subtotal: _subtotal,
           deliveryFee: _deliveryFee,
           serviceFee: _serviceFee,
@@ -1982,12 +1985,18 @@ class _CheckoutLocationData {
 
 class _OrdersCheckoutScreen extends StatefulWidget {
   const _OrdersCheckoutScreen({
+    required this.items,
+    required this.restaurantId,
+    required this.restaurantName,
     required this.subtotal,
     required this.deliveryFee,
     required this.serviceFee,
     required this.totalItems,
   });
 
+  final List<_CartLineItemData> items;
+  final String restaurantId;
+  final String restaurantName;
   final double subtotal;
   final double deliveryFee;
   final double serviceFee;
@@ -2024,6 +2033,21 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
   _CheckoutChangeRequest _changeRequest = _CheckoutChangeRequest.noNeed;
   bool _useLoyalty = false;
   bool _saveChangeInWallet = false;
+  bool _isPlacingOrder = false;
+  late final AuthSessionService _authSessionService;
+  late final CustomerOrderApiService _orderApiService;
+
+  @override
+  void initState() {
+    super.initState();
+    _authSessionService = AuthSessionService();
+    _orderApiService = CustomerOrderApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+      ),
+    );
+  }
 
   double get _baseTotalUsd =>
       widget.subtotal + widget.deliveryFee + widget.serviceFee;
@@ -2068,6 +2092,17 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
         return 'Visa';
       case _CheckoutPaymentMethod.whishMoney:
         return 'Whish Money';
+    }
+  }
+
+  String _paymentMethodCode(_CheckoutPaymentMethod method) {
+    switch (method) {
+      case _CheckoutPaymentMethod.onDelivery:
+        return 'cash_on_delivery';
+      case _CheckoutPaymentMethod.visa:
+        return 'visa';
+      case _CheckoutPaymentMethod.whishMoney:
+        return 'whish_money';
     }
   }
 
@@ -2127,7 +2162,7 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
     });
   }
 
-  void _placeOrder() {
+  Future<void> _placeOrder() async {
     if (!_location.hasRequiredFields) {
       final messenger = ScaffoldMessenger.maybeOf(context);
       messenger
@@ -2142,7 +2177,113 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
       _openLocationEditor();
       return;
     }
-    Navigator.of(context).pop(true);
+    final liveItems = widget.items;
+    final hasUnlinkedItem = liveItems.any(
+      (item) => item.menuItemId.trim().isEmpty,
+    );
+    if (widget.restaurantId.trim().isEmpty ||
+        liveItems.isEmpty ||
+        hasUnlinkedItem) {
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Please add an item from the live restaurant menu before checkout.',
+            ),
+          ),
+        );
+      return;
+    }
+
+    final session = await _authSessionService.readSession();
+    if (session == null || session.token.trim().isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Please log in again to place orders.')),
+        );
+      return;
+    }
+
+    setState(() => _isPlacingOrder = true);
+    try {
+      await _orderApiService.placeOrder(
+        session: session,
+        draft: CustomerOrderDraft(
+          restaurantId: widget.restaurantId.trim(),
+          restaurantName: widget.restaurantName.trim(),
+          items: liveItems
+              .map(
+                (item) => CustomerOrderDraftItem(
+                  menuItemId: item.menuItemId.trim(),
+                  title: item.title,
+                  quantity: item.quantity,
+                  unitPrice: item.price,
+                  notes: item.subtitle,
+                ),
+              )
+              .toList(growable: false),
+          address: OrderAddress(
+            city: _location.city,
+            street: _location.street,
+            building: _location.building,
+            floor: _location.floor,
+            apartment: _location.apartment,
+            landmark: _location.landmark,
+          ),
+          paymentMethod: _paymentMethodCode(_paymentMethod),
+          deliveryMode: _deliveryMode == _CheckoutDeliveryMode.now
+              ? 'now'
+              : 'scheduled',
+          scheduledLabel: _deliveryMode == _CheckoutDeliveryMode.scheduled
+              ? _deliverySecondaryLabel
+              : '',
+          changeRequest: _cashPayment
+              ? _changeRequestLabel(_changeRequest)
+              : '',
+          useLoyalty: _useLoyalty,
+          saveChangeInWallet: _saveChangeInWallet,
+          subtotal: widget.subtotal,
+          deliveryFee: widget.deliveryFee,
+          serviceFee: widget.serviceFee,
+          total: _totalUsd,
+        ),
+      );
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pop(true);
+    } on AuthApiException catch (error) {
+      debugPrint('Order placement auth failed: $error');
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Please log in again to place orders.')),
+        );
+    } on OrderApiException catch (error) {
+      debugPrint('Order placement failed: $error');
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Could not place your order. Please try again.'),
+          ),
+        );
+    } finally {
+      if (mounted) {
+        setState(() => _isPlacingOrder = false);
+      }
+    }
   }
 
   Future<void> _openDeliveryTimeSelector() async {
@@ -2591,7 +2732,7 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: _placeOrder,
+                  onPressed: _isPlacingOrder ? null : _placeOrder,
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFFFF7E4D),
                     minimumSize: const Size.fromHeight(52),
@@ -2599,9 +2740,20 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
                       borderRadius: BorderRadius.circular(14),
                     ),
                   ),
-                  icon: const Icon(Icons.check_circle_outline_rounded),
+                  icon: _isPlacingOrder
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.check_circle_outline_rounded),
                   label: Text(
-                    'Place Order (${widget.totalItems} items)',
+                    _isPlacingOrder
+                        ? 'Placing order...'
+                        : 'Place Order (${widget.totalItems} items)',
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ),
@@ -4444,6 +4596,8 @@ class _CartLineItemData {
     required this.price,
     required this.quantity,
     this.restaurantName = '',
+    this.restaurantId = '',
+    this.menuItemId = '',
   });
 
   final String title;
@@ -4452,6 +4606,8 @@ class _CartLineItemData {
   final double price;
   final int quantity;
   final String restaurantName;
+  final String restaurantId;
+  final String menuItemId;
 
   _CartLineItemData copyWith({
     String? title,
@@ -4460,6 +4616,8 @@ class _CartLineItemData {
     double? price,
     int? quantity,
     String? restaurantName,
+    String? restaurantId,
+    String? menuItemId,
   }) {
     return _CartLineItemData(
       title: title ?? this.title,
@@ -4468,6 +4626,8 @@ class _CartLineItemData {
       price: price ?? this.price,
       quantity: quantity ?? this.quantity,
       restaurantName: restaurantName ?? this.restaurantName,
+      restaurantId: restaurantId ?? this.restaurantId,
+      menuItemId: menuItemId ?? this.menuItemId,
     );
   }
 }
@@ -4508,6 +4668,16 @@ String _firstRestaurantNameFromItems(List<_CartLineItemData> items) {
   return '';
 }
 
+String _firstRestaurantIdFromItems(List<_CartLineItemData> items) {
+  for (final item in items) {
+    final id = item.restaurantId.trim();
+    if (id.isNotEmpty) {
+      return id;
+    }
+  }
+  return '';
+}
+
 String _resolvedCartItemRestaurantName(_CartLineItemData item) {
   final direct = item.restaurantName.trim();
   if (direct.isNotEmpty) {
@@ -4526,4 +4696,3 @@ String _resolvedCartItemRestaurantName(_CartLineItemData item) {
   }
   return '';
 }
-

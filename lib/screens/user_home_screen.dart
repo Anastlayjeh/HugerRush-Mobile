@@ -15,6 +15,7 @@ import '../services/customer_restaurant_api_service.dart';
 import '../services/customer_video_feed_api_service.dart';
 import '../services/demo_app_repository.dart';
 import '../services/moderation_support_models.dart';
+import '../services/order_api_service.dart';
 import '../services/post_share_service.dart';
 import '../services/push_notification_service.dart';
 import '../services/restaurant_menu_api_service.dart';
@@ -42,46 +43,6 @@ String _profileEmail({required String handle, String? email}) {
     return cleanedEmail;
   }
   return _profileEmailFromHandle(handle);
-}
-
-String _reviewTimeLabel(DateTime createdAt) {
-  final delta = DateTime.now().difference(createdAt);
-  if (delta.inMinutes < 1) {
-    return 'Just now';
-  }
-  if (delta.inHours < 1) {
-    return '${delta.inMinutes}m ago';
-  }
-  if (delta.inDays < 1) {
-    return '${delta.inHours}h ago';
-  }
-  if (delta.inDays == 1) {
-    return 'Yesterday';
-  }
-  return '${delta.inDays}d ago';
-}
-
-List<RestaurantProfileReviewPreview> _reviewPreviewsFromComments({
-  required List<DemoComment> comments,
-  required double baseRating,
-}) {
-  return comments
-      .asMap()
-      .entries
-      .map((entry) {
-        final index = entry.key;
-        final comment = entry.value;
-        final ratingAdjustment = ((index % 3) - 1) * 0.1;
-        final simulatedRating = (baseRating + ratingAdjustment).clamp(3.6, 5.0);
-        return RestaurantProfileReviewPreview(
-          customerName: comment.authorName,
-          rating: simulatedRating.toDouble(),
-          comment: comment.body,
-          timeLabel: _reviewTimeLabel(comment.createdAt),
-          orderLabel: '#47${20 + index}',
-        );
-      })
-      .toList(growable: false);
 }
 
 List<RestaurantProfileReviewPreview> _buildDemoRestaurantReviews({

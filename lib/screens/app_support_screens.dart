@@ -9,9 +9,11 @@ import '../models/demo_app_models.dart';
 import '../services/auth_api_service.dart';
 import '../services/auth_session_service.dart';
 import '../services/authenticated_api_client.dart';
+import '../services/customer_restaurant_api_service.dart';
 import '../services/demo_app_repository.dart';
 import '../services/moderation_support_models.dart';
 import '../services/notification_api_service.dart';
+import '../services/order_api_service.dart';
 import '../services/order_support_service.dart';
 import '../services/post_share_service.dart';
 import '../services/report_service.dart';
@@ -198,18 +200,20 @@ Future<bool> showReportSheet(
                       child: DropdownButton<ReportReason>(
                         value: selectedReason,
                         isExpanded: true,
-                        items: reasons.map((reason) {
-                          return DropdownMenuItem<ReportReason>(
-                            value: reason,
-                            child: Text(
-                              reason.label,
-                              style: const TextStyle(
-                                color: Color(0xFF2F241B),
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          );
-                        }).toList(growable: false),
+                        items: reasons
+                            .map((reason) {
+                              return DropdownMenuItem<ReportReason>(
+                                value: reason,
+                                child: Text(
+                                  reason.label,
+                                  style: const TextStyle(
+                                    color: Color(0xFF2F241B),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              );
+                            })
+                            .toList(growable: false),
                         onChanged: isSubmitting
                             ? null
                             : (value) {
@@ -304,7 +308,9 @@ Future<bool> showReportSheet(
     messenger
       ?..hideCurrentSnackBar()
       ..showSnackBar(
-        const SnackBar(content: Text('Thanks. Your report has been submitted.')),
+        const SnackBar(
+          content: Text('Thanks. Your report has been submitted.'),
+        ),
       );
   }
   return submitted;
@@ -417,18 +423,20 @@ Future<bool> showOrderIssueSheet(
                       child: DropdownButton<OrderIssueReason>(
                         value: selectedReason,
                         isExpanded: true,
-                        items: OrderIssueReason.values.map((reason) {
-                          return DropdownMenuItem<OrderIssueReason>(
-                            value: reason,
-                            child: Text(
-                              reason.label,
-                              style: const TextStyle(
-                                color: Color(0xFF2F241B),
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          );
-                        }).toList(growable: false),
+                        items: OrderIssueReason.values
+                            .map((reason) {
+                              return DropdownMenuItem<OrderIssueReason>(
+                                value: reason,
+                                child: Text(
+                                  reason.label,
+                                  style: const TextStyle(
+                                    color: Color(0xFF2F241B),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              );
+                            })
+                            .toList(growable: false),
                         onChanged: isSubmitting
                             ? null
                             : (value) {
@@ -523,7 +531,9 @@ Future<bool> showOrderIssueSheet(
     messenger
       ?..hideCurrentSnackBar()
       ..showSnackBar(
-        const SnackBar(content: Text('Support request submitted successfully.')),
+        const SnackBar(
+          content: Text('Support request submitted successfully.'),
+        ),
       );
   }
   return submitted;
@@ -732,6 +742,7 @@ class _RestaurantMenuItemDetailsSheet extends StatelessWidget {
         itemTitle: item.title,
       );
     }
+
     void addToCart() {
       final messenger = ScaffoldMessenger.maybeOf(context);
       Navigator.of(context).pop();
@@ -4758,10 +4769,13 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final _repository = DemoAppRepository.instance;
+  final _authSessionService = AuthSessionService();
   late final TextEditingController _controller;
+  late final CustomerRestaurantApiService _restaurantApiService;
   int _activeSearchRequestId = 0;
 
   List<DemoSearchResult> _results = const <DemoSearchResult>[];
+  final Map<String, bool> _restaurantFollowOverrides = <String, bool>{};
   bool _isLoading = false;
 
   String get _searchHintText {
@@ -4779,6 +4793,12 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   void initState() {
     super.initState();
+    _restaurantApiService = CustomerRestaurantApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+      ),
+    );
     _controller = TextEditingController(text: widget.initialQuery);
     _controller.addListener(_handleQueryChanged);
     if (widget.initialQuery.trim().isNotEmpty) {
@@ -4811,10 +4831,12 @@ class _SearchScreenState extends State<SearchScreen> {
       return;
     }
     setState(() => _isLoading = true);
-    final results = await _repository.search(
-      cleanedQuery,
-      includeCustomers: widget.includeCustomers,
-    );
+    final customerResults = widget.includeCustomers
+        ? (await _repository.search(cleanedQuery, includeCustomers: true))
+              .where((item) => item.categoryLabel.toLowerCase() == 'customer')
+              .toList(growable: false)
+        : const <DemoSearchResult>[];
+    final restaurantResults = await _searchLiveRestaurants(cleanedQuery);
     if (!mounted) {
       return;
     }
@@ -4822,9 +4844,81 @@ class _SearchScreenState extends State<SearchScreen> {
       return;
     }
     setState(() {
-      _results = results;
+      _results = <DemoSearchResult>[...customerResults, ...restaurantResults];
       _isLoading = false;
     });
+  }
+
+  Future<List<DemoSearchResult>> _searchLiveRestaurants(String query) async {
+    final session = await _authSessionService.readSession();
+    if (session == null || session.token.trim().isEmpty) {
+      return const <DemoSearchResult>[];
+    }
+
+    try {
+      final page = await _restaurantApiService.fetchRestaurants(
+        session: session,
+        perPage: 30,
+        query: query,
+      );
+      final filtered = page.restaurants
+          .where((restaurant) => _restaurantMatchesQuery(restaurant, query))
+          .toList(growable: false);
+      final restaurants = filtered.isEmpty ? page.restaurants : filtered;
+      return restaurants
+          .map(_searchResultFromRestaurant)
+          .toList(growable: false);
+    } catch (error) {
+      debugPrint('Live restaurant search failed: $error');
+      return const <DemoSearchResult>[];
+    }
+  }
+
+  bool _restaurantMatchesQuery(
+    CustomerRestaurantItem restaurant,
+    String query,
+  ) {
+    final cleanedQuery = _normalizeSearchQuery(query);
+    if (cleanedQuery.isEmpty) {
+      return true;
+    }
+    final haystack = _normalizeSearchQuery(
+      '${restaurant.name} ${restaurant.description} ${restaurant.categoryLabel} ${restaurant.address}',
+    );
+    return haystack.contains(cleanedQuery);
+  }
+
+  String _normalizeSearchQuery(String value) {
+    return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  }
+
+  DemoSearchResult _searchResultFromRestaurant(
+    CustomerRestaurantItem restaurant,
+  ) {
+    final description = restaurant.description.trim();
+    final address = restaurant.address.trim();
+    final subtitle = description.isNotEmpty
+        ? description
+        : (address.isNotEmpty ? address : restaurant.categoryLabel);
+    final handle = restaurant.id.trim().isNotEmpty
+        ? 'restaurant-${restaurant.id}'
+        : restaurant.name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+    if (restaurant.isFollowing && restaurant.id.trim().isNotEmpty) {
+      _restaurantFollowOverrides.putIfAbsent(restaurant.id.trim(), () => true);
+    }
+    return DemoSearchResult(
+      id: 'restaurant-live-${restaurant.id}',
+      restaurantId: restaurant.id,
+      title: restaurant.name,
+      subtitle: subtitle,
+      categoryLabel: 'Restaurant',
+      handle: handle,
+      imageUrl: restaurant.profilePhotoUrl,
+      rating: restaurant.averageRating,
+      phoneLabel: restaurant.phone,
+      locationLabel: restaurant.address,
+      isFollowingRestaurant: restaurant.isFollowing,
+    );
   }
 
   Future<void> _handleSubmittedSearch(String query) async {
@@ -4852,6 +4946,11 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Future<void> _openRestaurantProfileFromResult(DemoSearchResult result) async {
+    final restaurantId = result.restaurantId?.trim();
+    if (restaurantId != null && restaurantId.isNotEmpty) {
+      await _openLiveRestaurantProfileFromResult(result, restaurantId);
+      return;
+    }
     if (!result.id.startsWith('post-')) {
       return;
     }
@@ -4868,6 +4967,96 @@ class _SearchScreenState extends State<SearchScreen> {
       caption: post.caption,
       followersCountLabel: '${post.followersCount} followers',
     );
+  }
+
+  Future<void> _openLiveRestaurantProfileFromResult(
+    DemoSearchResult result,
+    String restaurantId,
+  ) async {
+    final session = await _authSessionService.readSession();
+    List<RestaurantMenuItem> menuItems = const <RestaurantMenuItem>[];
+    if (session != null && session.token.trim().isNotEmpty) {
+      try {
+        menuItems = await _restaurantApiService.fetchRestaurantMenu(
+          session: session,
+          restaurantId: restaurantId,
+        );
+      } catch (error) {
+        debugPrint('Search restaurant menu load failed: $error');
+      }
+    }
+    if (!mounted) {
+      return;
+    }
+    await showRestaurantProfilePopup(
+      context,
+      restaurantName: result.title,
+      handle: result.handle ?? 'restaurant-$restaurantId',
+      rating: result.rating ?? 0,
+      caption: result.subtitle,
+      cuisineSummary: result.subtitle,
+      phoneLabel: result.phoneLabel,
+      locationLabel: result.locationLabel,
+      profileImageUrl: result.imageUrl,
+      menuItems: menuItems,
+      showFollowButton: true,
+      initiallyFollowing: _isRestaurantFollowing(result),
+      onToggleFollow: () => unawaited(_toggleRestaurantFollow(result)),
+      enableReportButton: false,
+    );
+  }
+
+  bool _isRestaurantFollowing(DemoSearchResult result) {
+    final restaurantId = result.restaurantId?.trim();
+    if (restaurantId == null || restaurantId.isEmpty) {
+      return result.isFollowingRestaurant;
+    }
+    return _restaurantFollowOverrides[restaurantId] ??
+        result.isFollowingRestaurant;
+  }
+
+  Future<void> _toggleRestaurantFollow(DemoSearchResult result) async {
+    final restaurantId = result.restaurantId?.trim();
+    if (restaurantId == null || restaurantId.isEmpty) {
+      return;
+    }
+    final session = await _authSessionService.readSession();
+    if (session == null || session.token.trim().isEmpty) {
+      _showSearchSnackBar('Please log in again to follow restaurants.');
+      return;
+    }
+    final previous = _isRestaurantFollowing(result);
+    final next = !previous;
+    setState(() => _restaurantFollowOverrides[restaurantId] = next);
+    try {
+      if (next) {
+        await _restaurantApiService.followRestaurant(
+          session: session,
+          restaurantId: restaurantId,
+        );
+      } else {
+        await _restaurantApiService.unfollowRestaurant(
+          session: session,
+          restaurantId: restaurantId,
+        );
+      }
+    } catch (error) {
+      debugPrint('Search restaurant follow failed: $error');
+      if (!mounted) {
+        return;
+      }
+      setState(() => _restaurantFollowOverrides[restaurantId] = previous);
+      _showSearchSnackBar('Could not update follow status. Try again.');
+    }
+  }
+
+  void _showSearchSnackBar(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.maybeOf(context)
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _openCustomerProfileFromResult(DemoSearchResult result) async {
@@ -5071,7 +5260,8 @@ class _CustomerPublicProfileScreen extends StatefulWidget {
       _CustomerPublicProfileScreenState();
 }
 
-class _CustomerPublicProfileScreenState extends State<_CustomerPublicProfileScreen> {
+class _CustomerPublicProfileScreenState
+    extends State<_CustomerPublicProfileScreen> {
   static const String _viewerId = 'viewer-customer';
   final _socialGraphService = SocialGraphService.instance;
   FriendshipStatus _friendshipStatus = FriendshipStatus.none;
@@ -5088,10 +5278,10 @@ class _CustomerPublicProfileScreenState extends State<_CustomerPublicProfileScre
   String get _targetId => widget.profileId.trim().toLowerCase();
 
   String get _handle {
-    final cleaned = widget.displayName
-        .trim()
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9]+'), '');
+    final cleaned = widget.displayName.trim().toLowerCase().replaceAll(
+      RegExp(r'[^a-z0-9]+'),
+      '',
+    );
     return cleaned.isEmpty ? '@customer' : '@$cleaned';
   }
 
@@ -5166,7 +5356,9 @@ class _CustomerPublicProfileScreenState extends State<_CustomerPublicProfileScre
         ?..hideCurrentSnackBar()
         ..showSnackBar(
           SnackBar(
-            content: Text(nextState ? 'Now following user.' : 'Unfollowed user.'),
+            content: Text(
+              nextState ? 'Now following user.' : 'Unfollowed user.',
+            ),
           ),
         );
     } finally {
@@ -5194,9 +5386,7 @@ class _CustomerPublicProfileScreenState extends State<_CustomerPublicProfileScre
       final messenger = ScaffoldMessenger.maybeOf(context);
       messenger
         ?..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(content: Text('Friend request sent.')),
-        );
+        ..showSnackBar(const SnackBar(content: Text('Friend request sent.')));
     } finally {
       if (mounted) {
         setState(() => _isUpdatingFriend = false);
@@ -5247,9 +5437,7 @@ class _CustomerPublicProfileScreenState extends State<_CustomerPublicProfileScre
       final messenger = ScaffoldMessenger.maybeOf(context);
       messenger
         ?..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(content: Text('Friend removed.')),
-        );
+        ..showSnackBar(const SnackBar(content: Text('Friend removed.')));
     } finally {
       if (mounted) {
         setState(() => _isUpdatingFriend = false);
@@ -5429,10 +5617,14 @@ class _CustomerPublicProfileScreenState extends State<_CustomerPublicProfileScre
                               child: const Text('Request Sent'),
                             )
                           : OutlinedButton(
-                              onPressed: _isUpdatingFriend ? null : _removeFriend,
+                              onPressed: _isUpdatingFriend
+                                  ? null
+                                  : _removeFriend,
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: const Color(0xFF2F8A7E),
-                                side: const BorderSide(color: Color(0xFFCBE6E1)),
+                                side: const BorderSide(
+                                  color: Color(0xFFCBE6E1),
+                                ),
                                 minimumSize: const Size.fromHeight(46),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(14),
@@ -6029,6 +6221,505 @@ class OrderDetailScreen extends StatelessWidget {
             Text('Total: ${order.totalLabel}'),
           ],
         ),
+      ),
+    );
+  }
+}
+
+enum RestaurantOrderFilter { all, active, completed }
+
+class LiveRestaurantOrdersScreen extends StatefulWidget {
+  const LiveRestaurantOrdersScreen({
+    super.key,
+    required this.title,
+    this.filter = RestaurantOrderFilter.all,
+  });
+
+  final String title;
+  final RestaurantOrderFilter filter;
+
+  @override
+  State<LiveRestaurantOrdersScreen> createState() =>
+      _LiveRestaurantOrdersScreenState();
+}
+
+class _LiveRestaurantOrdersScreenState
+    extends State<LiveRestaurantOrdersScreen> {
+  late final AuthSessionService _sessionService;
+  late final RestaurantOrderApiService _orderApiService;
+  List<AppOrder> _orders = const <AppOrder>[];
+  bool _isLoading = true;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _sessionService = AuthSessionService();
+    _orderApiService = RestaurantOrderApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _sessionService,
+      ),
+    );
+    unawaited(_loadOrders());
+  }
+
+  List<AppOrder> get _filteredOrders {
+    switch (widget.filter) {
+      case RestaurantOrderFilter.active:
+        return _orders.where((order) => order.isActive).toList(growable: false);
+      case RestaurantOrderFilter.completed:
+        return _orders
+            .where((order) => order.isCompleted)
+            .toList(growable: false);
+      case RestaurantOrderFilter.all:
+        return _orders;
+    }
+  }
+
+  Future<void> _loadOrders({bool showSpinner = true}) async {
+    if (showSpinner) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
+
+    try {
+      final session = await _sessionService.readSession();
+      if (session == null || session.token.trim().isEmpty) {
+        throw const AuthApiException('Please log in again.');
+      }
+      final orders = await _orderApiService.fetchOrders(session: session);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _orders = orders;
+        _isLoading = false;
+        _errorMessage = null;
+      });
+    } catch (error) {
+      debugPrint('Restaurant orders load failed: $error');
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Could not load orders. Pull to refresh or try again.';
+      });
+    }
+  }
+
+  Future<void> _openOrder(AppOrder order) async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => LiveRestaurantOrderDetailScreen(
+          orderId: order.id,
+          initialOrder: order,
+        ),
+      ),
+    );
+    if (changed == true) {
+      unawaited(_loadOrders(showSpinner: false));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final orders = _filteredOrders;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.title),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: () => unawaited(_loadOrders()),
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: () => _loadOrders(showSpinner: false),
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : _errorMessage != null
+            ? ListView(
+                padding: const EdgeInsets.all(20),
+                children: [
+                  const SizedBox(height: 80),
+                  Icon(
+                    Icons.receipt_long_outlined,
+                    size: 54,
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    _errorMessage!,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 14),
+                  Center(
+                    child: FilledButton.icon(
+                      onPressed: () => unawaited(_loadOrders()),
+                      icon: const Icon(Icons.refresh_rounded),
+                      label: const Text('Try again'),
+                    ),
+                  ),
+                ],
+              )
+            : orders.isEmpty
+            ? ListView(
+                padding: const EdgeInsets.all(20),
+                children: [
+                  const SizedBox(height: 90),
+                  Icon(
+                    Icons.inbox_outlined,
+                    size: 54,
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'No orders found.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ],
+              )
+            : ListView.separated(
+                padding: const EdgeInsets.all(16),
+                itemCount: orders.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 10),
+                itemBuilder: (context, index) {
+                  final order = orders[index];
+                  return ListTile(
+                    onTap: () => unawaited(_openOrder(order)),
+                    tileColor: const Color(0xFFF3F0EC),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    title: Text('${order.displayId} - ${order.customerName}'),
+                    subtitle: Text(order.itemSummary),
+                    trailing: _OrderStatusChip(label: order.statusLabel),
+                  );
+                },
+              ),
+      ),
+    );
+  }
+}
+
+class LiveRestaurantOrderDetailScreen extends StatefulWidget {
+  const LiveRestaurantOrderDetailScreen({
+    super.key,
+    required this.orderId,
+    this.initialOrder,
+  });
+
+  final String orderId;
+  final AppOrder? initialOrder;
+
+  @override
+  State<LiveRestaurantOrderDetailScreen> createState() =>
+      _LiveRestaurantOrderDetailScreenState();
+}
+
+class _LiveRestaurantOrderDetailScreenState
+    extends State<LiveRestaurantOrderDetailScreen> {
+  late final AuthSessionService _sessionService;
+  late final RestaurantOrderApiService _orderApiService;
+  AppOrder? _order;
+  bool _isLoading = false;
+  bool _isUpdating = false;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _order = widget.initialOrder;
+    _sessionService = AuthSessionService();
+    _orderApiService = RestaurantOrderApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _sessionService,
+      ),
+    );
+    if (_order == null) {
+      unawaited(_loadOrder());
+    }
+  }
+
+  Future<AuthSession> _readSession() async {
+    final session = await _sessionService.readSession();
+    if (session == null || session.token.trim().isEmpty) {
+      throw const AuthApiException('Please log in again.');
+    }
+    return session;
+  }
+
+  Future<void> _loadOrder() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+    try {
+      final order = await _orderApiService.fetchOrder(
+        session: await _readSession(),
+        orderId: widget.orderId,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _order = order;
+        _isLoading = false;
+      });
+    } catch (error) {
+      debugPrint('Restaurant order detail load failed: $error');
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Could not load this order.';
+      });
+    }
+  }
+
+  Future<void> _updateStatus(String status) async {
+    final order = _order;
+    if (order == null || _isUpdating) {
+      return;
+    }
+    setState(() => _isUpdating = true);
+    try {
+      await _orderApiService.updateStatus(
+        session: await _readSession(),
+        orderId: order.id,
+        status: status,
+      );
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pop(true);
+    } catch (error) {
+      debugPrint('Restaurant order status update failed: $error');
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Could not update the order. Please try again.'),
+          ),
+        );
+    } finally {
+      if (mounted) {
+        setState(() => _isUpdating = false);
+      }
+    }
+  }
+
+  List<_RestaurantOrderAction> _actionsFor(AppOrder order) {
+    switch (order.status.trim().toLowerCase().replaceAll('-', '_')) {
+      case 'pending':
+        return const [
+          _RestaurantOrderAction('Accept', 'accepted', true),
+          _RestaurantOrderAction('Reject', 'rejected', false),
+        ];
+      case 'accepted':
+        return const [
+          _RestaurantOrderAction('Start Preparing', 'preparing', true),
+          _RestaurantOrderAction('Reject', 'rejected', false),
+        ];
+      case 'preparing':
+        return const [_RestaurantOrderAction('Mark Ready', 'ready', true)];
+      case 'ready':
+        return const [
+          _RestaurantOrderAction('Send Out', 'on_the_way', true),
+          _RestaurantOrderAction('Mark Delivered', 'delivered', false),
+        ];
+      case 'on_the_way':
+      case 'on the way':
+        return const [
+          _RestaurantOrderAction('Mark Delivered', 'delivered', true),
+        ];
+    }
+    return const <_RestaurantOrderAction>[];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final order = _order;
+    return Scaffold(
+      appBar: AppBar(title: Text(order?.displayId ?? 'Order')),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _errorMessage != null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _errorMessage!,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton.icon(
+                      onPressed: () => unawaited(_loadOrder()),
+                      icon: const Icon(Icons.refresh_rounded),
+                      label: const Text('Try again'),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : order == null
+          ? const Center(child: Text('Order not found.'))
+          : ListView(
+              padding: const EdgeInsets.all(20),
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        order.customerName,
+                        style: Theme.of(context).textTheme.headlineSmall,
+                      ),
+                    ),
+                    _OrderStatusChip(label: order.statusLabel),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                _OrderInfoRow(label: 'Restaurant', value: order.restaurantName),
+                _OrderInfoRow(label: 'Items', value: order.itemSummary),
+                _OrderInfoRow(label: 'Channel', value: order.channelLabel),
+                if (order.etaLabel.trim().isNotEmpty)
+                  _OrderInfoRow(label: 'ETA', value: order.etaLabel),
+                if (order.addressLabel.trim().isNotEmpty)
+                  _OrderInfoRow(label: 'Address', value: order.addressLabel),
+                _OrderInfoRow(label: 'Total', value: order.totalLabel),
+                if (order.items.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    'Line items',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ...order.items.map(
+                    (item) => ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(item.title),
+                      subtitle: Text(item.quantityLabel),
+                      trailing: Text(item.totalLabel),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 18),
+                ..._actionsFor(order).map((action) {
+                  final buttonChild = _isUpdating
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(action.label);
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: action.primary
+                        ? FilledButton(
+                            onPressed: _isUpdating
+                                ? null
+                                : () => unawaited(_updateStatus(action.status)),
+                            child: buttonChild,
+                          )
+                        : OutlinedButton(
+                            onPressed: _isUpdating
+                                ? null
+                                : () => unawaited(_updateStatus(action.status)),
+                            child: buttonChild,
+                          ),
+                  );
+                }),
+              ],
+            ),
+    );
+  }
+}
+
+class _RestaurantOrderAction {
+  const _RestaurantOrderAction(this.label, this.status, this.primary);
+
+  final String label;
+  final String status;
+  final bool primary;
+}
+
+class _OrderStatusChip extends StatelessWidget {
+  const _OrderStatusChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFEFE8),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Color(0xFFB65D37),
+          fontWeight: FontWeight.w800,
+          fontSize: 12,
+        ),
+      ),
+    );
+  }
+}
+
+class _OrderInfoRow extends StatelessWidget {
+  const _OrderInfoRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 92,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xFF7D6C60),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                color: Color(0xFF231A16),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
