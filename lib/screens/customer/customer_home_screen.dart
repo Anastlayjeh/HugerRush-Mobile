@@ -923,16 +923,35 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
 
   Future<void> _sharePromo(DemoFeedPost post) async {
     final current = _feedPostsById[post.id] ?? post;
-    setState(() {
-      _feedPostsById[post.id] = current.copyWith(
-        shareCount: current.shareCount + 1,
-      );
-    });
-    await showShareFallbackDialog(
-      context,
+    final result = await PostShareService.instance.sharePost(
+      postId: post.id,
       title: post.restaurantName,
-      body: post.caption,
+      caption: post.caption,
+      creatorHandle: post.restaurantHandle,
     );
+    if (!mounted) {
+      return;
+    }
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.hideCurrentSnackBar();
+    if (!result.success) {
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text(
+            result.errorMessage ??
+                'Unable to share this post right now. Please try again.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (result.copiedToClipboard) {
+      messenger?.showSnackBar(
+        const SnackBar(content: Text('Link copied to clipboard.')),
+      );
+    }
+    final sharedPost = current.copyWith(shareCount: current.shareCount + 1);
+    setState(() => _feedPostsById[post.id] = sharedPost);
     final session = await _resolveSession();
     if (session == null) {
       return;
@@ -948,6 +967,15 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
         setState(() => _feedPostsById[post.id] = current);
       }
     }
+  }
+
+  Future<void> _reportFeedPost(DemoFeedPost post) async {
+    await showReportSheet(
+      context,
+      itemType: ReportItemType.feedPost,
+      itemId: post.id,
+      itemTitle: post.restaurantName,
+    );
   }
 
   Future<void> _openPromoDetails(DemoFeedPost post) async {
@@ -1133,109 +1161,133 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
                             thumbnailUrl: video.thumbnailUrl,
                           ),
                         ),
-                        Positioned.fill(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [
-                                  const Color(0x08000000),
-                                  const Color(0x6B000000),
-                                  const Color(0xD100131A),
-                                ],
-                                stops: const [0.0, 0.6, 1.0],
+                        if (!_isVideoHoldActive) ...[
+                          Positioned.fill(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    const Color(0x08000000),
+                                    const Color(0x6B000000),
+                                    const Color(0xD100131A),
+                                  ],
+                                  stops: const [0.0, 0.6, 1.0],
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        SafeArea(
-                          bottom: false,
-                          child: Padding(
-                            padding: EdgeInsets.fromLTRB(
-                              metrics.horizontalPadding,
-                              metrics.topPadding,
-                              metrics.horizontalPadding,
-                              0,
-                            ),
-                            child: Column(
-                              children: [
-                                SizedBox(height: topOverlayReservedHeight),
-                                Expanded(
-                                  child: Align(
-                                    alignment: Alignment.bottomCenter,
-                                    child: Row(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.end,
-                                      children: [
-                                        Expanded(
-                                          child: _FeedDetails(
-                                            post: post,
+                          SafeArea(
+                            bottom: false,
+                            child: Padding(
+                              padding: EdgeInsets.fromLTRB(
+                                metrics.horizontalPadding,
+                                metrics.topPadding,
+                                metrics.horizontalPadding,
+                                0,
+                              ),
+                              child: Column(
+                                children: [
+                                  SizedBox(height: topOverlayReservedHeight),
+                                  Expanded(
+                                    child: Align(
+                                      alignment: Alignment.bottomCenter,
+                                      child: Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.end,
+                                        children: [
+                                          Expanded(
+                                            child: _FeedDetails(
+                                              post: post,
+                                              metrics: metrics,
+                                              onOpenRestaurant: () =>
+                                                  _openRestaurantDetails(post),
+                                              onOpenReviews: () =>
+                                                  _openRestaurantReviews(post),
+                                              onOpenAudio: () =>
+                                                  _openPromoDetails(post),
+                                              showOrderNow: showOrderNow,
+                                              orderNowPriceLabel:
+                                                  video.priceLabel,
+                                              onDismissOrderNow: () =>
+                                                  _dismissOrderNowForVideoIndex(
+                                                    index,
+                                                  ),
+                                              onOrderNowTap: () =>
+                                                  _openOrderNowCart(
+                                                    post,
+                                                    video,
+                                                    videoIndex: index,
+                                                  ),
+                                            ),
+                                          ),
+                                          SizedBox(width: metrics.railGap),
+                                          _ActionRail(
                                             metrics: metrics,
+                                            post: post,
                                             onOpenRestaurant: () =>
                                                 _openRestaurantDetails(post),
-                                            onOpenReviews: () =>
-                                                _openRestaurantReviews(post),
-                                            onOpenAudio: () =>
-                                                _openPromoDetails(post),
-                                            showOrderNow: showOrderNow,
-                                            orderNowPriceLabel:
-                                                video.priceLabel,
-                                            onDismissOrderNow: () =>
-                                                _dismissOrderNowForVideoIndex(
-                                                  index,
-                                                ),
-                                            onOrderNowTap: () =>
-                                                _openOrderNowCart(
-                                                  post,
-                                                  video,
-                                                  videoIndex: index,
-                                                ),
+                                            onToggleFollow: () =>
+                                                _toggleFollow(post),
+                                            onToggleLike: () =>
+                                                _toggleLike(post),
+                                            onToggleSave: () =>
+                                                _toggleSave(post),
+                                            onOpenComments: () =>
+                                                _openComments(post),
+                                            onShare: () => _sharePromo(post),
+                                            onReport: () =>
+                                                _reportFeedPost(post),
                                           ),
-                                        ),
-                                        SizedBox(width: metrics.railGap),
-                                        _ActionRail(
-                                          metrics: metrics,
-                                          post: post,
-                                          onOpenRestaurant: () =>
-                                              _openRestaurantDetails(post),
-                                          onToggleFollow: () =>
-                                              _toggleFollow(post),
-                                          onToggleLike: () => _toggleLike(post),
-                                          onToggleSave: () => _toggleSave(post),
-                                          onOpenComments: () =>
-                                              _openComments(post),
-                                          onShare: () => _sharePromo(post),
-                                        ),
-                                      ],
+                                        ],
+                                      ),
                                     ),
                                   ),
-                                ),
-                                SizedBox(
-                                  height: _clampDouble(
-                                    10 * metrics.scale,
-                                    6,
-                                    12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        if (likeBursts.isNotEmpty)
-                          Positioned.fill(
-                            child: IgnorePointer(
-                              child: Stack(
-                                children: [
-                                  for (final burst in likeBursts)
-                                    _TastyLikeBurst(
-                                      key: ValueKey<int>(burst.id),
-                                      tapPosition: burst.tapPosition,
+                                  SizedBox(
+                                    height: _clampDouble(
+                                      10 * metrics.scale,
+                                      6,
+                                      12,
                                     ),
+                                  ),
                                 ],
                               ),
                             ),
                           ),
+                          if (likeBursts.isNotEmpty)
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                child: Stack(
+                                  children: [
+                                    for (final burst in likeBursts)
+                                      _TastyLikeBurst(
+                                        key: ValueKey<int>(burst.id),
+                                        tapPosition: burst.tapPosition,
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          Positioned(
+                            left: _clampDouble(10 * metrics.scale, 8, 14),
+                            right: _clampDouble(10 * metrics.scale, 8, 14),
+                            bottom: _clampDouble(8 * metrics.scale, 6, 10),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(999),
+                              child: VideoProgressIndicator(
+                                _videoControllers[index],
+                                allowScrubbing: true,
+                                padding: EdgeInsets.zero,
+                                colors: const VideoProgressColors(
+                                  playedColor: Color(0xFFFF7E4D),
+                                  bufferedColor: Color(0x80FFFFFF),
+                                  backgroundColor: Color(0x50000000),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   );
@@ -1943,6 +1995,7 @@ class _ActionRail extends StatelessWidget {
     required this.onToggleSave,
     required this.onOpenComments,
     required this.onShare,
+    required this.onReport,
   });
 
   final _ResponsiveMetrics metrics;
@@ -1953,6 +2006,7 @@ class _ActionRail extends StatelessWidget {
   final VoidCallback onToggleSave;
   final VoidCallback onOpenComments;
   final VoidCallback onShare;
+  final VoidCallback onReport;
 
   @override
   Widget build(BuildContext context) {
@@ -2000,6 +2054,13 @@ class _ActionRail extends StatelessWidget {
                 : 'Share',
             metrics: metrics,
             onTap: onShare,
+          ),
+          SizedBox(height: metrics.railItemGap),
+          _ActionButton(
+            icon: Icons.flag_outlined,
+            value: 'Report',
+            metrics: metrics,
+            onTap: onReport,
           ),
         ],
       ),
@@ -3065,6 +3126,30 @@ class _FeedCommentsBottomSheetState extends State<_FeedCommentsBottomSheet> {
                                               color: Color(0xFF8A7A6F),
                                               fontSize: 12,
                                               fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          PopupMenuButton<String>(
+                                            tooltip: 'More actions',
+                                            onSelected: (value) {
+                                              if (value == 'report') {
+                                                showReportSheet(
+                                                  context,
+                                                  itemType: ReportItemType.comment,
+                                                  itemId: comment.id,
+                                                  itemTitle: comment.authorName,
+                                                );
+                                              }
+                                            },
+                                            itemBuilder: (_) => const [
+                                              PopupMenuItem<String>(
+                                                value: 'report',
+                                                child: Text('Report comment'),
+                                              ),
+                                            ],
+                                            icon: const Icon(
+                                              Icons.more_vert_rounded,
+                                              size: 18,
+                                              color: Color(0xFF9E8A7E),
                                             ),
                                           ),
                                         ],

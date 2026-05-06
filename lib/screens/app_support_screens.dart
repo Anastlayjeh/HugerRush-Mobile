@@ -1,9 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../models/demo_app_models.dart';
 import '../services/demo_app_repository.dart';
+import '../services/moderation_support_models.dart';
+import '../services/order_support_service.dart';
+import '../services/post_share_service.dart';
+import '../services/report_service.dart';
 import '../services/restaurant_menu_api_service.dart';
+import '../services/social_graph_service.dart';
 
 final Set<String> _customerSavedRestaurantKeys = <String>{};
 
@@ -66,6 +73,454 @@ void setCustomerRestaurantSaved({
     handle: handle,
     isSaved: isSaved,
   );
+}
+
+Future<bool> showReportSheet(
+  BuildContext context, {
+  required ReportItemType itemType,
+  required String itemId,
+  String? itemTitle,
+  List<ReportReason> reasons = ReportReason.values,
+}) async {
+  final cleanItemId = itemId.trim();
+  if (cleanItemId.isEmpty) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(content: Text('Unable to report this item right now.')),
+      );
+    return false;
+  }
+
+  final descriptionController = TextEditingController();
+  var selectedReason = reasons.first;
+  var isSubmitting = false;
+  var submitted = false;
+
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: const Color(0xFFFFFBF7),
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (sheetContext) {
+      return StatefulBuilder(
+        builder: (context, setSheetState) {
+          final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+          Future<void> submit() async {
+            if (isSubmitting) {
+              return;
+            }
+            setSheetState(() => isSubmitting = true);
+            try {
+              await ReportService.instance.submitReport(
+                itemType: itemType,
+                itemId: cleanItemId,
+                reason: selectedReason,
+                description: descriptionController.text,
+              );
+              submitted = true;
+              if (sheetContext.mounted) {
+                Navigator.of(sheetContext).pop();
+              }
+            } on ReportServiceException catch (error) {
+              if (!sheetContext.mounted) {
+                return;
+              }
+              final messenger = ScaffoldMessenger.maybeOf(sheetContext);
+              messenger
+                ?..hideCurrentSnackBar()
+                ..showSnackBar(SnackBar(content: Text(error.message)));
+              setSheetState(() => isSubmitting = false);
+            } catch (_) {
+              if (!sheetContext.mounted) {
+                return;
+              }
+              final messenger = ScaffoldMessenger.maybeOf(sheetContext);
+              messenger
+                ?..hideCurrentSnackBar()
+                ..showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'We could not submit your report. Please try again.',
+                    ),
+                  ),
+                );
+              setSheetState(() => isSubmitting = false);
+            }
+          }
+
+          return SafeArea(
+            top: false,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(16, 14, 16, bottomInset + 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Report',
+                    style: TextStyle(
+                      color: Color(0xFF231A16),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    itemTitle?.trim().isNotEmpty == true
+                        ? 'You are reporting: ${itemTitle!.trim()}'
+                        : 'You are reporting a ${itemType.label.toLowerCase()}.',
+                    style: const TextStyle(
+                      color: Color(0xFF7D6C60),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEFCFA),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFFEADBCB)),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<ReportReason>(
+                        value: selectedReason,
+                        isExpanded: true,
+                        items: reasons.map((reason) {
+                          return DropdownMenuItem<ReportReason>(
+                            value: reason,
+                            child: Text(
+                              reason.label,
+                              style: const TextStyle(
+                                color: Color(0xFF2F241B),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          );
+                        }).toList(growable: false),
+                        onChanged: isSubmitting
+                            ? null
+                            : (value) {
+                                if (value == null) {
+                                  return;
+                                }
+                                setSheetState(() => selectedReason = value);
+                              },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: descriptionController,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      hintText: 'Optional details',
+                      filled: true,
+                      fillColor: const Color(0xFFFEFCFA),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: Color(0xFFEADBCB)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: Color(0xFFEADBCB)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: isSubmitting
+                              ? null
+                              : () => Navigator.of(sheetContext).pop(),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF7B675A),
+                            side: const BorderSide(color: Color(0xFFE3D2C4)),
+                            minimumSize: const Size.fromHeight(46),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          child: const Text(
+                            'Cancel',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: isSubmitting ? null : submit,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFFFF7E4D),
+                            minimumSize: const Size.fromHeight(46),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          child: isSubmitting
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Text(
+                                  'Submit',
+                                  style: TextStyle(fontWeight: FontWeight.w800),
+                                ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+
+  descriptionController.dispose();
+  if (submitted && context.mounted) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(content: Text('Thanks. Your report has been submitted.')),
+      );
+  }
+  return submitted;
+}
+
+Future<bool> showOrderIssueSheet(
+  BuildContext context, {
+  required String orderId,
+  String? restaurantName,
+}) async {
+  final cleanOrderId = orderId.trim();
+  if (cleanOrderId.isEmpty) {
+    return false;
+  }
+  final detailsController = TextEditingController();
+  var selectedReason = OrderIssueReason.missingItem;
+  var isSubmitting = false;
+  var submitted = false;
+
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: const Color(0xFFFFFBF7),
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (sheetContext) {
+      return StatefulBuilder(
+        builder: (context, setSheetState) {
+          final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+
+          Future<void> submit() async {
+            if (isSubmitting) {
+              return;
+            }
+            setSheetState(() => isSubmitting = true);
+            try {
+              await OrderSupportService.instance.submitOrderIssue(
+                orderId: cleanOrderId,
+                reason: selectedReason,
+                description: detailsController.text,
+              );
+              submitted = true;
+              if (sheetContext.mounted) {
+                Navigator.of(sheetContext).pop();
+              }
+            } on OrderSupportServiceException catch (error) {
+              if (!sheetContext.mounted) {
+                return;
+              }
+              final messenger = ScaffoldMessenger.maybeOf(sheetContext);
+              messenger
+                ?..hideCurrentSnackBar()
+                ..showSnackBar(SnackBar(content: Text(error.message)));
+              setSheetState(() => isSubmitting = false);
+            } catch (_) {
+              if (!sheetContext.mounted) {
+                return;
+              }
+              final messenger = ScaffoldMessenger.maybeOf(sheetContext);
+              messenger
+                ?..hideCurrentSnackBar()
+                ..showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'We could not submit your issue right now. Please try again.',
+                    ),
+                  ),
+                );
+              setSheetState(() => isSubmitting = false);
+            }
+          }
+
+          return SafeArea(
+            top: false,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(16, 14, 16, bottomInset + 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Order Help',
+                    style: TextStyle(
+                      color: Color(0xFF231A16),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    restaurantName?.trim().isNotEmpty == true
+                        ? 'Order #$cleanOrderId - ${restaurantName!.trim()}'
+                        : 'Order #$cleanOrderId',
+                    style: const TextStyle(
+                      color: Color(0xFF7D6C60),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEFCFA),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFFEADBCB)),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<OrderIssueReason>(
+                        value: selectedReason,
+                        isExpanded: true,
+                        items: OrderIssueReason.values.map((reason) {
+                          return DropdownMenuItem<OrderIssueReason>(
+                            value: reason,
+                            child: Text(
+                              reason.label,
+                              style: const TextStyle(
+                                color: Color(0xFF2F241B),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          );
+                        }).toList(growable: false),
+                        onChanged: isSubmitting
+                            ? null
+                            : (value) {
+                                if (value == null) {
+                                  return;
+                                }
+                                setSheetState(() => selectedReason = value);
+                              },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: detailsController,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      hintText: 'Describe what happened',
+                      filled: true,
+                      fillColor: const Color(0xFFFEFCFA),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: Color(0xFFEADBCB)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: Color(0xFFEADBCB)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: isSubmitting
+                              ? null
+                              : () => Navigator.of(sheetContext).pop(),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF7B675A),
+                            side: const BorderSide(color: Color(0xFFE3D2C4)),
+                            minimumSize: const Size.fromHeight(46),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          child: const Text(
+                            'Cancel',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: isSubmitting ? null : submit,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFFFF7E4D),
+                            minimumSize: const Size.fromHeight(46),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          child: isSubmitting
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Text(
+                                  'Submit',
+                                  style: TextStyle(fontWeight: FontWeight.w800),
+                                ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+
+  detailsController.dispose();
+  if (submitted && context.mounted) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(content: Text('Support request submitted successfully.')),
+      );
+  }
+  return submitted;
 }
 
 Future<void> showShareFallbackDialog(
@@ -134,6 +589,7 @@ Future<void> showRestaurantProfilePopup(
   ValueChanged<bool>? onToggleSave,
   VoidCallback? onOpenReviews,
   bool showMenuCategoryFilter = false,
+  bool enableReportButton = true,
 }) {
   final resolvedInitiallySaved =
       showSaveButton &&
@@ -184,6 +640,15 @@ Future<void> showRestaurantProfilePopup(
         onToggleSave: handleToggleSave,
         onOpenReviews: onOpenReviews,
         showMenuCategoryFilter: showMenuCategoryFilter,
+        showReportButton: enableReportButton,
+        onReport: () {
+          showReportSheet(
+            context,
+            itemType: ReportItemType.restaurantProfile,
+            itemId: handle.trim().isEmpty ? restaurantName : handle,
+            itemTitle: restaurantName,
+          );
+        },
       );
     },
   );
@@ -211,6 +676,27 @@ Future<void> showRestaurantMenuItemDetailsPopup(
   );
 }
 
+typedef RestaurantVideoManageCallback = Future<void> Function(int index);
+
+Future<void> openRestaurantProfileVideoFeed(
+  BuildContext context, {
+  required String restaurantName,
+  required List<RestaurantProfileVideoPreview> videos,
+  int initialIndex = 0,
+  RestaurantVideoManageCallback? onManageVideo,
+}) {
+  return Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => _RestaurantProfileVideoFeedScreen(
+        restaurantName: restaurantName,
+        videos: videos,
+        initialIndex: initialIndex,
+        onManageVideo: onManageVideo,
+      ),
+    ),
+  );
+}
+
 class _RestaurantMenuItemDetailsSheet extends StatelessWidget {
   const _RestaurantMenuItemDetailsSheet({
     required this.item,
@@ -232,6 +718,14 @@ class _RestaurantMenuItemDetailsSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    Future<void> reportItem() async {
+      await showReportSheet(
+        context,
+        itemType: ReportItemType.menuItem,
+        itemId: item.id,
+        itemTitle: item.title,
+      );
+    }
     void addToCart() {
       final messenger = ScaffoldMessenger.maybeOf(context);
       Navigator.of(context).pop();
@@ -439,6 +933,27 @@ class _RestaurantMenuItemDetailsSheet extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 16),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: reportItem,
+                    icon: const Icon(Icons.flag_outlined, size: 18),
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFFFF7E4D),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 0,
+                        vertical: 0,
+                      ),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    label: const Text(
+                      'Report item',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 if (allowAddToCart)
                   Row(
                     children: [
@@ -560,6 +1075,8 @@ class _RestaurantProfilePopup extends StatelessWidget {
     this.onToggleSave,
     this.onOpenReviews,
     this.showMenuCategoryFilter = false,
+    this.showReportButton = true,
+    this.onReport,
   });
 
   final String restaurantName;
@@ -586,6 +1103,8 @@ class _RestaurantProfilePopup extends StatelessWidget {
   final ValueChanged<bool>? onToggleSave;
   final VoidCallback? onOpenReviews;
   final bool showMenuCategoryFilter;
+  final bool showReportButton;
+  final VoidCallback? onReport;
 
   static const String _defaultProfileImage =
       'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=600&q=80';
@@ -826,6 +1345,8 @@ class _RestaurantProfilePopup extends StatelessWidget {
                   initiallySaved: initiallySaved,
                   onToggleSave: onToggleSave,
                   onOpenReviews: onOpenReviews,
+                  showReportButton: showReportButton,
+                  onReport: onReport,
                 ),
                 const SizedBox(height: 18),
                 Padding(
@@ -923,6 +1444,8 @@ class _PopupRestaurantHero extends StatefulWidget {
     this.initiallySaved = false,
     this.onToggleSave,
     this.onOpenReviews,
+    this.showReportButton = true,
+    this.onReport,
   });
 
   final String restaurantName;
@@ -942,6 +1465,8 @@ class _PopupRestaurantHero extends StatefulWidget {
   final bool initiallySaved;
   final ValueChanged<bool>? onToggleSave;
   final VoidCallback? onOpenReviews;
+  final bool showReportButton;
+  final VoidCallback? onReport;
 
   @override
   State<_PopupRestaurantHero> createState() => _PopupRestaurantHeroState();
@@ -1057,6 +1582,35 @@ class _PopupRestaurantHeroState extends State<_PopupRestaurantHero> {
                           onTap: () => Navigator.of(context).pop(),
                         ),
                         const Spacer(),
+                        if (widget.showReportButton)
+                          PopupMenuButton<String>(
+                            tooltip: 'More actions',
+                            color: const Color(0xFFFFFBF7),
+                            onSelected: (value) {
+                              if (value == 'report') {
+                                widget.onReport?.call();
+                              }
+                            },
+                            itemBuilder: (_) => const [
+                              PopupMenuItem<String>(
+                                value: 'report',
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.flag_outlined,
+                                      color: Color(0xFFFF7E4D),
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text('Report'),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            child: const _PopupTopOverlayButton(
+                              icon: Icons.more_horiz_rounded,
+                            ),
+                          ),
+                        if (widget.showReportButton) const SizedBox(width: 8),
                         if (widget.showSaveButton)
                           _PopupTopOverlayButton(
                             icon: _isSaved
@@ -1810,14 +2364,11 @@ class _RestaurantProfileVideoGrid extends StatelessWidget {
           return _RestaurantProfileVideoGridTile(
             video: video,
             onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => _RestaurantProfileVideoFeedScreen(
-                    restaurantName: restaurantName,
-                    videos: videos,
-                    initialIndex: index,
-                  ),
-                ),
+              openRestaurantProfileVideoFeed(
+                context,
+                restaurantName: restaurantName,
+                videos: videos,
+                initialIndex: index,
               );
             },
           );
@@ -2094,11 +2645,13 @@ class _RestaurantProfileVideoFeedScreen extends StatefulWidget {
     required this.restaurantName,
     required this.videos,
     required this.initialIndex,
+    this.onManageVideo,
   });
 
   final String restaurantName;
   final List<RestaurantProfileVideoPreview> videos;
   final int initialIndex;
+  final RestaurantVideoManageCallback? onManageVideo;
 
   @override
   State<_RestaurantProfileVideoFeedScreen> createState() =>
@@ -2308,11 +2861,45 @@ class _RestaurantProfileVideoFeedScreenState
 
   Future<void> _shareVideo(int index) async {
     final video = widget.videos[index];
-    await showShareFallbackDialog(
-      context,
+    final result = await PostShareService.instance.sharePost(
+      postId: _postIdForVideoIndex(index),
       title: widget.restaurantName,
-      body: video.title,
+      caption: video.title,
+      creatorHandle: widget.restaurantName,
     );
+    if (!mounted) {
+      return;
+    }
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.hideCurrentSnackBar();
+    if (!result.success) {
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text(
+            result.errorMessage ??
+                'Unable to share this video right now. Please try again.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (result.copiedToClipboard) {
+      messenger?.showSnackBar(
+        const SnackBar(content: Text('Link copied to clipboard.')),
+      );
+    }
+  }
+
+  Future<void> _openManageVideo() async {
+    final onManageVideo = widget.onManageVideo;
+    if (onManageVideo == null) {
+      return;
+    }
+    await onManageVideo(_currentIndex);
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
   }
 
   String _compactCount(int value) {
@@ -2449,7 +3036,13 @@ class _RestaurantProfileVideoFeedScreenState
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 42),
+                            if (widget.onManageVideo != null)
+                              _VideoOverlayIconButton(
+                                icon: Icons.edit_rounded,
+                                onTap: _openManageVideo,
+                              )
+                            else
+                              const SizedBox(width: 42),
                           ],
                         ),
                         const Spacer(),
@@ -3734,6 +4327,29 @@ class _RestaurantProfileReviewTile extends StatelessWidget {
                   ],
                 ),
               ),
+              PopupMenuButton<String>(
+                tooltip: 'More actions',
+                onSelected: (value) {
+                  if (value == 'report') {
+                    showReportSheet(
+                      context,
+                      itemType: ReportItemType.review,
+                      itemId: '${review.customerName}-${review.orderLabel}',
+                      itemTitle: review.customerName,
+                    );
+                  }
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem<String>(
+                    value: 'report',
+                    child: Text('Report review'),
+                  ),
+                ],
+                icon: const Icon(
+                  Icons.more_vert_rounded,
+                  color: Color(0xFF9A8B7E),
+                ),
+              ),
             ],
           ),
           if (hasComment) ...[
@@ -4122,11 +4738,13 @@ class SearchScreen extends StatefulWidget {
     this.initialQuery = '',
     this.includeCustomers = true,
     this.returnSubmittedQuery = false,
+    this.allowFriendActions = false,
   });
 
   final String initialQuery;
   final bool includeCustomers;
   final bool returnSubmittedQuery;
+  final bool allowFriendActions;
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -4142,13 +4760,13 @@ class _SearchScreenState extends State<SearchScreen> {
 
   String get _searchHintText {
     return widget.includeCustomers
-        ? 'Search restaurants or customers'
+        ? 'Search users or restaurants'
         : 'Search restaurants';
   }
 
   String get _searchPromptText {
     return widget.includeCustomers
-        ? 'Start typing to search restaurants or customers.'
+        ? 'Start typing to search users or restaurants.'
         : 'Start typing to search restaurants.';
   }
 
@@ -4246,6 +4864,87 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
+  Future<void> _openCustomerProfileFromResult(DemoSearchResult result) async {
+    if (!result.id.startsWith('thread-')) {
+      return;
+    }
+    final threadId = result.id.substring('thread-'.length);
+    final thread = _repository.findThread(threadId);
+    if (thread == null || !mounted) {
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _CustomerPublicProfileScreen(
+          profileId: 'customer-${thread.id}',
+          displayName: thread.customerName,
+          subtitle: thread.lastMessage,
+          allowFriendActions: widget.allowFriendActions,
+        ),
+      ),
+    );
+  }
+
+  List<DemoSearchResult> get _restaurantResults {
+    return _results
+        .where((item) => item.categoryLabel.toLowerCase() == 'restaurant')
+        .toList(growable: false);
+  }
+
+  List<DemoSearchResult> get _customerResults {
+    return _results
+        .where((item) => item.categoryLabel.toLowerCase() == 'customer')
+        .toList(growable: false);
+  }
+
+  Widget _buildResultsSection({
+    required String title,
+    required List<DemoSearchResult> items,
+    required VoidCallback Function(DemoSearchResult result)? onTapBuilder,
+  }) {
+    if (items.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+          child: Text(
+            title,
+            style: const TextStyle(
+              color: Color(0xFF6D5B4F),
+              fontSize: 12.5,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+        ...items.asMap().entries.map((entry) {
+          final index = entry.key;
+          final result = entry.value;
+          return Column(
+            children: [
+              ListTile(
+                onTap: onTapBuilder == null ? null : onTapBuilder(result),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                tileColor: const Color(0xFFF3F0EC),
+                title: Text(result.title),
+                subtitle: Text(result.subtitle),
+                trailing: const Icon(
+                  Icons.chevron_right_rounded,
+                  color: Color(0xFFB59885),
+                ),
+              ),
+              if (index != items.length - 1) const Divider(height: 1),
+            ],
+          );
+        }),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -4316,41 +5015,430 @@ class _SearchScreenState extends State<SearchScreen> {
                           padding: EdgeInsets.symmetric(vertical: 20),
                           child: Center(
                             child: Text(
-                              'No match found',
+                              'No users or restaurants found.',
                               textAlign: TextAlign.center,
                             ),
                           ),
                         )
-                      : ListView.separated(
+                      : ListView(
                           shrinkWrap: true,
-                          itemCount: _results.length,
-                          separatorBuilder: (_, _) => const Divider(height: 1),
-                          itemBuilder: (context, index) {
-                            final result = _results[index];
-                            return ListTile(
-                              onTap: result.id.startsWith('post-')
-                                  ? () =>
-                                        _openRestaurantProfileFromResult(result)
-                                  : null,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              tileColor: const Color(0xFFF3F0EC),
-                              title: Text(result.title),
-                              subtitle: Text(result.subtitle),
-                              trailing: Text(
-                                result.categoryLabel,
-                                style: const TextStyle(
-                                  color: Color(0xFFFF7E4D),
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            );
-                          },
+                          children: [
+                            _buildResultsSection(
+                              title: 'Users',
+                              items: _customerResults,
+                              onTapBuilder: (result) =>
+                                  () => _openCustomerProfileFromResult(result),
+                            ),
+                            _buildResultsSection(
+                              title: 'Restaurants',
+                              items: _restaurantResults,
+                              onTapBuilder: (result) =>
+                                  () =>
+                                      _openRestaurantProfileFromResult(result),
+                            ),
+                          ],
                         ),
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CustomerPublicProfileScreen extends StatefulWidget {
+  const _CustomerPublicProfileScreen({
+    required this.profileId,
+    required this.displayName,
+    required this.subtitle,
+    required this.allowFriendActions,
+  });
+
+  final String profileId;
+  final String displayName;
+  final String subtitle;
+  final bool allowFriendActions;
+
+  @override
+  State<_CustomerPublicProfileScreen> createState() =>
+      _CustomerPublicProfileScreenState();
+}
+
+class _CustomerPublicProfileScreenState extends State<_CustomerPublicProfileScreen> {
+  static const String _viewerId = 'viewer-customer';
+  final _socialGraphService = SocialGraphService.instance;
+  FriendshipStatus _friendshipStatus = FriendshipStatus.none;
+  bool _isFollowing = false;
+  bool _isUpdatingFollow = false;
+  bool _isUpdatingFriend = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncState();
+  }
+
+  String get _targetId => widget.profileId.trim().toLowerCase();
+
+  String get _handle {
+    final cleaned = widget.displayName
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '');
+    return cleaned.isEmpty ? '@customer' : '@$cleaned';
+  }
+
+  String get _initials {
+    final words = widget.displayName
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .toList(growable: false);
+    if (words.isEmpty) {
+      return 'CU';
+    }
+    if (words.length == 1) {
+      final value = words.first.toUpperCase();
+      return value.length >= 2 ? value.substring(0, 2) : value;
+    }
+    return '${words.first[0]}${words.last[0]}'.toUpperCase();
+  }
+
+  Future<void> _syncState() async {
+    final follow = _socialGraphService.isFollowingCustomer(
+      viewerId: _viewerId,
+      targetId: _targetId,
+    );
+    final friend = await _socialGraphService.refreshFriendshipStatus(
+      viewerId: _viewerId,
+      targetId: _targetId,
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isFollowing = follow;
+      _friendshipStatus = friend;
+    });
+    if (_friendshipStatus == FriendshipStatus.requestSent) {
+      _pollFriendRequest();
+    }
+  }
+
+  Future<void> _pollFriendRequest() async {
+    await Future<void>.delayed(const Duration(seconds: 3));
+    if (!mounted || _friendshipStatus != FriendshipStatus.requestSent) {
+      return;
+    }
+    final status = await _socialGraphService.refreshFriendshipStatus(
+      viewerId: _viewerId,
+      targetId: _targetId,
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() => _friendshipStatus = status);
+  }
+
+  Future<void> _toggleFollow() async {
+    if (_isUpdatingFollow) {
+      return;
+    }
+    setState(() => _isUpdatingFollow = true);
+    try {
+      final nextState = await _socialGraphService.toggleFollowCustomer(
+        viewerId: _viewerId,
+        targetId: _targetId,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() => _isFollowing = nextState);
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(nextState ? 'Now following user.' : 'Unfollowed user.'),
+          ),
+        );
+    } finally {
+      if (mounted) {
+        setState(() => _isUpdatingFollow = false);
+      }
+    }
+  }
+
+  Future<void> _sendFriendRequest() async {
+    if (_isUpdatingFriend || _friendshipStatus != FriendshipStatus.none) {
+      return;
+    }
+    setState(() => _isUpdatingFriend = true);
+    try {
+      final next = await _socialGraphService.sendFriendRequest(
+        viewerId: _viewerId,
+        targetId: _targetId,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() => _friendshipStatus = next);
+      _pollFriendRequest();
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Friend request sent.')),
+        );
+    } finally {
+      if (mounted) {
+        setState(() => _isUpdatingFriend = false);
+      }
+    }
+  }
+
+  Future<void> _removeFriend() async {
+    if (_isUpdatingFriend || _friendshipStatus != FriendshipStatus.friends) {
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Remove friend'),
+          content: Text('Remove ${widget.displayName} from your friends list?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFFF7E4D),
+              ),
+              child: const Text('Remove'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) {
+      return;
+    }
+
+    setState(() => _isUpdatingFriend = true);
+    try {
+      final next = await _socialGraphService.removeFriend(
+        viewerId: _viewerId,
+        targetId: _targetId,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() => _friendshipStatus = next);
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Friend removed.')),
+        );
+    } finally {
+      if (mounted) {
+        setState(() => _isUpdatingFriend = false);
+      }
+    }
+  }
+
+  Future<void> _reportProfile() async {
+    await showReportSheet(
+      context,
+      itemType: ReportItemType.customerProfile,
+      itemId: _targetId,
+      itemTitle: widget.displayName,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final showFriendActions = widget.allowFriendActions;
+    return Scaffold(
+      backgroundColor: const Color(0xFFFFFBF7),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFFFFBF7),
+        surfaceTintColor: Colors.transparent,
+        title: const Text('User Profile'),
+        actions: [
+          IconButton(
+            onPressed: _reportProfile,
+            tooltip: 'Report profile',
+            icon: const Icon(Icons.flag_outlined),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          child: Column(
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEFCFA),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFFECDDCF)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 62,
+                      height: 62,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [Color(0xFFFFD8B6), Color(0xFFFFAE79)],
+                        ),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        _initials,
+                        style: const TextStyle(
+                          color: Color(0xFF6A3D24),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.displayName,
+                            style: const TextStyle(
+                              color: Color(0xFF231A16),
+                              fontSize: 18,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _handle,
+                            style: const TextStyle(
+                              color: Color(0xFF88786D),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            widget.subtitle,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFF7D6C60),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              height: 1.3,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              if (!showFriendActions)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF2E9),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFF2D8C5)),
+                  ),
+                  child: const Text(
+                    'This profile is shown in preview mode.',
+                    style: TextStyle(
+                      color: Color(0xFF6A574B),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                )
+              else
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _isUpdatingFollow ? null : _toggleFollow,
+                        icon: Icon(
+                          _isFollowing
+                              ? Icons.check_rounded
+                              : Icons.person_add_alt_rounded,
+                        ),
+                        label: Text(_isFollowing ? 'Following' : 'Follow'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFFFF7E4D),
+                          side: const BorderSide(color: Color(0xFFFFC9B2)),
+                          minimumSize: const Size.fromHeight(46),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _friendshipStatus == FriendshipStatus.none
+                          ? FilledButton(
+                              onPressed: _isUpdatingFriend
+                                  ? null
+                                  : _sendFriendRequest,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFFFF7E4D),
+                                minimumSize: const Size.fromHeight(46),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: const Text('Add Friend'),
+                            )
+                          : _friendshipStatus == FriendshipStatus.requestSent
+                          ? FilledButton(
+                              onPressed: null,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFFFFB793),
+                                minimumSize: const Size.fromHeight(46),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: const Text('Request Sent'),
+                            )
+                          : OutlinedButton(
+                              onPressed: _isUpdatingFriend ? null : _removeFriend,
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFF2F8A7E),
+                                side: const BorderSide(color: Color(0xFFCBE6E1)),
+                                minimumSize: const Size.fromHeight(46),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: const Text('Remove Friend'),
+                            ),
+                    ),
+                  ],
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -4592,9 +5680,37 @@ class _CommentsScreenState extends State<CommentsScreen> {
                   ),
                   title: Text(comment.authorName),
                   subtitle: Text(comment.body),
-                  trailing: Text(
-                    _formatTime(comment.createdAt),
-                    style: const TextStyle(fontSize: 12),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _formatTime(comment.createdAt),
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      PopupMenuButton<String>(
+                        tooltip: 'More actions',
+                        onSelected: (value) {
+                          if (value == 'report') {
+                            showReportSheet(
+                              context,
+                              itemType: ReportItemType.comment,
+                              itemId: comment.id,
+                              itemTitle: comment.authorName,
+                            );
+                          }
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem<String>(
+                            value: 'report',
+                            child: Text('Report comment'),
+                          ),
+                        ],
+                        icon: const Icon(
+                          Icons.more_vert_rounded,
+                          color: Color(0xFF9E8A7E),
+                        ),
+                      ),
+                    ],
                   ),
                 );
               },
@@ -4831,11 +5947,45 @@ class _ConversationScreenState extends State<ConversationScreen> {
     ).showSnackBar(const SnackBar(content: Text('Reply sent')));
   }
 
+  Future<void> _reportConversation() async {
+    await showReportSheet(
+      context,
+      itemType: ReportItemType.conversation,
+      itemId: widget.threadId,
+      itemTitle: _thread?.customerName,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final thread = _thread;
     return Scaffold(
-      appBar: AppBar(title: Text(thread?.customerName ?? 'Conversation')),
+      appBar: AppBar(
+        title: Text(thread?.customerName ?? 'Conversation'),
+        actions: [
+          PopupMenuButton<String>(
+            tooltip: 'Conversation actions',
+            onSelected: (value) {
+              if (value == 'report') {
+                _reportConversation();
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem<String>(
+                value: 'report',
+                child: Row(
+                  children: [
+                    Icon(Icons.flag_outlined, color: Color(0xFFFF7E4D)),
+                    SizedBox(width: 8),
+                    Text('Report conversation'),
+                  ],
+                ),
+              ),
+            ],
+            icon: const Icon(Icons.more_vert_rounded),
+          ),
+        ],
+      ),
       body: thread == null
           ? const Center(child: CircularProgressIndicator())
           : Column(

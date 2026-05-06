@@ -417,31 +417,72 @@ class _FollowingRestaurantsScreenState
     });
   }
 
-  void _toggleFollow(DemoFeedPost post) {
-    _repository
-        .toggleFollow(post.id)
-        .then((_) {
-          if (!mounted) {
-            return;
-          }
-          _refreshFollowedRestaurants();
-        })
-        .catchError((Object error) {
-          if (!mounted) {
-            return;
-          }
-          final messenger = ScaffoldMessenger.maybeOf(context);
-          if (messenger == null) {
-            return;
-          }
-          messenger
-            ..hideCurrentSnackBar()
-            ..showSnackBar(
-              const SnackBar(
-                content: Text('Could not update follow status. Try again.'),
+  Future<void> _toggleFollow(DemoFeedPost post) async {
+    await _repository.toggleFollow(post.id);
+    if (!mounted) {
+      return;
+    }
+    _refreshFollowedRestaurants();
+  }
+
+  Future<void> _confirmAndUnfollow(DemoFeedPost post) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Unfollow restaurant'),
+          content: Text('Unfollow ${post.restaurantName}?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFFF7E4D),
               ),
-            );
-        });
+              child: const Text('Unfollow'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) {
+      return;
+    }
+
+    final previous = List<DemoFeedPost>.from(_followedRestaurants);
+    setState(() {
+      _followedRestaurants.removeWhere((item) => item.id == post.id);
+    });
+    try {
+      await _toggleFollow(post);
+      if (!mounted) {
+        return;
+      }
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text('Unfollowed ${post.restaurantName}.')),
+        );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _followedRestaurants = previous;
+      });
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Could not unfollow right now. Please try again.'),
+          ),
+        );
+    }
   }
 
   Future<void> _openRestaurant(DemoFeedPost post) async {
@@ -535,6 +576,7 @@ class _FollowingRestaurantsScreenState
                           return _FollowingRestaurantTile(
                             post: post,
                             onTap: () => _openRestaurant(post),
+                            onUnfollow: () => _confirmAndUnfollow(post),
                           );
                         },
                       ),
@@ -595,10 +637,15 @@ class _FollowingRestaurantsEmptyState extends StatelessWidget {
 }
 
 class _FollowingRestaurantTile extends StatelessWidget {
-  const _FollowingRestaurantTile({required this.post, required this.onTap});
+  const _FollowingRestaurantTile({
+    required this.post,
+    required this.onTap,
+    required this.onUnfollow,
+  });
 
   final DemoFeedPost post;
   final VoidCallback onTap;
+  final VoidCallback onUnfollow;
 
   @override
   Widget build(BuildContext context) {
@@ -707,22 +754,20 @@ class _FollowingRestaurantTile extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF1F8F5),
-                  borderRadius: BorderRadius.circular(14),
+              OutlinedButton(
+                onPressed: onUnfollow,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFFF7E4D),
+                  side: const BorderSide(color: Color(0xFFFFD3BF)),
+                  minimumSize: const Size(82, 34),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
                 ),
                 child: const Text(
-                  'Following',
-                  style: TextStyle(
-                    color: Color(0xFF2F8A7E),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                  ),
+                  'Unfollow',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
                 ),
               ),
             ],
@@ -2880,10 +2925,16 @@ class _CustomerEditProfileScreenState
   }
 
   bool _isValidEmail(String value) {
-    if (value.trim().isEmpty) {
-      return true;
-    }
     return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value.trim());
+  }
+
+  bool _isValidName(String value) {
+    return RegExp(r"^[A-Za-z][A-Za-z\s'.-]{1,49}$").hasMatch(value.trim());
+  }
+
+  bool _isValidPhone(String value) {
+    final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    return digits.length >= 6 && digits.length <= 15;
   }
 
   void _handleFormChanged() {
@@ -2946,10 +2997,26 @@ class _CustomerEditProfileScreenState
 
   void _saveChanges() {
     final data = _currentData;
-    if (data.fullName.isEmpty) {
+    if (data.fullName.isEmpty ||
+        data.email.isEmpty ||
+        data.phone.isEmpty ||
+        data.country.isEmpty ||
+        data.city.isEmpty ||
+        data.streetAddress.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please add your full name.'),
+          content: Text('Please complete all required fields.'),
+          backgroundColor: Color(0xFFB7372B),
+        ),
+      );
+      return;
+    }
+    if (!_isValidName(data.fullName)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Please enter a valid name using letters, spaces, apostrophes, or dashes.',
+          ),
           backgroundColor: Color(0xFFB7372B),
         ),
       );
@@ -2959,6 +3026,15 @@ class _CustomerEditProfileScreenState
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter a valid email address.'),
+          backgroundColor: Color(0xFFB7372B),
+        ),
+      );
+      return;
+    }
+    if (!_isValidPhone(data.phone)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a valid phone number.'),
           backgroundColor: Color(0xFFB7372B),
         ),
       );
@@ -3047,6 +3123,10 @@ class _CustomerEditProfileScreenState
                 hint: 'Jane Doe',
                 controller: _fullNameController,
                 textCapitalization: TextCapitalization.words,
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r"[A-Za-z\s'.-]")),
+                  LengthLimitingTextInputFormatter(50),
+                ],
               ),
               const SizedBox(height: 12),
               _CustomerEditProfileField(
@@ -3061,6 +3141,10 @@ class _CustomerEditProfileScreenState
                 hint: '+961 03 123 456',
                 keyboardType: TextInputType.phone,
                 controller: _phoneController,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(15),
+                ],
               ),
               const SizedBox(height: 12),
               Row(
@@ -3071,6 +3155,10 @@ class _CustomerEditProfileScreenState
                       hint: 'Lebanon',
                       controller: _countryController,
                       textCapitalization: TextCapitalization.words,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r"[A-Za-z\s'-]")),
+                        LengthLimitingTextInputFormatter(40),
+                      ],
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -3080,6 +3168,10 @@ class _CustomerEditProfileScreenState
                       hint: 'Beirut',
                       controller: _cityController,
                       textCapitalization: TextCapitalization.words,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r"[A-Za-z\s'-]")),
+                        LengthLimitingTextInputFormatter(40),
+                      ],
                     ),
                   ),
                 ],
@@ -3339,6 +3431,7 @@ class _CustomerEditProfileField extends StatelessWidget {
     required this.controller,
     this.keyboardType,
     this.textCapitalization = TextCapitalization.none,
+    this.inputFormatters,
   });
 
   final String label;
@@ -3346,6 +3439,7 @@ class _CustomerEditProfileField extends StatelessWidget {
   final TextEditingController controller;
   final TextInputType? keyboardType;
   final TextCapitalization textCapitalization;
+  final List<TextInputFormatter>? inputFormatters;
 
   @override
   Widget build(BuildContext context) {
@@ -3372,6 +3466,7 @@ class _CustomerEditProfileField extends StatelessWidget {
             controller: controller,
             keyboardType: keyboardType,
             textCapitalization: textCapitalization,
+            inputFormatters: inputFormatters,
             decoration: InputDecoration(
               border: InputBorder.none,
               hintText: hint,

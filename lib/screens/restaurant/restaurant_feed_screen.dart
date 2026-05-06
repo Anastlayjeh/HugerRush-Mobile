@@ -306,7 +306,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     await _withFeedPlaybackPaused<void>(
       () => Navigator.of(context, rootNavigator: true).push(
         MaterialPageRoute<void>(
-          builder: (_) => const SearchScreen(includeCustomers: false),
+          builder: (_) => const SearchScreen(includeCustomers: true),
         ),
       ),
     );
@@ -461,12 +461,42 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
 
   Future<void> _shareVendorPromo([DemoFeedPost? post]) async {
     final targetPost = post ?? _activeFeedPost;
-    await _withFeedPlaybackPaused<void>(
-      () => showShareFallbackDialog(
-        context,
-        title: targetPost.restaurantName,
-        body: targetPost.caption,
-      ),
+    final result = await PostShareService.instance.sharePost(
+      postId: targetPost.id,
+      title: targetPost.restaurantName,
+      caption: targetPost.caption,
+      creatorHandle: targetPost.restaurantHandle,
+    );
+    if (!mounted) {
+      return;
+    }
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.hideCurrentSnackBar();
+    if (!result.success) {
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text(
+            result.errorMessage ??
+                'Unable to share this post right now. Please try again.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (result.copiedToClipboard) {
+      messenger?.showSnackBar(
+        const SnackBar(content: Text('Link copied to clipboard.')),
+      );
+    }
+  }
+
+  Future<void> _reportFeedPost([DemoFeedPost? post]) async {
+    final targetPost = post ?? _activeFeedPost;
+    await showReportSheet(
+      context,
+      itemType: ReportItemType.feedPost,
+      itemId: targetPost.id,
+      itemTitle: targetPost.restaurantName,
     );
   }
 
@@ -981,13 +1011,15 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                                                   _openRestaurantDetails(post),
                                               onToggleLike: () =>
                                                   _toggleVendorLike(post),
-                                              onOpenComments: () =>
-                                                  _openVendorComments(post),
-                                              onShare: () =>
-                                                  _shareVendorPromo(post),
-                                            ),
-                                          ],
-                                        ),
+                                            onOpenComments: () =>
+                                                _openVendorComments(post),
+                                            onShare: () =>
+                                                _shareVendorPromo(post),
+                                            onReport: () =>
+                                                _reportFeedPost(post),
+                                          ),
+                                        ],
+                                      ),
                                       ),
                                     ),
                                     SizedBox(
@@ -1971,6 +2003,7 @@ class _ActionRail extends StatelessWidget {
     required this.onToggleLike,
     required this.onOpenComments,
     required this.onShare,
+    required this.onReport,
   });
 
   final _ResponsiveMetrics metrics;
@@ -1979,6 +2012,7 @@ class _ActionRail extends StatelessWidget {
   final VoidCallback onToggleLike;
   final VoidCallback onOpenComments;
   final VoidCallback onShare;
+  final VoidCallback onReport;
 
   @override
   Widget build(BuildContext context) {
@@ -2015,6 +2049,13 @@ class _ActionRail extends StatelessWidget {
             value: 'Share',
             metrics: metrics,
             onTap: onShare,
+          ),
+          SizedBox(height: metrics.railItemGap),
+          _ActionButton(
+            icon: Icons.flag_outlined,
+            value: 'Report',
+            metrics: metrics,
+            onTap: onReport,
           ),
         ],
       ),
@@ -2446,6 +2487,30 @@ class _FeedCommentsBottomSheetState extends State<_FeedCommentsBottomSheet> {
                                               color: Color(0xFF8A7A6F),
                                               fontSize: 12,
                                               fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          PopupMenuButton<String>(
+                                            tooltip: 'More actions',
+                                            onSelected: (value) {
+                                              if (value == 'report') {
+                                                showReportSheet(
+                                                  context,
+                                                  itemType: ReportItemType.comment,
+                                                  itemId: comment.id,
+                                                  itemTitle: comment.authorName,
+                                                );
+                                              }
+                                            },
+                                            itemBuilder: (_) => const [
+                                              PopupMenuItem<String>(
+                                                value: 'report',
+                                                child: Text('Report comment'),
+                                              ),
+                                            ],
+                                            icon: const Icon(
+                                              Icons.more_vert_rounded,
+                                              size: 18,
+                                              color: Color(0xFF9E8A7E),
                                             ),
                                           ),
                                         ],
