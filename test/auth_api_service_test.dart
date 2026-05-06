@@ -95,5 +95,57 @@ void main() {
       expect(result.token, 'next-access');
       expect(result.refreshToken, 'next-refresh');
     });
+
+    test(
+      'forgotPassword posts email to the public forgot password endpoint',
+      () async {
+        late http.Request capturedRequest;
+
+        final service = AuthApiService(
+          client: MockClient((request) async {
+            capturedRequest = request;
+            return http.Response(
+              '{"message":"If this email exists, a reset password link has been sent.","data":{"queued":true}}',
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }),
+        );
+
+        final message = await service.forgotPassword(
+          email: ' customer@example.com ',
+        );
+
+        expect(capturedRequest.url.path, '/api/forgot-password');
+        expect(
+          capturedRequest.body,
+          contains('"email":"customer@example.com"'),
+        );
+        expect(message, AuthApiService.forgotPasswordSuccessMessage);
+      },
+    );
+
+    test('forgotPassword propagates backend validation errors', () async {
+      final service = AuthApiService(
+        client: MockClient((request) async {
+          return http.Response(
+            '{"message":"Validation failed.","errors":{"email":["Enter a valid email."]}}',
+            422,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      expect(
+        () => service.forgotPassword(email: 'bad-email'),
+        throwsA(
+          isA<AuthApiException>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('Validation failed.'), contains('HTTP 422')),
+          ),
+        ),
+      );
+    });
   });
 }

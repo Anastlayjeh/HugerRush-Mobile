@@ -9,6 +9,8 @@ class AuthApiService {
   AuthApiService({http.Client? client}) : _client = client ?? http.Client();
 
   static const String deviceName = 'hunger-rush-mobile';
+  static const String forgotPasswordSuccessMessage =
+      'A reset password link has been sent.';
 
   final http.Client _client;
 
@@ -39,6 +41,61 @@ class AuthApiService {
     return _sendAuthRequest(
       endpoint: '/api/v1/auth/register',
       payload: payload,
+    );
+  }
+
+  Future<String> forgotPassword({required String email}) async {
+    final cleanedEmail = email.trim();
+    if (cleanedEmail.isEmpty) {
+      throw const AuthApiException('Email is required.');
+    }
+
+    http.Response response;
+    try {
+      response = await _client
+          .post(
+            AppConfig.apiUri('/api/forgot-password'),
+            headers: const {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(<String, dynamic>{'email': cleanedEmail}),
+          )
+          .timeout(const Duration(seconds: 20));
+    } on TimeoutException {
+      throw const AuthApiException(
+        'Request timed out. Please check your connection and try again.',
+      );
+    } catch (error) {
+      throw AuthApiException(
+        'Unable to reach ${AppConfig.apiBaseUrl}. '
+        'Check your API URL and network access. '
+        'Details: $error',
+      );
+    }
+
+    Map<String, dynamic> data = <String, dynamic>{};
+    if (response.body.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic>) {
+          data = decoded;
+        }
+      } on FormatException {
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          throw const AuthApiException(
+            'Server returned an unreadable response format.',
+          );
+        }
+      }
+    }
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return forgotPasswordSuccessMessage;
+    }
+
+    throw AuthApiException(
+      '${_extractError(data)} (HTTP ${response.statusCode})',
     );
   }
 
