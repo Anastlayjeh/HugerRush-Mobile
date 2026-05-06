@@ -11,29 +11,92 @@ class _MessagesSection extends StatefulWidget {
 }
 
 class _MessagesSectionState extends State<_MessagesSection> {
-  final _repository = DemoAppRepository.instance;
+  final _authSessionService = AuthSessionService();
+  late final ConversationApiService _conversationApiService;
 
   List<DemoConversationThread> _threads = const <DemoConversationThread>[];
   MessageFilterType _selectedFilter = MessageFilterType.all;
   String? _selectedCustomerName;
   bool _needsReplyOnly = false;
   bool _isLoading = true;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
+    _conversationApiService = ConversationApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+      ),
+    );
     _loadThreads();
   }
 
   Future<void> _loadThreads() async {
-    final threads = await _repository.getThreads();
-    if (!mounted) {
-      return;
-    }
     setState(() {
-      _threads = threads;
-      _isLoading = false;
+      _isLoading = true;
+      _error = null;
     });
+    try {
+      final session = await _authSessionService.readSession();
+      if (session == null || session.token.trim().isEmpty) {
+        throw const ConversationApiException(
+          'Please log in again to load conversations.',
+        );
+      }
+      final conversations = await _conversationApiService.fetchConversations(
+        session: session,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _threads = conversations
+            .map(_threadFromConversation)
+            .toList(growable: false);
+        _isLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _threads = const <DemoConversationThread>[];
+        _isLoading = false;
+        _error = error.toString();
+      });
+    }
+  }
+
+  DemoConversationThread _threadFromConversation(AppConversation conversation) {
+    final latestAt =
+        conversation.lastMessageAt ?? conversation.latestMessage?.createdAt;
+    final isOrderThread = conversation.orderId.trim().isNotEmpty;
+    return DemoConversationThread(
+      id: conversation.id,
+      customerName: conversation.customerName,
+      lastMessage: conversation.previewText,
+      timeLabel: latestAt == null ? 'Recent' : _formatRelativeTime(latestAt),
+      orderLabel: isOrderThread ? '#${conversation.orderId}' : 'General',
+      channelLabel: conversation.displaySubject,
+      unreadCount: conversation.unreadCount,
+      priority: conversation.unreadCount > 0,
+      needsReply: conversation.unreadCount > 0,
+      online: false,
+      type: isOrderThread ? MessageThreadType.order : MessageThreadType.offer,
+      messages: conversation.messages
+          .map(
+            (message) => DemoConversationMessage(
+              id: message.id,
+              senderName: message.senderName,
+              body: message.body,
+              sentAt: message.createdAt ?? DateTime.now(),
+              fromRestaurant: message.fromRestaurant,
+            ),
+          )
+          .toList(growable: false),
+    );
   }
 
   List<DemoConversationThread> get _visibleThreads {
@@ -113,6 +176,24 @@ class _MessagesSectionState extends State<_MessagesSection> {
               children: [
                 SizedBox(height: 200),
                 Center(child: CircularProgressIndicator()),
+              ],
+            )
+          : _error != null
+          ? ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              children: [
+                const SizedBox(height: 160),
+                Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Text(
+                    _error!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFF7D3D34),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
               ],
             )
           : ListView(
@@ -966,4 +1047,3 @@ class _MessageMetaPill extends StatelessWidget {
     );
   }
 }
-

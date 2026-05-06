@@ -50,7 +50,7 @@ class AuthApiService {
     try {
       response = await _apiClient.request(
         method: 'POST',
-        endpoint: '/api/forgot-password',
+        endpoint: '/v1/auth/forgot-password',
         body: <String, dynamic>{'email': cleanedEmail},
       );
     } on ApiClientException catch (error) {
@@ -73,16 +73,6 @@ class AuthApiService {
 
     throw AuthApiException(
       '${ApiClient.errorMessageForStatus(response.statusCode, data, fallback: 'Could not send reset password link. Please try again.')} (HTTP ${response.statusCode})',
-    );
-  }
-
-  Future<AuthResult> refresh({required String refreshToken}) {
-    return _sendAuthRequest(
-      endpoint: '/v1/auth/refresh',
-      payload: <String, dynamic>{
-        'refresh_token': refreshToken,
-        'device_name': deviceName,
-      },
     );
   }
 
@@ -135,8 +125,7 @@ class AuthApiService {
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
       final result = AuthResult.fromJson(data);
-      if ((result.token == null || result.token!.trim().isEmpty) &&
-          endpoint != '/v1/auth/refresh') {
+      if (result.token == null || result.token!.trim().isEmpty) {
         throw const AuthApiException(
           'Login succeeded but the server did not return an auth token.',
         );

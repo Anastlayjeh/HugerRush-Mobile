@@ -70,34 +70,8 @@ void main() {
       },
     );
 
-    test('refresh sends expected payload and parses rotated tokens', () async {
-      late http.Request capturedRequest;
-
-      final service = AuthApiService(
-        client: MockClient((request) async {
-          capturedRequest = request;
-          return http.Response(
-            '{"message":"Token refreshed","data":{"access_token":"next-access","refresh_token":"next-refresh"}}',
-            200,
-            headers: {'content-type': 'application/json'},
-          );
-        }),
-      );
-
-      final result = await service.refresh(refreshToken: 'refresh-abc');
-
-      expect(capturedRequest.url.path, '/api/v1/auth/refresh');
-      expect(capturedRequest.body, contains('"refresh_token":"refresh-abc"'));
-      expect(
-        capturedRequest.body,
-        contains('"device_name":"hunger-rush-mobile"'),
-      );
-      expect(result.token, 'next-access');
-      expect(result.refreshToken, 'next-refresh');
-    });
-
     test(
-      'forgotPassword posts email to the public forgot password endpoint',
+      'forgotPassword posts email to the v1 forgot password endpoint',
       () async {
         late http.Request capturedRequest;
 
@@ -116,7 +90,7 @@ void main() {
           email: ' customer@example.com ',
         );
 
-        expect(capturedRequest.url.path, '/api/forgot-password');
+        expect(capturedRequest.url.path, '/api/v1/auth/forgot-password');
         expect(
           capturedRequest.body,
           contains('"email":"customer@example.com"'),

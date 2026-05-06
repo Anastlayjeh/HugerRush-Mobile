@@ -70,7 +70,7 @@ void main() {
     await tester.tap(find.text('Send Reset Link'));
     await tester.pumpAndSettle();
 
-    expect(capturedRequest.url.path, '/api/forgot-password');
+    expect(capturedRequest.url.path, '/api/v1/auth/forgot-password');
     expect(
       find.text(AuthApiService.forgotPasswordSuccessMessage),
       findsWidgets,

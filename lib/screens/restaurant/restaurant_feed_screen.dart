@@ -36,10 +36,12 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       postId: 'vendor-feed',
     ),
   ];
+  // ignore: unused_field
   static const String _sampleProfileVideoAssetPath =
       'assets/videos/home_video_2.mp4';
 
   final _profileScaffoldKey = GlobalKey<ScaffoldState>();
+  final _authSessionService = AuthSessionService();
   final _demoRepository = DemoAppRepository.instance;
   final Map<String, DemoFeedPost> _feedPostsById = <String, DemoFeedPost>{};
   final Map<String, Offset> _lastDoubleTapOffsetsByPostId = <String, Offset>{};
@@ -48,8 +50,8 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   int _selectedBottomIndex = 0;
   int _selectedTopTab = 1;
   int _selectedProfileTabIndex = _profileMenuTabIndex;
-  final _profileApiService = RestaurantProfileApiService();
-  final _menuApiService = RestaurantMenuApiService();
+  late final RestaurantOwnerApiService _ownerApiService;
+  late final RestaurantOrderApiService _restaurantOrderApiService;
   PlatformFile? _selectedPostVideo;
   bool _isPickingPostVideo = false;
   bool _isCreatingPost = false;
@@ -68,6 +70,9 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   bool _isRefreshingProfile = false;
   String? _profileSyncError;
   List<RestaurantMenuItem> _restaurantMenuItems = const [];
+  RestaurantAnalytics? _restaurantAnalytics;
+  List<AppOrder> _restaurantOrders = const <AppOrder>[];
+  bool _isRefreshingDashboard = false;
   bool _isRefreshingMenu = false;
   bool _hasLoadedMenu = false;
   String? _menuSyncError;
@@ -75,6 +80,20 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   @override
   void initState() {
     super.initState();
+    _ownerApiService = RestaurantOwnerApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+        onSessionExpired: widget.onLogout,
+      ),
+    );
+    _restaurantOrderApiService = RestaurantOrderApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+        onSessionExpired: widget.onLogout,
+      ),
+    );
     _syncFeedPosts();
     _videoControllers = List<VideoPlayerController>.generate(
       _feedVideos.length,
@@ -115,7 +134,8 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       primary: widget.initialUserData,
       fallbackName: widget.restaurantName,
     );
-    _addSampleProfileVideo();
+    unawaited(_refreshRestaurantVideos());
+    unawaited(_refreshDashboardData());
     _refreshRestaurantProfile();
   }
 
@@ -124,14 +144,29 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     for (final controller in _videoControllers) {
       controller.dispose();
     }
-    _profileApiService.dispose();
-    _menuApiService.dispose();
     super.dispose();
   }
 
-  Future<void> _refreshRestaurantProfile() async {
+  Future<AuthSession?> _resolveSession() async {
+    final restored = await _authSessionService.readSession();
+    if (restored != null && restored.token.trim().isNotEmpty) {
+      return restored;
+    }
     final token = widget.authToken?.trim() ?? '';
     if (token.isEmpty) {
+      return null;
+    }
+    return AuthSession(
+      token: token,
+      role: 'restaurant_owner',
+      restaurantName: widget.restaurantName,
+      user: widget.initialUserData,
+    );
+  }
+
+  Future<void> _refreshRestaurantProfile() async {
+    final session = await _resolveSession();
+    if (session == null) {
       return;
     }
 
@@ -141,7 +176,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     });
 
     try {
-      final payload = await _profileApiService.fetchProfile(token: token);
+      final payload = await _ownerApiService.fetchProfile(session: session);
       if (!mounted) {
         return;
       }
@@ -174,20 +209,74 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   bool get _isMessagesTabSelected => _selectedBottomIndex == _messagesTabIndex;
   List<RestaurantMenuItem> get _menuItemsForDisplay => _restaurantMenuItems;
 
+  // ignore: unused_element
   void _addSampleProfileVideo() {
-    if (_uploadedVideos.isNotEmpty) {
+    // Restaurant videos are loaded from the owner API.
+  }
+
+  Future<void> _refreshRestaurantVideos() async {
+    final session = await _resolveSession();
+    if (session == null) {
       return;
     }
-    _uploadedVideos.add(
-      _UploadedRestaurantVideo(
-        name: 'sample_promo.mp4',
-        sizeBytes: 12400000,
-        uploadedAt: DateTime.now().subtract(const Duration(hours: 2)),
-        caption: 'Fresh out of the oven and ready for tonight.',
-        hashtags: '#pizza #fresh #hugerush',
-        videoAssetPath: _sampleProfileVideoAssetPath,
-      ),
+    try {
+      final videos = await _ownerApiService.fetchVideos(session: session);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _uploadedVideos
+          ..clear()
+          ..addAll(videos.map(_uploadedVideoFromApiItem));
+      });
+    } catch (error) {
+      debugPrint('Restaurant videos refresh failed: $error');
+    }
+  }
+
+  _UploadedRestaurantVideo _uploadedVideoFromApiItem(RestaurantVideoItem item) {
+    return _UploadedRestaurantVideo(
+      backendId: item.id,
+      name: item.title,
+      sizeBytes: 0,
+      uploadedAt: item.createdAt ?? item.publishedAt ?? DateTime.now(),
+      caption: item.description,
+      hashtags: item.status,
+      moderationLabel: item.moderationLabel,
+      moderationReason: item.moderationReason,
+      videoFilePath: item.playbackUrl,
     );
+  }
+
+  Future<void> _refreshDashboardData() async {
+    if (_isRefreshingDashboard) {
+      return;
+    }
+    final session = await _resolveSession();
+    if (session == null) {
+      return;
+    }
+    setState(() => _isRefreshingDashboard = true);
+    try {
+      final results = await Future.wait<Object>([
+        _ownerApiService.fetchAnalytics(session: session),
+        _restaurantOrderApiService.fetchOrders(session: session),
+      ]);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _restaurantAnalytics = results[0] as RestaurantAnalytics;
+        _restaurantOrders = results[1] as List<AppOrder>;
+        _isRefreshingDashboard = false;
+      });
+    } catch (error) {
+      debugPrint('Restaurant dashboard refresh failed: $error');
+      if (!mounted) {
+        return;
+      }
+      setState(() => _isRefreshingDashboard = false);
+    }
   }
 
   DemoFeedPost get _activeFeedPost {
@@ -415,6 +504,9 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     setState(() {
       _uploadedVideos[index] = updated;
     });
+    if (updated.backendId.trim().isNotEmpty) {
+      unawaited(_syncUpdatedVideo(updated));
+    }
   }
 
   void _deleteUploadedVideo(_UploadedRestaurantVideo target) {
@@ -425,6 +517,56 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     setState(() {
       _uploadedVideos.removeAt(index);
     });
+    if (target.backendId.trim().isNotEmpty) {
+      unawaited(_deleteVideoFromApi(target));
+    }
+  }
+
+  Future<void> _syncUpdatedVideo(_UploadedRestaurantVideo video) async {
+    final session = await _resolveSession();
+    if (session == null) {
+      return;
+    }
+    try {
+      await _ownerApiService.updateVideo(
+        session: session,
+        videoId: video.backendId,
+        body: <String, dynamic>{
+          'title': video.name.trim().isEmpty ? 'Video' : video.name.trim(),
+          'description': video.caption.trim(),
+          'status': 'published',
+        },
+      );
+    } catch (error) {
+      debugPrint('Video update failed: $error');
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not update video details.')),
+      );
+    }
+  }
+
+  Future<void> _deleteVideoFromApi(_UploadedRestaurantVideo video) async {
+    final session = await _resolveSession();
+    if (session == null) {
+      return;
+    }
+    try {
+      await _ownerApiService.deleteVideo(
+        session: session,
+        videoId: video.backendId,
+      );
+    } catch (error) {
+      debugPrint('Video delete failed: $error');
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not delete video from server.')),
+      );
+    }
   }
 
   Future<void> _toggleVendorLike([DemoFeedPost? post]) async {
@@ -579,7 +721,117 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   }
 
   void _openMenuItemDetails(RestaurantMenuItem item) {
-    showRestaurantMenuItemDetailsPopup(context, item: item);
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFFFFFBF7),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.info_outline_rounded),
+                  title: const Text('View details'),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    showRestaurantMenuItemDetailsPopup(context, item: item);
+                  },
+                ),
+                ListTile(
+                  leading: Icon(
+                    item.isAvailable
+                        ? Icons.pause_circle_outline_rounded
+                        : Icons.play_circle_outline_rounded,
+                  ),
+                  title: Text(
+                    item.isAvailable ? 'Mark unavailable' : 'Mark available',
+                  ),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    unawaited(_toggleMenuItemAvailability(item));
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(
+                    Icons.delete_outline_rounded,
+                    color: Color(0xFFB7372B),
+                  ),
+                  title: const Text('Delete item'),
+                  textColor: const Color(0xFFB7372B),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    unawaited(_deleteMenuItem(item));
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _toggleMenuItemAvailability(RestaurantMenuItem item) async {
+    final session = await _resolveSession();
+    if (session == null || item.id.trim().isEmpty) {
+      return;
+    }
+    try {
+      final updated = await _ownerApiService.updateMenuItemAvailability(
+        session: session,
+        menuItemId: item.id,
+        isAvailable: !item.isAvailable,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _restaurantMenuItems = _restaurantMenuItems
+            .map((current) => current.id == item.id ? updated : current)
+            .toList(growable: false);
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not update availability: $error')),
+      );
+    }
+  }
+
+  Future<void> _deleteMenuItem(RestaurantMenuItem item) async {
+    final session = await _resolveSession();
+    if (session == null || item.id.trim().isEmpty) {
+      return;
+    }
+    try {
+      await _ownerApiService.deleteMenuItem(
+        session: session,
+        menuItemId: item.id,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _restaurantMenuItems = _restaurantMenuItems
+            .where((current) => current.id != item.id)
+            .toList(growable: false);
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not delete menu item: $error')),
+      );
+    }
   }
 
   void _onBottomNavSelected(int index) {
@@ -769,37 +1021,78 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       return;
     }
 
+    final session = await _resolveSession();
+    if (session == null) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please log in again to update profile.')),
+      );
+      return;
+    }
+
+    try {
+      String? uploadedPhotoUrl;
+      final nextPhotoPath = updatedData.localProfileImagePath.trim();
+      final currentPhotoPath = _profileInfo.localProfileImagePath?.trim() ?? '';
+      if (nextPhotoPath.isNotEmpty && nextPhotoPath != currentPhotoPath) {
+        uploadedPhotoUrl = await _ownerApiService.uploadProfilePhoto(
+          session: session,
+          path: nextPhotoPath,
+        );
+      }
+      await _ownerApiService.updateSettings(
+        session: session,
+        body: <String, dynamic>{
+          'name': updatedData.restaurantName.trim(),
+          'owner_email': updatedData.email.trim(),
+          'owner_phone': updatedData.phone.trim(),
+          'settings': <String, dynamic>{
+            'cuisine': updatedData.cuisineType.trim(),
+            if (uploadedPhotoUrl != null && uploadedPhotoUrl.trim().isNotEmpty)
+              'profile_photo_url': uploadedPhotoUrl.trim(),
+          },
+          'locations': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'name': 'Main',
+              'address': <String>[
+                updatedData.street.trim(),
+                updatedData.city.trim(),
+                updatedData.country.trim(),
+                updatedData.postalCode.trim(),
+              ].where((value) => value.isNotEmpty).join(', '),
+              'phone': updatedData.phone.trim(),
+            },
+          ],
+        },
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not update profile: $error')),
+      );
+      return;
+    }
+
     setState(() {
       _profileInfo = _profileInfo.copyWithEditable(updatedData);
     });
 
+    if (!mounted) {
+      return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Profile updated successfully.')),
     );
   }
 
   Future<void> _openFollowersList({String? restaurantName}) async {
-    final token = widget.authToken?.trim() ?? '';
-    if (token.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please log in again to load followers.'),
-          backgroundColor: Color(0xFFB7372B),
-        ),
-      );
-      return;
-    }
-
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => _FollowersListScreen(
-          token: token,
-          restaurantName: (restaurantName?.trim().isNotEmpty ?? false)
-              ? restaurantName!.trim()
-              : _restaurantName,
-          restaurantId: _profileInfo.id,
-          profileApiService: _profileApiService,
-        ),
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Followers list is not available from the API yet.'),
       ),
     );
   }
@@ -850,13 +1143,13 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       return;
     }
 
-    final token = widget.authToken?.trim() ?? '';
-    if (token.isEmpty) {
+    final session = await _resolveSession();
+    if (session == null) {
       setState(() {
         _restaurantMenuItems = const <RestaurantMenuItem>[];
         _hasLoadedMenu = true;
         _isRefreshingMenu = false;
-        _menuSyncError = 'Missing auth token. Please log in again.';
+        _menuSyncError = 'Please log in again to load menu items.';
       });
       return;
     }
@@ -867,7 +1160,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     });
 
     try {
-      final items = await _menuApiService.fetchMenu(token: token);
+      final items = await _ownerApiService.fetchMenuItems(session: session);
       if (!mounted) {
         return;
       }
@@ -877,7 +1170,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         _isRefreshingMenu = false;
         _menuSyncError = items.isEmpty ? 'No menu items available yet.' : null;
       });
-    } on RestaurantMenuApiException catch (e) {
+    } on RestaurantOwnerApiException catch (e) {
       if (!mounted) {
         return;
       }
@@ -1303,14 +1596,19 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   }
 
   Widget _buildDashboardScaffold() {
-    final completedOrdersToday = _computeOrdersCompletedToday(
-      _restaurantMenuItems,
-    );
-    final ordersInProgress = _computeOrdersInProgress(completedOrdersToday);
-    final revenueToday = _computeRevenueToday(
-      completedToday: completedOrdersToday,
-      averagePrice: _computeAveragePrice(_restaurantMenuItems),
-    );
+    final analytics = _restaurantAnalytics;
+    final completedOrdersToday =
+        analytics?.metricValue('order_volume').round() ??
+        _restaurantOrders.where((order) => order.isCompleted).length;
+    final ordersInProgress = _restaurantOrders
+        .where((order) => order.isActive)
+        .length;
+    final revenueToday =
+        analytics?.metricValue('total_revenue') ??
+        _restaurantOrders.fold<double>(
+          0,
+          (total, order) => total + (order.total ?? 0),
+        );
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8EFE8),
@@ -1346,7 +1644,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                     child: _DashboardSection(
                       metrics: metrics,
                       restaurantName: _restaurantName,
-                      isRefreshing: _isRefreshingMenu,
+                      isRefreshing: _isRefreshingMenu || _isRefreshingDashboard,
                       ordersCompletedToday: completedOrdersToday,
                       revenueToday: revenueToday,
                       ordersInProgress: ordersInProgress,
@@ -1356,7 +1654,12 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
                       isCreatingPost: _isCreatingPost,
                       onSelectVideo: _pickPostVideo,
                       onClearVideo: _clearSelectedPostVideo,
-                      onRefresh: () => _refreshRestaurantMenu(force: true),
+                      onRefresh: () async {
+                        await Future.wait<void>([
+                          _refreshRestaurantMenu(force: true),
+                          _refreshDashboardData(),
+                        ]);
+                      },
                       onCreatePost: _createVideoPost,
                       onOpenCompletedOrders: _openCompletedOrders,
                       onOpenRevenueAnalytics: _openRevenueAnalytics,
@@ -1502,13 +1805,40 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     if (!mounted || composerResult == null) {
       return;
     }
+    final videoPath = selectedVideo.path?.trim() ?? '';
+    if (videoPath.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This platform did not provide a video file path.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    final session = await _resolveSession();
+    if (session == null) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please log in again to upload videos.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
     setState(() => _isCreatingPost = true);
     try {
-      final created = await _demoRepository.createPost(
-        fileName: selectedVideo.name,
-        fileSizeBytes: selectedVideo.size,
-        caption: composerResult.caption,
-        hashtags: composerResult.hashtags,
+      final title = composerResult.caption.trim().isEmpty
+          ? selectedVideo.name
+          : composerResult.caption.trim();
+      final created = await _ownerApiService.createVideo(
+        session: session,
+        videoPath: videoPath,
+        title: title,
+        description: composerResult.hashtags,
+        status: 'published',
       );
       if (!mounted) {
         return;
@@ -1517,12 +1847,17 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         _uploadedVideos.insert(
           0,
           _UploadedRestaurantVideo(
-            name: created.fileName,
-            sizeBytes: created.fileSizeBytes,
-            uploadedAt: created.createdAt,
-            caption: created.caption,
-            hashtags: created.hashtags,
-            videoFilePath: selectedVideo.path,
+            backendId: created.id,
+            name: created.title,
+            sizeBytes: selectedVideo.size,
+            uploadedAt: created.createdAt ?? DateTime.now(),
+            caption: created.description,
+            hashtags: created.status,
+            moderationLabel: created.moderationLabel,
+            moderationReason: created.moderationReason,
+            videoFilePath: created.playbackUrl.isEmpty
+                ? videoPath
+                : created.playbackUrl,
           ),
         );
         _selectedPostVideo = null;
@@ -1530,21 +1865,21 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         _isCreatingPost = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Video post published. It is now visible in your profile videos.',
+            'Video uploaded. Moderation status: ${created.moderationLabel}.',
           ),
           behavior: SnackBarBehavior.floating,
         ),
       );
-    } catch (_) {
+    } catch (error) {
       if (!mounted) {
         return;
       }
       setState(() => _isCreatingPost = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Unable to create the post right now.'),
+        SnackBar(
+          content: Text('Unable to create the post: $error'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -1570,6 +1905,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     return (backendSignal * 0.08).round().clamp(8, 320).toInt();
   }
 
+  // ignore: unused_element
   int _computeOrdersInProgress(int completedToday) {
     return (completedToday * 0.34).round().clamp(3, 120).toInt();
   }

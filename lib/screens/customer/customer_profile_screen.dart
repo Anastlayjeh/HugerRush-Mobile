@@ -27,10 +27,56 @@ class _ProfileTabBody extends StatelessWidget {
   final VoidCallback onOpenMenu;
   final ValueChanged<int> onBottomNavSelected;
 
-  static final List<_PastOrderEntryData> _recentOrders =
-      List<_PastOrderEntryData>.unmodifiable(
-        _OrdersTabBody._pastOrders.take(2),
+  Future<_CustomerProfileLiveSummary> _loadLiveSummary() async {
+    final authSessionService = AuthSessionService();
+    final session = await authSessionService.readSession();
+    if (session == null || session.token.trim().isEmpty) {
+      throw const CustomerProfileApiException(
+        'Please log in again to load your profile.',
       );
+    }
+    final authenticatedClient = AuthenticatedApiClient(
+      authApiService: AuthApiService(),
+      authSessionService: authSessionService,
+    );
+    final profileService = CustomerProfileApiService(
+      apiClient: authenticatedClient,
+    );
+    final orderService = CustomerOrderApiService(
+      apiClient: authenticatedClient,
+    );
+    final restaurantService = CustomerRestaurantApiService(
+      apiClient: authenticatedClient,
+    );
+    final notificationService = NotificationApiService(
+      apiClient: authenticatedClient,
+    );
+
+    final results = await Future.wait<Object>([
+      profileService.fetchProfile(session: session),
+      orderService.fetchHistory(session: session),
+      restaurantService.fetchFollowing(session: session),
+      notificationService.fetchNotifications(session: session),
+    ]);
+    final profile = results[0] as CustomerProfile;
+    final orders = results[1] as List<AppOrder>;
+    final following = results[2] as List<CustomerRestaurantItem>;
+    final notifications = results[3] as List<AppNotification>;
+    return _CustomerProfileLiveSummary(
+      profile: profile,
+      ordersCount: profile.ordersCount ?? orders.length,
+      followingCount: profile.followingCount ?? following.length,
+      notificationsCount:
+          profile.notificationsCount ??
+          notifications.where((item) => !item.isRead).length,
+      points: profile.points ?? 0,
+      rewardsCount: profile.rewardsCount ?? 0,
+      recentOrders: orders
+          .take(2)
+          .map(_pastOrderEntryFromAppOrder)
+          .toList(growable: false),
+    );
+  }
 
   void _openFollowingRestaurants(
     BuildContext context,
@@ -44,26 +90,121 @@ class _ProfileTabBody extends StatelessWidget {
     );
   }
 
-  void _openReorderCart(
-    BuildContext context, {
-    required String restaurantName,
-    required List<_CartLineItemData> initialItems,
-  }) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => _OrdersCartScreen(
-          initialItems: initialItems,
-          restaurantName: restaurantName,
-        ),
-      ),
-    );
-  }
-
-  void _reorderRecentOrder(BuildContext context, _PastOrderEntryData order) {
-    _openReorderCart(
-      context,
-      restaurantName: order.title,
-      initialItems: order.reorderItems,
+  Widget _buildLiveProfileHighlights(
+    BuildContext context,
+    _ResponsiveMetrics metrics,
+  ) {
+    return FutureBuilder<_CustomerProfileLiveSummary>(
+      future: _loadLiveSummary(),
+      builder: (context, snapshot) {
+        final summary = snapshot.data;
+        final points = summary?.points ?? 0;
+        final rewards = summary?.rewardsCount ?? 0;
+        final recentOrders =
+            summary?.recentOrders ?? const <_PastOrderEntryData>[];
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (snapshot.connectionState != ConnectionState.done)
+              const LinearProgressIndicator(minHeight: 2),
+            if (snapshot.hasError) ...[
+              _ProfilePanel(
+                child: Padding(
+                  padding: EdgeInsets.all(
+                    _clampDouble(14 * metrics.scale, 12, 14),
+                  ),
+                  child: Text(
+                    snapshot.error.toString(),
+                    style: const TextStyle(
+                      color: Color(0xFF7D3D34),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+              SizedBox(height: _clampDouble(14 * metrics.scale, 10, 14)),
+            ],
+            Row(
+              children: [
+                Expanded(
+                  child: _ProfileStatCard(
+                    title: 'Points Balance',
+                    value: _formatCompactCount(points),
+                    subtitle: points == 0
+                        ? 'No live points yet'
+                        : 'Live points balance',
+                    accentColor: const Color(0xFFFF7E4D),
+                    icon: Icons.stars_rounded,
+                    metrics: metrics,
+                  ),
+                ),
+                SizedBox(width: _clampDouble(14 * metrics.scale, 10, 14)),
+                Expanded(
+                  child: _ProfileStatCard(
+                    title: 'Rewards',
+                    value: _formatCompactCount(rewards),
+                    subtitle: rewards == 0
+                        ? 'No active rewards yet'
+                        : 'Active perks to use',
+                    accentColor: const Color(0xFF2F8A7E),
+                    icon: Icons.local_offer_rounded,
+                    metrics: metrics,
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: _clampDouble(28 * metrics.scale, 20, 28)),
+            const _ProfileSectionHeader(
+              title: 'Recent Orders',
+              actionLabel: 'View All',
+            ),
+            SizedBox(height: _clampDouble(14 * metrics.scale, 10, 14)),
+            if (recentOrders.isEmpty)
+              _ProfilePanel(
+                child: Padding(
+                  padding: EdgeInsets.all(
+                    _clampDouble(18 * metrics.scale, 14, 18),
+                  ),
+                  child: const Text(
+                    'No recent orders yet.',
+                    style: TextStyle(
+                      color: Color(0xFF7D6C60),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              )
+            else
+              SizedBox(
+                height: _clampDouble(146 * metrics.scale, 126, 156),
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
+                  itemCount: recentOrders.length,
+                  separatorBuilder: (context, index) =>
+                      SizedBox(width: _clampDouble(14 * metrics.scale, 10, 14)),
+                  itemBuilder: (context, index) {
+                    return _RecentOrderCard(
+                      data: recentOrders[index],
+                      metrics: metrics,
+                      onReorder: () {
+                        ScaffoldMessenger.maybeOf(context)
+                          ?..hideCurrentSnackBar()
+                          ..showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Reorder is not available yet. Please add items from the live restaurant menu.',
+                              ),
+                            ),
+                          );
+                      },
+                    );
+                  },
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 
@@ -106,7 +247,11 @@ class _ProfileTabBody extends StatelessWidget {
         messenger
           ..hideCurrentSnackBar()
           ..showSnackBar(
-            SnackBar(content: Text('${item.title} added to cart')),
+            const SnackBar(
+              content: Text(
+                'Saved-place checkout is not available yet. Open a live restaurant menu to add items.',
+              ),
+            ),
           );
       },
     );
@@ -203,85 +348,7 @@ class _ProfileTabBody extends StatelessWidget {
                                   18,
                                 ),
                               ),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: _ProfileStatCard(
-                                      title: 'Points Balance',
-                                      value: '1,250',
-                                      subtitle: '50 points expiring soon',
-                                      accentColor: const Color(0xFFFF7E4D),
-                                      icon: Icons.stars_rounded,
-                                      metrics: metrics,
-                                    ),
-                                  ),
-                                  SizedBox(
-                                    width: _clampDouble(
-                                      14 * metrics.scale,
-                                      10,
-                                      14,
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: _ProfileStatCard(
-                                      title: 'Rewards',
-                                      value: '3',
-                                      subtitle: 'Active perks to use',
-                                      accentColor: const Color(0xFF2F8A7E),
-                                      icon: Icons.local_offer_rounded,
-                                      metrics: metrics,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              SizedBox(
-                                height: _clampDouble(
-                                  28 * metrics.scale,
-                                  20,
-                                  28,
-                                ),
-                              ),
-                              const _ProfileSectionHeader(
-                                title: 'Recent Orders',
-                                actionLabel: 'View All',
-                              ),
-                              SizedBox(
-                                height: _clampDouble(
-                                  14 * metrics.scale,
-                                  10,
-                                  14,
-                                ),
-                              ),
-                              SizedBox(
-                                height: _clampDouble(
-                                  146 * metrics.scale,
-                                  126,
-                                  156,
-                                ),
-                                child: ListView.separated(
-                                  scrollDirection: Axis.horizontal,
-                                  physics: const BouncingScrollPhysics(),
-                                  itemCount: _recentOrders.length,
-                                  separatorBuilder: (context, index) =>
-                                      SizedBox(
-                                        width: _clampDouble(
-                                          14 * metrics.scale,
-                                          10,
-                                          14,
-                                        ),
-                                      ),
-                                  itemBuilder: (context, index) {
-                                    return _RecentOrderCard(
-                                      data: _recentOrders[index],
-                                      metrics: metrics,
-                                      onReorder: () => _reorderRecentOrder(
-                                        context,
-                                        _recentOrders[index],
-                                      ),
-                                    );
-                                  },
-                                ),
-                              ),
+                              _buildLiveProfileHighlights(context, metrics),
                               SizedBox(
                                 height: _clampDouble(
                                   28 * metrics.scale,
@@ -584,7 +651,11 @@ class _FollowingRestaurantsScreenState
         messenger
           ..hideCurrentSnackBar()
           ..showSnackBar(
-            SnackBar(content: Text('${item.title} added to cart')),
+            const SnackBar(
+              content: Text(
+                'Open this restaurant from Discover to add live menu items.',
+              ),
+            ),
           );
       },
     );
@@ -3572,6 +3643,26 @@ enum _ProfileSettingsDestination {
   paymentMethods,
   privacySecurity,
   helpSupport,
+}
+
+class _CustomerProfileLiveSummary {
+  const _CustomerProfileLiveSummary({
+    required this.profile,
+    required this.ordersCount,
+    required this.followingCount,
+    required this.notificationsCount,
+    required this.points,
+    required this.rewardsCount,
+    required this.recentOrders,
+  });
+
+  final CustomerProfile profile;
+  final int ordersCount;
+  final int followingCount;
+  final int notificationsCount;
+  final int points;
+  final int rewardsCount;
+  final List<_PastOrderEntryData> recentOrders;
 }
 
 class _ProfileSettingsItemData {

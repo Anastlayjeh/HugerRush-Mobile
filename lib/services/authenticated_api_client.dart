@@ -1,5 +1,6 @@
 import 'package:http/http.dart' as http;
 
+import '../config/api_config.dart';
 import '../models/auth_session.dart';
 import 'api_client.dart';
 import 'auth_api_service.dart';
@@ -12,19 +13,13 @@ class AuthenticatedApiClient {
     Future<void> Function(AuthSession session)? onSessionUpdated,
     Future<void> Function()? onSessionExpired,
     http.Client? client,
-  }) : _authApiService = authApiService,
-       _authSessionService = authSessionService,
-       _onSessionUpdated = onSessionUpdated,
+  }) : _authSessionService = authSessionService,
        _onSessionExpired = onSessionExpired,
        _apiClient = ApiClient(client: client);
 
-  final AuthApiService _authApiService;
   final AuthSessionService _authSessionService;
-  final Future<void> Function(AuthSession session)? _onSessionUpdated;
   final Future<void> Function()? _onSessionExpired;
   final ApiClient _apiClient;
-
-  Future<AuthSession>? _refreshingSessionFuture;
 
   Future<AuthenticatedApiResult> request({
     required AuthSession session,
@@ -52,17 +47,33 @@ class AuthenticatedApiClient {
       );
     }
 
-    final refreshedSession = await _refreshSession(session);
-    final retriedResponse = await _sendWithAuth(
-      method: normalizedMethod,
+    await _expireSession();
+    throw const AuthSessionExpiredException(
+      'Session expired. Please log in again.',
+    );
+  }
+
+  Future<AuthenticatedApiResult> multipartRequest({
+    required AuthSession session,
+    required String method,
+    required String endpoint,
+    Map<String, String>? headers,
+    Map<String, String> fields = const <String, String>{},
+    List<AuthenticatedMultipartFile> files =
+        const <AuthenticatedMultipartFile>[],
+    Duration timeout = const Duration(seconds: 60),
+  }) async {
+    final response = await _sendMultipartWithAuth(
+      method: method.trim().toUpperCase(),
       endpoint: endpoint,
-      token: refreshedSession.token,
+      token: session.token,
       headers: headers,
-      body: body,
+      fields: fields,
+      files: files,
       timeout: timeout,
     );
 
-    if (retriedResponse.statusCode == 401) {
+    if (response.statusCode == 401) {
       await _expireSession();
       throw const AuthSessionExpiredException(
         'Session expired. Please log in again.',
@@ -70,74 +81,10 @@ class AuthenticatedApiClient {
     }
 
     return AuthenticatedApiResult(
-      response: retriedResponse,
-      session: refreshedSession,
-      usedRefreshFlow: true,
+      response: response,
+      session: session,
+      usedRefreshFlow: false,
     );
-  }
-
-  Future<AuthSession> _refreshSession(AuthSession session) async {
-    final activeRefresh = _refreshingSessionFuture;
-    if (activeRefresh != null) {
-      return activeRefresh;
-    }
-
-    final refreshFuture = _performRefresh(session);
-    _refreshingSessionFuture = refreshFuture;
-
-    try {
-      return await refreshFuture;
-    } finally {
-      if (identical(_refreshingSessionFuture, refreshFuture)) {
-        _refreshingSessionFuture = null;
-      }
-    }
-  }
-
-  Future<AuthSession> _performRefresh(AuthSession session) async {
-    final refreshToken = session.refreshToken?.trim();
-    if (refreshToken == null || refreshToken.isEmpty) {
-      await _expireSession();
-      throw const AuthSessionExpiredException(
-        'Session expired. Please log in again.',
-      );
-    }
-
-    AuthResult refreshed;
-    try {
-      refreshed = await _authApiService.refresh(refreshToken: refreshToken);
-    } on AuthApiException {
-      await _expireSession();
-      throw const AuthSessionExpiredException(
-        'Session expired. Please log in again.',
-      );
-    }
-
-    final newAccessToken = refreshed.token?.trim();
-    if (newAccessToken == null || newAccessToken.isEmpty) {
-      await _expireSession();
-      throw const AuthSessionExpiredException(
-        'Session expired. Please log in again.',
-      );
-    }
-
-    final rotatedRefreshToken = refreshed.refreshToken?.trim();
-    final updatedSession = session.copyWith(
-      token: newAccessToken,
-      refreshToken:
-          (rotatedRefreshToken != null && rotatedRefreshToken.isNotEmpty)
-          ? rotatedRefreshToken
-          : refreshToken,
-      user: refreshed.user,
-    );
-
-    await _authSessionService.saveSession(updatedSession);
-    final onSessionUpdated = _onSessionUpdated;
-    if (onSessionUpdated != null) {
-      await onSessionUpdated(updatedSession);
-    }
-
-    return updatedSession;
   }
 
   Future<void> _expireSession() async {
@@ -169,6 +116,69 @@ class AuthenticatedApiClient {
       throw AuthApiException(error.message);
     }
   }
+
+  Future<http.Response> _sendMultipartWithAuth({
+    required String method,
+    required String endpoint,
+    required String token,
+    required Duration timeout,
+    required Map<String, String> fields,
+    required List<AuthenticatedMultipartFile> files,
+    Map<String, String>? headers,
+  }) async {
+    try {
+      final request = http.MultipartRequest(method, ApiConfig.apiUri(endpoint));
+      request.headers.addAll(<String, String>{
+        'Accept': 'application/json',
+        'Authorization': 'Bearer ${token.trim()}',
+        ...?headers,
+      });
+      request.fields.addAll(fields);
+
+      for (final file in files) {
+        if (file.path != null && file.path!.trim().isNotEmpty) {
+          request.files.add(
+            await http.MultipartFile.fromPath(
+              file.field,
+              file.path!.trim(),
+              filename: file.filename,
+            ),
+          );
+        } else if (file.bytes != null) {
+          request.files.add(
+            http.MultipartFile.fromBytes(
+              file.field,
+              file.bytes!,
+              filename: file.filename,
+            ),
+          );
+        }
+      }
+
+      final streamed = await request.send().timeout(timeout);
+      return http.Response.fromStream(streamed);
+    } on ApiClientException catch (error) {
+      throw AuthApiException(error.message);
+    } catch (error) {
+      throw const AuthApiException(
+        'Unable to connect to server. Please check your internet connection.',
+      );
+    }
+  }
+}
+
+class AuthenticatedMultipartFile {
+  const AuthenticatedMultipartFile({
+    required this.field,
+    this.path,
+    this.bytes,
+    this.filename,
+  });
+
+  final String field;
+  final String? path;
+  final List<int>? bytes;
+  final String? filename;
 }
 
 class AuthenticatedApiResult {

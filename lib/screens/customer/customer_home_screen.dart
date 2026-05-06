@@ -316,6 +316,7 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
   final Set<String> _pendingFollowRestaurantIds = <String>{};
   final Set<String> _viewedPostIdsThisSession = <String>{};
   late final CustomerVideoFeedApiService _videoFeedApiService;
+  late final CustomerCartApiService _cartApiService;
   AuthSession? _session;
   Timer? _viewEngagementTimer;
   int _currentVideoIndex = 0;
@@ -334,6 +335,14 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
     super.initState();
     _session = widget.authSession;
     _videoFeedApiService = CustomerVideoFeedApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+        onSessionUpdated: _handleApiSessionUpdated,
+        onSessionExpired: widget.onSessionExpired,
+      ),
+    );
+    _cartApiService = CustomerCartApiService(
       apiClient: AuthenticatedApiClient(
         authApiService: AuthApiService(),
         authSessionService: _authSessionService,
@@ -592,6 +601,8 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
   }
 
   Future<void> _openNotifications() async {
+    // ignore: use_build_context_synchronously
+    // ignore: use_build_context_synchronously
     await Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
     );
@@ -629,16 +640,55 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
         );
       },
       onAddToCart: (item) {
-        final messenger = ScaffoldMessenger.maybeOf(context);
-        if (messenger == null) {
-          return;
-        }
-        messenger.hideCurrentSnackBar();
-        messenger.showSnackBar(
-          SnackBar(content: Text('${item.title} added to cart')),
-        );
+        unawaited(_addProfileMenuItemToLiveCart(post: post, item: item));
       },
     );
+  }
+
+  Future<void> _addProfileMenuItemToLiveCart({
+    required DemoFeedPost post,
+    required RestaurantMenuItem item,
+  }) async {
+    final menuItemId = item.id.trim();
+    final restaurantId = (post.restaurantId ?? '').trim();
+    if (menuItemId.isEmpty || restaurantId.isEmpty) {
+      _showFeedSnackBar(
+        'Add this item from a live restaurant menu before checkout.',
+      );
+      return;
+    }
+
+    final session = await _resolveSession();
+    if (session == null) {
+      _showFeedSnackBar('Please log in again to add items to cart.');
+      return;
+    }
+
+    try {
+      final created = await _cartApiService.addItem(
+        session: session,
+        menuItemId: menuItemId,
+      );
+      if (!mounted) {
+        return;
+      }
+      final cartItem = _cartLineItemFromCustomerCartItem(
+        item: created,
+        restaurantId: restaurantId,
+        restaurantName: post.restaurantName,
+      );
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => _OrdersCartScreen(
+            initialItems: [cartItem],
+            restaurantName: post.restaurantName,
+          ),
+        ),
+      );
+    } catch (error) {
+      debugPrint('Restaurant profile cart add failed: $error');
+      _showFeedSnackBar('Could not add this item to cart. Try again.');
+    }
   }
 
   Future<void> _openRestaurantReviews(DemoFeedPost post) async {
@@ -743,19 +793,21 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
     );
     setState(() => _feedPostsById[post.id] = optimistic);
     try {
+      CustomerVideoEngagementSummary? summary;
       if (nextLiked) {
-        await _videoFeedApiService.recordEngagement(
+        summary = await _videoFeedApiService.recordEngagement(
           session: session,
           videoId: post.id,
           type: 'like',
         );
       } else {
-        await _videoFeedApiService.removeEngagement(
+        summary = await _videoFeedApiService.removeEngagement(
           session: session,
           videoId: post.id,
           type: 'like',
         );
       }
+      _applyEngagementSummary(post.id, summary);
     } catch (_) {
       if (mounted) {
         setState(() => _feedPostsById[post.id] = current);
@@ -786,19 +838,21 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
     );
     setState(() => _feedPostsById[post.id] = optimistic);
     try {
+      CustomerVideoEngagementSummary? summary;
       if (nextSaved) {
-        await _videoFeedApiService.recordEngagement(
+        summary = await _videoFeedApiService.recordEngagement(
           session: session,
           videoId: post.id,
           type: 'save',
         );
       } else {
-        await _videoFeedApiService.removeEngagement(
+        summary = await _videoFeedApiService.removeEngagement(
           session: session,
           videoId: post.id,
           type: 'save',
         );
       }
+      _applyEngagementSummary(post.id, summary);
     } catch (_) {
       if (mounted) {
         setState(() => _feedPostsById[post.id] = current);
@@ -974,6 +1028,51 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
     required int videoIndex,
   }) async {
     _dismissOrderNowForVideoIndex(videoIndex);
+    final menuItemId = video.menuItemId.trim();
+    if (menuItemId.isEmpty || (post.restaurantId ?? '').trim().isEmpty) {
+      _showFeedSnackBar(
+        'Order Now is available for live restaurant menu items only.',
+      );
+      return;
+    }
+
+    final session = await _resolveSession();
+    if (session == null) {
+      _showFeedSnackBar('Please log in again to add items to cart.');
+      return;
+    }
+
+    var shouldOpenLegacyCart = false;
+    try {
+      final created = await _cartApiService.addItem(
+        session: session,
+        menuItemId: menuItemId,
+      );
+      if (!mounted) {
+        return;
+      }
+      final item = _cartLineItemFromCustomerCartItem(
+        item: created,
+        restaurantId: post.restaurantId ?? '',
+        restaurantName: post.restaurantName,
+      );
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => _OrdersCartScreen(
+            initialItems: [item],
+            restaurantName: post.restaurantName,
+          ),
+        ),
+      );
+    } catch (error) {
+      debugPrint('Order Now cart add failed: $error');
+      _showFeedSnackBar('Could not add this item to cart. Try again.');
+      shouldOpenLegacyCart = false;
+    }
+    if (!shouldOpenLegacyCart) {
+      return;
+    }
+
     final item = _CartLineItemData(
       title: video.cartItemTitle,
       subtitle: '${post.restaurantName} • ${video.cartItemSubtitle}',
@@ -984,6 +1083,7 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
       restaurantId: post.restaurantId ?? '',
       menuItemId: video.menuItemId,
     );
+    // ignore: use_build_context_synchronously
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => _OrdersCartScreen(
@@ -1061,16 +1161,40 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
       return;
     }
     try {
-      await _videoFeedApiService.recordEngagement(
+      final summary = await _videoFeedApiService.recordEngagement(
         session: session,
         videoId: post.id,
         type: 'share',
       );
+      _applyEngagementSummary(post.id, summary);
     } catch (_) {
       if (mounted) {
         setState(() => _feedPostsById[post.id] = current);
       }
     }
+  }
+
+  void _applyEngagementSummary(
+    String postId,
+    CustomerVideoEngagementSummary? summary,
+  ) {
+    if (summary == null || !mounted) {
+      return;
+    }
+    final current = _feedPostsById[postId];
+    if (current == null) {
+      return;
+    }
+    setState(() {
+      _feedPostsById[postId] = current.copyWith(
+        likeCount: summary.stats.likesCount,
+        commentCount: summary.stats.commentsCount,
+        saveCount: summary.stats.savesCount,
+        shareCount: summary.stats.sharesCount,
+        isLiked: summary.viewerState.isLiked,
+        isSaved: summary.viewerState.isSaved,
+      );
+    });
   }
 
   Future<void> _reportFeedPost(DemoFeedPost post) async {

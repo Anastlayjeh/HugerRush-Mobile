@@ -63,6 +63,33 @@ class CustomerRestaurantApiService {
         .toList(growable: false);
   }
 
+  Future<CustomerRestaurantItem> fetchRestaurant({
+    required AuthSession session,
+    required String restaurantId,
+  }) async {
+    final cleanedRestaurantId = restaurantId.trim();
+    if (cleanedRestaurantId.isEmpty) {
+      throw const AuthApiException('Restaurant is required.');
+    }
+
+    final result = await _apiClient.request(
+      session: session,
+      method: 'GET',
+      endpoint: '/v1/customer/restaurants/$cleanedRestaurantId',
+    );
+    final payload = ApiClient.decodeMap(result.response.body);
+    _throwForFailure(
+      result.response.statusCode,
+      payload,
+      fallback: 'Failed to load restaurant.',
+    );
+
+    final data = payload['data'];
+    return CustomerRestaurantItem.fromJson(
+      data is Map ? _restaurantPayloadFromNode(_stringMap(data)) : payload,
+    );
+  }
+
   Future<void> followRestaurant({
     required AuthSession session,
     required String restaurantId,

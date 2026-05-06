@@ -1,5 +1,10 @@
 import 'dart:async';
 
+import 'auth_api_service.dart';
+import 'auth_session_service.dart';
+import 'authenticated_api_client.dart';
+import 'api_client.dart';
+
 enum SupportAudience {
   customer,
   restaurant,
@@ -27,6 +32,7 @@ class SupportRequestService {
   static final SupportRequestService instance = SupportRequestService._();
 
   final List<SupportRequest> _requests = <SupportRequest>[];
+  final AuthSessionService _sessionService = AuthSessionService();
 
   List<SupportRequest> get requests => List<SupportRequest>.from(_requests);
 
@@ -41,10 +47,46 @@ class SupportRequestService {
       throw const SupportRequestException('Topic and details are required.');
     }
 
-    await Future<void>.delayed(const Duration(milliseconds: 520));
+    final session = await _sessionService.readSession();
+    if (session == null || session.token.trim().isEmpty) {
+      throw const SupportRequestException('Please log in again.');
+    }
+
+    final apiClient = AuthenticatedApiClient(
+      authApiService: AuthApiService(),
+      authSessionService: _sessionService,
+    );
+    final response = await apiClient.request(
+      session: session,
+      method: 'POST',
+      endpoint: '/v1/support-requests',
+      body: <String, dynamic>{
+        'channel': audience == SupportAudience.restaurant
+            ? 'restaurant_app'
+            : 'customer_app',
+        'subject': cleanedTopic,
+        'message': cleanedDetails,
+      },
+    );
+    final payload = ApiClient.decodeMap(response.response.body);
+    if (response.response.statusCode < 200 ||
+        response.response.statusCode >= 300) {
+      throw SupportRequestException(
+        ApiClient.errorMessageForStatus(
+          response.response.statusCode,
+          payload,
+          fallback: 'Could not submit support request.',
+        ),
+      );
+    }
+
+    final data = payload['data'] is Map<String, dynamic>
+        ? payload['data'] as Map<String, dynamic>
+        : <String, dynamic>{};
 
     final request = SupportRequest(
-      id: 'support-${DateTime.now().microsecondsSinceEpoch}',
+      id: (data['id'] as Object?)?.toString() ??
+          'support-${DateTime.now().microsecondsSinceEpoch}',
       audience: audience,
       topic: cleanedTopic,
       details: cleanedDetails,
@@ -52,7 +94,6 @@ class SupportRequestService {
     );
     _requests.insert(0, request);
 
-    // TODO(api): Replace this mock insertion with backend support ticket endpoint.
     return request;
   }
 }

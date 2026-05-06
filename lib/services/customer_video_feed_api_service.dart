@@ -61,25 +61,26 @@ class CustomerVideoFeedApiService {
     );
   }
 
-  Future<void> recordEngagement({
+  Future<CustomerVideoEngagementSummary?> recordEngagement({
     required AuthSession session,
     required String videoId,
     required String type,
   }) async {
     final cleanedVideoId = videoId.trim();
     if (cleanedVideoId.isEmpty) {
-      return;
+      return null;
     }
-    await _requestVoid(
+    final payload = await _requestMap(
       session: session,
       method: 'POST',
       endpoint: '/v1/customer/videos/$cleanedVideoId/engagements',
       body: <String, dynamic>{'type': type},
       fallback: 'Failed to update video engagement.',
     );
+    return CustomerVideoEngagementSummary.fromPayload(payload);
   }
 
-  Future<void> removeEngagement({
+  Future<CustomerVideoEngagementSummary?> removeEngagement({
     required AuthSession session,
     required String videoId,
     required String type,
@@ -87,14 +88,15 @@ class CustomerVideoFeedApiService {
     final cleanedVideoId = videoId.trim();
     final cleanedType = type.trim();
     if (cleanedVideoId.isEmpty || cleanedType.isEmpty) {
-      return;
+      return null;
     }
-    await _requestVoid(
+    final payload = await _requestMap(
       session: session,
       method: 'DELETE',
       endpoint: '/v1/customer/videos/$cleanedVideoId/engagements/$cleanedType',
       fallback: 'Failed to update video engagement.',
     );
+    return CustomerVideoEngagementSummary.fromPayload(payload);
   }
 
   Future<List<CustomerVideoComment>> fetchComments({
@@ -219,6 +221,28 @@ class CustomerVideoFeedApiService {
       _decodeMap(result.response.body),
       fallback: fallback,
     );
+  }
+
+  Future<Map<String, dynamic>> _requestMap({
+    required AuthSession session,
+    required String method,
+    required String endpoint,
+    Object? body,
+    required String fallback,
+  }) async {
+    final result = await _apiClient.request(
+      session: session,
+      method: method,
+      endpoint: endpoint,
+      body: body,
+    );
+    final payload = _decodeMap(result.response.body);
+    _throwForFailure(
+      result.response.statusCode,
+      payload,
+      fallback: fallback,
+    );
+    return payload;
   }
 
   String _endpoint(String path, Map<String, String> queryParameters) {

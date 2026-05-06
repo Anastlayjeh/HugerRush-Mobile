@@ -152,6 +152,33 @@ bool _orderStatusIsTerminal(_OrderStatus status) {
       status == _OrderStatus.rejected;
 }
 
+_OrderStatus _orderStatusFromBackend(String status) {
+  final normalized = status.trim().toLowerCase().replaceAll('-', '_');
+  switch (normalized) {
+    case 'accepted':
+      return _OrderStatus.accepted;
+    case 'preparing':
+      return _OrderStatus.preparing;
+    case 'ready':
+    case 'ready_for_pickup':
+      return _OrderStatus.ready;
+    case 'picked_up':
+    case 'on_the_way':
+      return _OrderStatus.onTheWay;
+    case 'delivered':
+    case 'completed':
+      return _OrderStatus.delivered;
+    case 'cancelled':
+    case 'canceled':
+      return _OrderStatus.canceled;
+    case 'rejected':
+      return _OrderStatus.rejected;
+    case 'pending':
+    default:
+      return _OrderStatus.pending;
+  }
+}
+
 List<_OrderTimelineStepData> _buildOrderTimeline(_OrderStatus status) {
   if (status == _OrderStatus.canceled || status == _OrderStatus.rejected) {
     return [
@@ -199,6 +226,7 @@ class _OrdersTabBody extends StatelessWidget {
   final int selectedBottomIndex;
   final ValueChanged<int> onBottomNavSelected;
 
+  // ignore: unused_field
   static const List<_OrdersMetricData> _heroMetrics = [
     _OrdersMetricData(
       label: 'Active',
@@ -223,8 +251,10 @@ class _OrdersTabBody extends StatelessWidget {
     ),
   ];
 
+  // ignore: unused_field
   static const _activeStatus = _OrderStatus.onTheWay;
 
+  // ignore: unused_field
   static const List<_PastOrderEntryData> _pastOrders = [
     _PastOrderEntryData(
       title: 'Burger Station',
@@ -315,6 +345,7 @@ class _OrdersTabBody extends StatelessWidget {
     ),
   ];
 
+  // ignore: unused_field
   static const List<_OrderReceiptData> _orderReceipts = [
     _OrderReceiptData(
       orderId: 'HR-2048',
@@ -471,10 +502,71 @@ class _OrdersTabBody extends StatelessWidget {
     ),
   ];
 
+  Future<_OrdersLiveSnapshot> _loadLiveOrders() async {
+    final authSessionService = AuthSessionService();
+    final session = await authSessionService.readSession();
+    if (session == null || session.token.trim().isEmpty) {
+      throw const OrderApiException('Please log in again to load orders.');
+    }
+    final service = CustomerOrderApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: authSessionService,
+      ),
+    );
+    final orders = await service.fetchHistory(session: session);
+    return _OrdersLiveSnapshot(orders: orders);
+  }
+
+  List<_OrdersMetricData> _metricsForOrders(List<AppOrder> orders) {
+    final active = orders.where((order) => order.isActive).length;
+    final delivered = orders
+        .where(
+          (order) =>
+              _orderStatusFromBackend(order.status) == _OrderStatus.delivered,
+        )
+        .length;
+    return <_OrdersMetricData>[
+      _OrdersMetricData(
+        label: 'Active',
+        value: '$active',
+        icon: Icons.delivery_dining_rounded,
+        accentColor: const Color(0xFFFF7E4D),
+        backgroundColor: const Color(0xFFFFF2E8),
+      ),
+      _OrdersMetricData(
+        label: 'Delivered',
+        value: '$delivered',
+        icon: Icons.receipt_long_rounded,
+        accentColor: const Color(0xFF2F8A7E),
+        backgroundColor: const Color(0xFFF1F8F5),
+      ),
+      _OrdersMetricData(
+        label: 'Total',
+        value: '${orders.length}',
+        icon: Icons.stars_rounded,
+        accentColor: const Color(0xFFB56A45),
+        backgroundColor: const Color(0xFFFFF4EC),
+      ),
+    ];
+  }
+
+  void _showUnavailableReorder(BuildContext context) {
+    ScaffoldMessenger.maybeOf(context)
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Reorder is not available yet. Please add items from the live restaurant menu.',
+          ),
+        ),
+      );
+  }
+
   void _openOrderHistory(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => const _OrdersReceiptsScreen(receipts: _orderReceipts),
+        builder: (_) => const _OrdersReceiptsScreen(receipts: []),
       ),
     );
   }
@@ -502,6 +594,7 @@ class _OrdersTabBody extends StatelessWidget {
     );
   }
 
+  // ignore: unused_element
   void _reorderPastOrder(BuildContext context, _PastOrderEntryData order) {
     _openCart(
       context,
@@ -606,99 +699,181 @@ class _OrdersTabBody extends StatelessWidget {
                         height: _clampDouble(20 * metrics.scale, 16, 20),
                       ),
                       Expanded(
-                        child: SingleChildScrollView(
-                          physics: const BouncingScrollPhysics(),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _OrdersHeroCard(
-                                metrics: metrics,
-                                metricsData: _heroMetrics,
-                              ),
-                              SizedBox(
-                                height: _clampDouble(
-                                  26 * metrics.scale,
-                                  20,
-                                  26,
-                                ),
-                              ),
-                              _ProfileSectionHeader(
-                                title: 'Live Order',
-                                actionLabel: 'Need Help?',
-                                onActionTap: () {
-                                  showOrderIssueSheet(
-                                    context,
-                                    orderId: 'HR-2048',
-                                    restaurantName: 'Burger Station',
-                                  );
-                                },
-                              ),
-                              SizedBox(
-                                height: _clampDouble(
-                                  14 * metrics.scale,
-                                  10,
-                                  14,
-                                ),
-                              ),
-                              _ActiveOrderCard(
-                                metrics: metrics,
-                                currentStatus: _activeStatus,
-                              ),
-                              SizedBox(
-                                height: _clampDouble(
-                                  26 * metrics.scale,
-                                  20,
-                                  26,
-                                ),
-                              ),
-                              const _ProfileSectionHeader(
-                                title: 'Recent Orders',
-                                actionLabel: 'View All',
-                              ),
-                              SizedBox(
-                                height: _clampDouble(
-                                  14 * metrics.scale,
-                                  10,
-                                  14,
-                                ),
-                              ),
-                              Column(
-                                children: List.generate(_pastOrders.length, (
-                                  index,
-                                ) {
-                                  return Padding(
-                                    padding: EdgeInsets.only(
-                                      bottom: index == _pastOrders.length - 1
-                                          ? 0
-                                          : _clampDouble(
-                                              14 * metrics.scale,
-                                              10,
-                                              14,
-                                            ),
+                        child: FutureBuilder<_OrdersLiveSnapshot>(
+                          future: _loadLiveOrders(),
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState !=
+                                ConnectionState.done) {
+                              return const Center(
+                                child: CircularProgressIndicator(),
+                              );
+                            }
+                            if (snapshot.hasError) {
+                              return Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(18),
+                                  child: Text(
+                                    snapshot.error.toString(),
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      color: Color(0xFF7D3D34),
+                                      fontWeight: FontWeight.w700,
                                     ),
-                                    child: _PastOrderCard(
-                                      data: _pastOrders[index],
+                                  ),
+                                ),
+                              );
+                            }
+                            final live =
+                                snapshot.data ??
+                                const _OrdersLiveSnapshot(orders: []);
+                            final activeOrder = live.activeOrder;
+                            final pastOrders = live.pastOrders;
+                            return SingleChildScrollView(
+                              physics: const BouncingScrollPhysics(),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _OrdersHeroCard(
+                                    metrics: metrics,
+                                    metricsData: _metricsForOrders(live.orders),
+                                  ),
+                                  SizedBox(
+                                    height: _clampDouble(
+                                      26 * metrics.scale,
+                                      20,
+                                      26,
+                                    ),
+                                  ),
+                                  _ProfileSectionHeader(
+                                    title: 'Live Order',
+                                    actionLabel: activeOrder == null
+                                        ? null
+                                        : 'Need Help?',
+                                    onActionTap: activeOrder == null
+                                        ? null
+                                        : () {
+                                            showOrderIssueSheet(
+                                              context,
+                                              orderId: activeOrder.id,
+                                              restaurantName:
+                                                  activeOrder.restaurantName,
+                                            );
+                                          },
+                                  ),
+                                  SizedBox(
+                                    height: _clampDouble(
+                                      14 * metrics.scale,
+                                      10,
+                                      14,
+                                    ),
+                                  ),
+                                  if (activeOrder == null)
+                                    _ProfilePanel(
+                                      child: Padding(
+                                        padding: EdgeInsets.all(
+                                          _clampDouble(
+                                            18 * metrics.scale,
+                                            14,
+                                            18,
+                                          ),
+                                        ),
+                                        child: const Text(
+                                          'No active orders right now.',
+                                          style: TextStyle(
+                                            color: Color(0xFF7D6C60),
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                  else
+                                    _ActiveOrderCard(
                                       metrics: metrics,
-                                      onReorder: () => _reorderPastOrder(
-                                        context,
-                                        _pastOrders[index],
+                                      order: activeOrder,
+                                    ),
+                                  SizedBox(
+                                    height: _clampDouble(
+                                      26 * metrics.scale,
+                                      20,
+                                      26,
+                                    ),
+                                  ),
+                                  const _ProfileSectionHeader(
+                                    title: 'Recent Orders',
+                                    actionLabel: 'View All',
+                                  ),
+                                  SizedBox(
+                                    height: _clampDouble(
+                                      14 * metrics.scale,
+                                      10,
+                                      14,
+                                    ),
+                                  ),
+                                  if (pastOrders.isEmpty)
+                                    _ProfilePanel(
+                                      child: Padding(
+                                        padding: EdgeInsets.all(
+                                          _clampDouble(
+                                            18 * metrics.scale,
+                                            14,
+                                            18,
+                                          ),
+                                        ),
+                                        child: const Text(
+                                          'No order history yet.',
+                                          style: TextStyle(
+                                            color: Color(0xFF7D6C60),
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                  else
+                                    Column(
+                                      children: List.generate(
+                                        pastOrders.length,
+                                        (index) {
+                                          return Padding(
+                                            padding: EdgeInsets.only(
+                                              bottom:
+                                                  index == pastOrders.length - 1
+                                                  ? 0
+                                                  : _clampDouble(
+                                                      14 * metrics.scale,
+                                                      10,
+                                                      14,
+                                                    ),
+                                            ),
+                                            child: _PastOrderCard(
+                                              data: pastOrders[index],
+                                              metrics: metrics,
+                                              onReorder: () =>
+                                                  _showUnavailableReorder(
+                                                    context,
+                                                  ),
+                                            ),
+                                          );
+                                        },
                                       ),
                                     ),
-                                  );
-                                }),
+                                  SizedBox(
+                                    height: _clampDouble(
+                                      26 * metrics.scale,
+                                      20,
+                                      26,
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    height: _clampDouble(
+                                      12 * metrics.scale,
+                                      8,
+                                      12,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              SizedBox(
-                                height: _clampDouble(
-                                  26 * metrics.scale,
-                                  20,
-                                  26,
-                                ),
-                              ),
-                              SizedBox(
-                                height: _clampDouble(12 * metrics.scale, 8, 12),
-                              ),
-                            ],
-                          ),
+                            );
+                          },
                         ),
                       ),
                     ],
@@ -728,6 +903,22 @@ class _OrdersReceiptsScreen extends StatelessWidget {
 
   final List<_OrderReceiptData> receipts;
 
+  Future<List<_OrderReceiptData>> _fetchLiveReceipts() async {
+    final authSessionService = AuthSessionService();
+    final session = await authSessionService.readSession();
+    if (session == null || session.token.trim().isEmpty) {
+      throw const OrderApiException('Please log in again to load receipts.');
+    }
+    final service = CustomerOrderApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: authSessionService,
+      ),
+    );
+    final orders = await service.fetchHistory(session: session);
+    return orders.map(_orderReceiptFromAppOrder).toList(growable: false);
+  }
+
   @override
   Widget build(BuildContext context) {
     final viewport = MediaQuery.sizeOf(context);
@@ -748,8 +939,30 @@ class _OrdersReceiptsScreen extends StatelessWidget {
         ),
       ),
       body: SafeArea(
-        child: receipts.isEmpty
-            ? const Center(
+        child: FutureBuilder<List<_OrderReceiptData>>(
+          future: _fetchLiveReceipts(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Text(
+                    snapshot.error.toString(),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFF7D3D34),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              );
+            }
+            final liveReceipts = snapshot.data ?? receipts;
+            if (liveReceipts.isEmpty) {
+              return const Center(
                 child: Text(
                   'No receipts available yet.',
                   style: TextStyle(
@@ -757,28 +970,31 @@ class _OrdersReceiptsScreen extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-              )
-            : ListView.separated(
-                physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                itemCount: receipts.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 10),
-                itemBuilder: (context, index) {
-                  final receipt = receipts[index];
-                  return _OrderReceiptListTile(
-                    receipt: receipt,
-                    metrics: metrics,
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) =>
-                              _OrderReceiptDetailsScreen(receipt: receipt),
-                        ),
-                      );
-                    },
-                  );
-                },
-              ),
+              );
+            }
+            return ListView.separated(
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              itemCount: liveReceipts.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 10),
+              itemBuilder: (context, index) {
+                final receipt = liveReceipts[index];
+                return _OrderReceiptListTile(
+                  receipt: receipt,
+                  metrics: metrics,
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) =>
+                            _OrderReceiptDetailsScreen(receipt: receipt),
+                      ),
+                    );
+                  },
+                );
+              },
+            );
+          },
+        ),
       ),
     );
   }
@@ -1234,6 +1450,23 @@ class _OrdersCartListScreen extends StatelessWidget {
 
   String _formatMoney(double value) => '\$${value.toStringAsFixed(2)}';
 
+  Future<CustomerCart?> _fetchLiveCart() async {
+    final authSessionService = AuthSessionService();
+    final session = await authSessionService.readSession();
+    if (session == null || session.token.trim().isEmpty) {
+      throw const CustomerCartApiException(
+        'Please log in again to load your cart.',
+      );
+    }
+    final service = CustomerCartApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: authSessionService,
+      ),
+    );
+    return service.fetchCart(session: session);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1252,65 +1485,89 @@ class _OrdersCartListScreen extends StatelessWidget {
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          child: carts.isEmpty
-              ? const Center(
+          child: FutureBuilder<CustomerCart?>(
+            future: _fetchLiveCart(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(18),
+                    child: Text(
+                      snapshot.error.toString(),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Color(0xFF7D3D34),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                );
+              }
+              final cart = snapshot.data;
+              if (cart == null || cart.isEmpty) {
+                return const Center(
                   child: Text(
-                    'No carts yet. Add items from a restaurant first.',
+                    'No cart yet. Add items from a live restaurant menu first.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Color(0xFF7D6C60),
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFFF4EC),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFFF2D8C4)),
-                      ),
-                      child: const Text(
-                        'Checkout supports one restaurant at a time.',
-                        style: TextStyle(
-                          color: Color(0xFF9B5B38),
-                          fontWeight: FontWeight.w700,
-                        ),
+                );
+              }
+              final items = _cartLineItemsFromCustomerCart(cart);
+              final coverImageUrl = items.isEmpty ? '' : items.first.imageUrl;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF4EC),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFFF2D8C4)),
+                    ),
+                    child: const Text(
+                      'Checkout supports one restaurant at a time.',
+                      style: TextStyle(
+                        color: Color(0xFF9B5B38),
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    Expanded(
-                      child: ListView.separated(
-                        physics: const BouncingScrollPhysics(),
-                        itemCount: carts.length,
-                        separatorBuilder: (_, _) => const SizedBox(height: 10),
-                        itemBuilder: (context, index) {
-                          final cart = carts[index];
-                          return _OrdersCartListTile(
-                            restaurantName: cart.restaurantName,
-                            totalItems: cart.totalItems,
-                            subtotalLabel: _formatMoney(cart.subtotal),
-                            coverImageUrl: cart.coverImageUrl,
-                            onTap: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute<void>(
-                                  builder: (_) => _OrdersCartScreen(
-                                    initialItems: cart.items,
-                                    restaurantName: cart.restaurantName,
-                                  ),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: ListView(
+                      physics: const BouncingScrollPhysics(),
+                      children: [
+                        _OrdersCartListTile(
+                          restaurantName: cart.restaurantName,
+                          totalItems: cart.totalItems,
+                          subtotalLabel: _formatMoney(cart.subtotal),
+                          coverImageUrl: coverImageUrl,
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => _OrdersCartScreen(
+                                  initialItems: items,
+                                  restaurantName: cart.restaurantName,
                                 ),
-                              );
-                            },
-                          );
-                        },
-                      ),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
@@ -1421,10 +1678,20 @@ class _OrdersCartScreenState extends State<_OrdersCartScreen> {
 
   late List<_CartLineItemData> _items;
   late String _restaurantName;
+  late final AuthSessionService _authSessionService;
+  late final CustomerCartApiService _cartApiService;
+  bool _isUpdatingCart = false;
 
   @override
   void initState() {
     super.initState();
+    _authSessionService = AuthSessionService();
+    _cartApiService = CustomerCartApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+      ),
+    );
     final explicitRestaurant = widget.restaurantName?.trim() ?? '';
     final fallbackRestaurant = _firstRestaurantNameFromItems(
       widget.initialItems,
@@ -1503,26 +1770,126 @@ class _OrdersCartScreenState extends State<_OrdersCartScreen> {
 
   String _formatMoney(double value) => '\$${value.toStringAsFixed(2)}';
 
-  void _increaseQuantity(int index) {
-    setState(() {
-      final item = _items[index];
-      _items[index] = item.copyWith(quantity: item.quantity + 1);
-    });
+  Future<AuthSession?> _resolveSession() => _authSessionService.readSession();
+
+  void _showCartSnackBar(String message) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
-  void _decreaseQuantity(int index) {
+  Future<void> _increaseQuantity(int index) async {
+    if (_isUpdatingCart || index < 0 || index >= _items.length) {
+      return;
+    }
+    final item = _items[index];
+    await _updateLiveCartItem(index, item.quantity + 1);
+  }
+
+  Future<void> _decreaseQuantity(int index) async {
+    if (_isUpdatingCart || index < 0 || index >= _items.length) {
+      return;
+    }
+    final item = _items[index];
+    if (item.quantity <= 1) {
+      await _removeItem(index);
+      return;
+    }
+    await _updateLiveCartItem(index, item.quantity - 1);
+  }
+
+  Future<void> _updateLiveCartItem(int index, int quantity) async {
+    final item = _items[index];
+    final cartItemId = item.cartItemId.trim();
+    if (cartItemId.isEmpty) {
+      _showCartSnackBar(
+        'Update quantity from a live cart item added through a restaurant menu.',
+      );
+      return;
+    }
+    final session = await _resolveSession();
+    if (session == null || session.token.trim().isEmpty) {
+      _showCartSnackBar('Please log in again to update your cart.');
+      return;
+    }
+
+    final previous = _items[index];
     setState(() {
-      final item = _items[index];
-      if (item.quantity <= 1) {
-        _items.removeAt(index);
+      _isUpdatingCart = true;
+      _items[index] = item.copyWith(quantity: quantity);
+    });
+    try {
+      final updated = await _cartApiService.updateItem(
+        session: session,
+        cartItemId: cartItemId,
+        quantity: quantity,
+        notes: item.subtitle,
+      );
+      if (!mounted || index >= _items.length) {
         return;
       }
-      _items[index] = item.copyWith(quantity: item.quantity - 1);
-    });
+      setState(() {
+        _items[index] = _cartLineItemFromCustomerCartItem(
+          item: updated,
+          restaurantId: previous.restaurantId,
+          restaurantName: previous.restaurantName,
+        );
+        _isUpdatingCart = false;
+      });
+    } catch (error) {
+      if (!mounted || index >= _items.length) {
+        return;
+      }
+      setState(() {
+        _items[index] = previous;
+        _isUpdatingCart = false;
+      });
+      _showCartSnackBar('Could not update cart quantity. Try again.');
+    }
   }
 
-  void _removeItem(int index) {
-    setState(() => _items.removeAt(index));
+  Future<void> _removeItem(int index) async {
+    if (_isUpdatingCart || index < 0 || index >= _items.length) {
+      return;
+    }
+    final item = _items[index];
+    final cartItemId = item.cartItemId.trim();
+    if (cartItemId.isEmpty) {
+      _showCartSnackBar(
+        'Remove static reorder items by adding a live menu item instead.',
+      );
+      return;
+    }
+    final session = await _resolveSession();
+    if (session == null || session.token.trim().isEmpty) {
+      _showCartSnackBar('Please log in again to update your cart.');
+      return;
+    }
+
+    setState(() {
+      _isUpdatingCart = true;
+      _items.removeAt(index);
+    });
+    try {
+      await _cartApiService.removeItem(
+        session: session,
+        cartItemId: cartItemId,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() => _isUpdatingCart = false);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _items.insert(index.clamp(0, _items.length), item);
+        _isUpdatingCart = false;
+      });
+      _showCartSnackBar('Could not remove cart item. Try again.');
+    }
   }
 
   Future<void> _checkout() async {
@@ -1703,7 +2070,7 @@ class _OrdersCartScreenState extends State<_OrdersCartScreen> {
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
-                        onPressed: _checkout,
+                        onPressed: _isUpdatingCart ? null : _checkout,
                         style: FilledButton.styleFrom(
                           backgroundColor: const Color(0xFFFF7E4D),
                           minimumSize: const Size.fromHeight(50),
@@ -3465,21 +3832,23 @@ class _OrdersMetricCard extends StatelessWidget {
 }
 
 class _ActiveOrderCard extends StatelessWidget {
-  const _ActiveOrderCard({required this.metrics, required this.currentStatus});
+  const _ActiveOrderCard({required this.metrics, required this.order});
 
   final _ResponsiveMetrics metrics;
-  final _OrderStatus currentStatus;
+  final AppOrder order;
+
+  _OrderStatus get currentStatus => _orderStatusFromBackend(order.status);
 
   void _openOrderTracking(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => _OrderTrackingScreen(
-          orderId: 'HR-2048',
-          restaurantName: 'Burger Station',
-          itemSummary: 'Double smash burger combo with Cajun fries',
+          orderId: order.displayId,
+          restaurantName: order.restaurantName,
+          itemSummary: order.itemSummary,
           status: currentStatus,
-          etaLabel: '8 min',
-          totalLabel: '\$24.50',
+          etaLabel: order.etaLabel,
+          totalLabel: order.totalLabel,
         ),
       ),
     );
@@ -3508,7 +3877,7 @@ class _ActiveOrderCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Burger Station',
+                        order.restaurantName,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -3519,7 +3888,7 @@ class _ActiveOrderCard extends StatelessWidget {
                       ),
                       SizedBox(height: _clampDouble(4 * metrics.scale, 2, 4)),
                       Text(
-                        'Double smash burger combo with Cajun fries',
+                        order.itemSummary,
                         maxLines: metrics.compact ? 2 : 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -3558,7 +3927,9 @@ class _ActiveOrderCard extends StatelessWidget {
               children: [
                 _OrdersInfoChip(
                   label: currentStatus == _OrderStatus.onTheWay
-                      ? 'ETA 8 min'
+                      ? (order.etaLabel.isEmpty
+                            ? 'Live status'
+                            : 'ETA ${order.etaLabel}')
                       : _orderStatusLabel(currentStatus),
                   icon: currentStatus == _OrderStatus.onTheWay
                       ? Icons.timer_outlined
@@ -3566,12 +3937,12 @@ class _ActiveOrderCard extends StatelessWidget {
                   metrics: metrics,
                 ),
                 _OrdersInfoChip(
-                  label: 'Order #HR-2048',
+                  label: 'Order ${order.displayId}',
                   icon: Icons.tag_rounded,
                   metrics: metrics,
                 ),
                 _OrdersInfoChip(
-                  label: 'Paid online',
+                  label: order.channelLabel,
                   icon: Icons.credit_card_rounded,
                   metrics: metrics,
                 ),
@@ -3620,7 +3991,7 @@ class _ActiveOrderCard extends StatelessWidget {
                     ),
                     SizedBox(height: _clampDouble(4 * metrics.scale, 2, 4)),
                     Text(
-                      '\$24.50',
+                      order.totalLabel,
                       style: TextStyle(
                         color: const Color(0xFF231A16),
                         fontSize: _clampDouble(24 * metrics.scale, 18, 24),
@@ -4505,6 +4876,84 @@ class _OrderTimelineStepData {
   final bool isCurrent;
 }
 
+class _OrdersLiveSnapshot {
+  const _OrdersLiveSnapshot({required this.orders});
+
+  final List<AppOrder> orders;
+
+  AppOrder? get activeOrder {
+    for (final order in orders) {
+      if (order.isActive) {
+        return order;
+      }
+    }
+    return null;
+  }
+
+  List<_PastOrderEntryData> get pastOrders =>
+      orders.map(_pastOrderEntryFromAppOrder).toList(growable: false);
+
+  List<_OrderReceiptData> get receipts =>
+      orders.map(_orderReceiptFromAppOrder).toList(growable: false);
+}
+
+_PastOrderEntryData _pastOrderEntryFromAppOrder(AppOrder order) {
+  return _PastOrderEntryData(
+    title: order.restaurantName,
+    summary: order.itemSummary,
+    dateLabel: _orderDateLabel(order.createdAt),
+    totalLabel: order.totalLabel,
+    status: _orderStatusFromBackend(order.status),
+    imageUrl: '',
+    reorderItems: const <_CartLineItemData>[],
+  );
+}
+
+_OrderReceiptData _orderReceiptFromAppOrder(AppOrder order) {
+  final total = order.total ?? 0;
+  final lineItems = order.items
+      .map(
+        (item) => _OrderReceiptLineItemData(
+          title: item.title,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice ?? 0,
+        ),
+      )
+      .toList(growable: false);
+  return _OrderReceiptData(
+    orderId: order.displayId,
+    restaurantName: order.restaurantName,
+    summary: order.itemSummary,
+    placedAtLabel: _orderDateLabel(order.createdAt),
+    status: _orderStatusFromBackend(order.status),
+    imageUrl: '',
+    paymentMethodLabel: order.channelLabel,
+    deliveryFee: 0,
+    serviceFee: 0,
+    discountPercent: 0,
+    loyaltyPointsUsed: 0,
+    loyaltyDiscountUsd: 0,
+    items: lineItems.isEmpty
+        ? <_OrderReceiptLineItemData>[
+            _OrderReceiptLineItemData(
+              title: order.itemSummary.isEmpty
+                  ? 'Order total'
+                  : order.itemSummary,
+              quantity: 1,
+              unitPrice: total,
+            ),
+          ]
+        : lineItems,
+  );
+}
+
+String _orderDateLabel(DateTime? value) {
+  if (value == null) {
+    return 'Recent';
+  }
+  return _formatRelativeTime(value);
+}
+
 class _PastOrderEntryData {
   const _PastOrderEntryData({
     required this.title,
@@ -4598,6 +5047,7 @@ class _CartLineItemData {
     this.restaurantName = '',
     this.restaurantId = '',
     this.menuItemId = '',
+    this.cartItemId = '',
   });
 
   final String title;
@@ -4608,6 +5058,7 @@ class _CartLineItemData {
   final String restaurantName;
   final String restaurantId;
   final String menuItemId;
+  final String cartItemId;
 
   _CartLineItemData copyWith({
     String? title,
@@ -4618,6 +5069,7 @@ class _CartLineItemData {
     String? restaurantName,
     String? restaurantId,
     String? menuItemId,
+    String? cartItemId,
   }) {
     return _CartLineItemData(
       title: title ?? this.title,
@@ -4628,8 +5080,45 @@ class _CartLineItemData {
       restaurantName: restaurantName ?? this.restaurantName,
       restaurantId: restaurantId ?? this.restaurantId,
       menuItemId: menuItemId ?? this.menuItemId,
+      cartItemId: cartItemId ?? this.cartItemId,
     );
   }
+}
+
+_CartLineItemData _cartLineItemFromCustomerCartItem({
+  required CustomerCartItem item,
+  required String restaurantId,
+  required String restaurantName,
+}) {
+  final category = item.category.trim();
+  final notes = item.notes.trim();
+  return _CartLineItemData(
+    title: item.title,
+    subtitle: <String>[
+      if (restaurantName.trim().isNotEmpty) restaurantName.trim(),
+      if (category.isNotEmpty) category,
+      if (notes.isNotEmpty) notes,
+    ].join(' - '),
+    imageUrl: item.imageUrl,
+    price: item.unitPrice,
+    quantity: item.quantity,
+    restaurantName: restaurantName,
+    restaurantId: restaurantId,
+    menuItemId: item.menuItemId,
+    cartItemId: item.id,
+  );
+}
+
+List<_CartLineItemData> _cartLineItemsFromCustomerCart(CustomerCart cart) {
+  return cart.items
+      .map(
+        (item) => _cartLineItemFromCustomerCartItem(
+          item: item,
+          restaurantId: cart.restaurantId,
+          restaurantName: cart.restaurantName,
+        ),
+      )
+      .toList(growable: false);
 }
 
 class _RestaurantCartData {

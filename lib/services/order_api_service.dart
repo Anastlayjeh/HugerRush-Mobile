@@ -13,28 +13,16 @@ class CustomerOrderApiService {
     required AuthSession session,
     required CustomerOrderDraft draft,
   }) async {
+    if (draft.canSyncCart) {
+      await _syncCart(session: session, draft: draft);
+    }
+
     final response = await _postOrder(
       session: session,
-      body: draft.toOrderJson(includeItems: true),
+      body: draft.toOrderJson(),
     );
     if (response != null) {
       return response;
-    }
-
-    if (!draft.canSyncCart) {
-      throw const OrderApiException(
-        'Please add an item from the live restaurant menu before checkout.',
-      );
-    }
-
-    await _syncCart(session: session, draft: draft);
-    final fallbackOrder = await _postOrder(
-      session: session,
-      body: draft.toOrderJson(includeItems: false),
-      allowValidationFallback: false,
-    );
-    if (fallbackOrder != null) {
-      return fallbackOrder;
     }
 
     throw const OrderApiException('Could not place your order right now.');
@@ -220,6 +208,7 @@ class CustomerOrderDraft {
     this.changeRequest = '',
     this.useLoyalty = false,
     this.saveChangeInWallet = false,
+    this.branchId,
   });
 
   final String restaurantId;
@@ -236,35 +225,17 @@ class CustomerOrderDraft {
   final String changeRequest;
   final bool useLoyalty;
   final bool saveChangeInWallet;
+  final String? branchId;
 
   bool get canSyncCart =>
       restaurantId.trim().isNotEmpty &&
       items.isNotEmpty &&
       items.every((item) => item.menuItemId.trim().isNotEmpty);
 
-  Map<String, dynamic> toOrderJson({required bool includeItems}) {
-    final addressPayload = address.toJson();
+  Map<String, dynamic> toOrderJson() {
     return <String, dynamic>{
-      'restaurant_id': restaurantId,
-      'restaurant_name': restaurantName,
-      if (includeItems)
-        'items': items.map((item) => item.toOrderJson()).toList(),
-      'delivery_address': addressPayload,
-      'address': address.label,
-      'delivery_method': 'delivery',
-      'delivery_type': 'delivery',
-      'fulfillment_type': 'delivery',
-      'delivery_mode': deliveryMode,
-      if (scheduledLabel.trim().isNotEmpty) 'scheduled_for': scheduledLabel,
-      'payment_method': paymentMethod,
-      'change_request': changeRequest,
-      'use_loyalty': useLoyalty,
-      'save_change_in_wallet': saveChangeInWallet,
-      'subtotal': subtotal,
-      'delivery_fee': deliveryFee,
-      'service_fee': serviceFee,
-      'total': total,
-      'total_amount': total,
+      if (branchId != null && branchId!.trim().isNotEmpty)
+        'branch_id': branchId!.trim(),
     };
   }
 }
@@ -298,9 +269,7 @@ class CustomerOrderDraftItem {
 
   Map<String, dynamic> toCartJson({required String restaurantId}) {
     return <String, dynamic>{
-      'restaurant_id': restaurantId,
       'menu_item_id': menuItemId,
-      'item_id': menuItemId,
       'quantity': quantity,
       if (notes.trim().isNotEmpty) 'notes': notes.trim(),
     };
@@ -533,7 +502,10 @@ String orderStatusLabel(String status) {
     case 'preparing':
       return 'Preparing';
     case 'ready':
+    case 'ready_for_pickup':
       return 'Ready';
+    case 'picked_up':
+      return 'Picked up';
     case 'on_the_way':
     case 'on the way':
       return 'On the way';

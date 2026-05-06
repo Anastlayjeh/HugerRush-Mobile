@@ -9,6 +9,7 @@ import '../models/demo_app_models.dart';
 import '../services/auth_api_service.dart';
 import '../services/auth_session_service.dart';
 import '../services/authenticated_api_client.dart';
+import '../services/conversation_api_service.dart';
 import '../services/customer_restaurant_api_service.dart';
 import '../services/demo_app_repository.dart';
 import '../services/moderation_support_models.dart';
@@ -6535,12 +6536,14 @@ class _LiveRestaurantOrderDetailScreenState
           _RestaurantOrderAction('Reject', 'rejected', false),
         ];
       case 'preparing':
-        return const [_RestaurantOrderAction('Mark Ready', 'ready', true)];
-      case 'ready':
         return const [
-          _RestaurantOrderAction('Send Out', 'on_the_way', true),
-          _RestaurantOrderAction('Mark Delivered', 'delivered', false),
+          _RestaurantOrderAction('Mark Ready', 'ready_for_pickup', true),
         ];
+      case 'ready':
+      case 'ready_for_pickup':
+        return const [_RestaurantOrderAction('Picked Up', 'picked_up', true)];
+      case 'picked_up':
+        return const [_RestaurantOrderAction('Send Out', 'on_the_way', true)];
       case 'on_the_way':
       case 'on the way':
         return const [
@@ -6774,16 +6777,24 @@ class ConversationScreen extends StatefulWidget {
 }
 
 class _ConversationScreenState extends State<ConversationScreen> {
-  final _repository = DemoAppRepository.instance;
+  final _authSessionService = AuthSessionService();
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
+  late final ConversationApiService _conversationApiService;
 
   DemoConversationThread? _thread;
   bool _isSending = false;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
+    _conversationApiService = ConversationApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+      ),
+    );
     _loadThread();
   }
 
@@ -6795,22 +6806,76 @@ class _ConversationScreenState extends State<ConversationScreen> {
   }
 
   Future<void> _loadThread() async {
-    final thread = _repository.findThread(widget.threadId);
-    if (thread == null) {
-      return;
-    }
-    await _repository.markThreadRead(widget.threadId);
-    if (!mounted) {
-      return;
-    }
-    setState(() => _thread = _repository.findThread(widget.threadId));
-    if (widget.openComposerOnStart) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          _focusNode.requestFocus();
-        }
+    try {
+      final session = await _authSessionService.readSession();
+      if (session == null || session.token.trim().isEmpty) {
+        throw const ConversationApiException(
+          'Please log in again to load this conversation.',
+        );
+      }
+      final conversation = await _conversationApiService.fetchConversation(
+        session: session,
+        conversationId: widget.threadId,
+      );
+      await _conversationApiService.markRead(
+        session: session,
+        conversationId: widget.threadId,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _thread = _threadFromConversation(conversation);
+        _error = null;
       });
+      if (widget.openComposerOnStart) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _focusNode.requestFocus();
+          }
+        });
+      }
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _error = error.toString());
     }
+  }
+
+  DemoConversationThread _threadFromConversation(
+    AppConversation conversation, {
+    List<DemoConversationMessage>? messages,
+  }) {
+    final latestAt =
+        conversation.lastMessageAt ?? conversation.latestMessage?.createdAt;
+    final isOrderThread = conversation.orderId.trim().isNotEmpty;
+    return DemoConversationThread(
+      id: conversation.id,
+      customerName: conversation.restaurantName,
+      lastMessage: conversation.previewText,
+      timeLabel: latestAt == null ? 'Recent' : _formatTime(latestAt),
+      orderLabel: isOrderThread ? '#${conversation.orderId}' : 'General',
+      channelLabel: conversation.displaySubject,
+      unreadCount: 0,
+      priority: false,
+      needsReply: false,
+      online: false,
+      type: isOrderThread ? MessageThreadType.order : MessageThreadType.offer,
+      messages:
+          messages ??
+          conversation.messages
+              .map(
+                (message) => DemoConversationMessage(
+                  id: message.id,
+                  senderName: message.senderName,
+                  body: message.body,
+                  sentAt: message.createdAt ?? DateTime.now(),
+                  fromRestaurant: message.fromRestaurant,
+                ),
+              )
+              .toList(growable: false),
+    );
   }
 
   Future<void> _send() async {
@@ -6819,22 +6884,52 @@ class _ConversationScreenState extends State<ConversationScreen> {
       return;
     }
     setState(() => _isSending = true);
-    final updated = await _repository.sendReply(
-      threadId: _thread!.id,
-      restaurantName: widget.restaurantName,
-      text: text,
-    );
-    if (!mounted) {
-      return;
+    try {
+      final session = await _authSessionService.readSession();
+      if (session == null || session.token.trim().isEmpty) {
+        throw const ConversationApiException(
+          'Please log in again to send messages.',
+        );
+      }
+      final created = await _conversationApiService.sendMessage(
+        session: session,
+        conversationId: _thread!.id,
+        body: text,
+      );
+      if (!mounted) {
+        return;
+      }
+      final current = _thread!;
+      _controller.clear();
+      setState(() {
+        _thread = current.copyWith(
+          messages: <DemoConversationMessage>[
+            ...current.messages,
+            DemoConversationMessage(
+              id: created.id,
+              senderName: created.senderName,
+              body: created.body,
+              sentAt: created.createdAt ?? DateTime.now(),
+              fromRestaurant: created.fromRestaurant,
+            ),
+          ],
+          lastMessage: created.body,
+          timeLabel: 'Now',
+        );
+        _isSending = false;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Reply sent')));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _isSending = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
     }
-    _controller.clear();
-    setState(() {
-      _thread = updated;
-      _isSending = false;
-    });
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Reply sent')));
   }
 
   Future<void> _reportConversation() async {
@@ -6876,7 +6971,21 @@ class _ConversationScreenState extends State<ConversationScreen> {
           ),
         ],
       ),
-      body: thread == null
+      body: _error != null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Text(
+                  _error!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFF7D3D34),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            )
+          : thread == null
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [

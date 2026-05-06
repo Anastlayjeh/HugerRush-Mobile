@@ -138,6 +138,7 @@ class _DiscoverTabBody extends StatefulWidget {
 class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
   final _authSessionService = AuthSessionService();
   late final CustomerRestaurantApiService _restaurantApiService;
+  late final CustomerCartApiService _cartApiService;
   AuthSession? _session;
   List<_DiscoverSpotData> _restaurantSpots = const <_DiscoverSpotData>[];
   final Map<String, List<RestaurantMenuItem>> _menuItemsByRestaurantId =
@@ -185,6 +186,14 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
     super.initState();
     _session = widget.authSession;
     _restaurantApiService = CustomerRestaurantApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+        onSessionUpdated: widget.onSessionUpdated,
+        onSessionExpired: widget.onSessionExpired,
+      ),
+    );
+    _cartApiService = CustomerCartApiService(
       apiClient: AuthenticatedApiClient(
         authApiService: AuthApiService(),
         authSessionService: _authSessionService,
@@ -727,26 +736,54 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
       item: item,
       allowAddToCart: true,
       onAddToCart: (selectedItem) {
-        final cartItem = _CartLineItemData(
-          title: selectedItem.title,
-          subtitle: '${spot.title} - ${selectedItem.category}',
-          imageUrl: selectedItem.imageUrl,
-          price: selectedItem.price ?? 0,
-          quantity: 1,
-          restaurantName: spot.title,
-          restaurantId: spot.id,
-          menuItemId: selectedItem.id,
-        );
-        Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => _OrdersCartScreen(
-              initialItems: [cartItem],
-              restaurantName: spot.title,
-            ),
-          ),
-        );
+        unawaited(_addMenuItemToLiveCart(spot: spot, item: selectedItem));
       },
     );
+  }
+
+  Future<void> _addMenuItemToLiveCart({
+    required _DiscoverSpotData spot,
+    required RestaurantMenuItem item,
+  }) async {
+    final menuItemId = item.id.trim();
+    if (menuItemId.isEmpty || spot.id.trim().isEmpty) {
+      _showDiscoverSnackBar(
+        'Add this item from a live restaurant menu before checkout.',
+      );
+      return;
+    }
+
+    final session = await _resolveSession();
+    if (session == null) {
+      _showDiscoverSnackBar('Please log in again to add items to cart.');
+      return;
+    }
+
+    try {
+      final created = await _cartApiService.addItem(
+        session: session,
+        menuItemId: menuItemId,
+      );
+      if (!mounted) {
+        return;
+      }
+      final cartItem = _cartLineItemFromCustomerCartItem(
+        item: created,
+        restaurantId: spot.id,
+        restaurantName: spot.title,
+      );
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => _OrdersCartScreen(
+            initialItems: [cartItem],
+            restaurantName: spot.title,
+          ),
+        ),
+      );
+    } catch (error) {
+      debugPrint('Add cart item failed: $error');
+      _showDiscoverSnackBar('Could not add this item to cart. Try again.');
+    }
   }
 
   Future<void> _openPopularSpotList(BuildContext context) async {
@@ -826,6 +863,19 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
     BuildContext sheetContext,
     _DiscoverDealData deal,
   ) {
+    if (!_hasLiveQuickCravingCheckoutRoute()) {
+      Navigator.of(sheetContext).pop();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        _showDiscoverSnackBar(
+          'Quick craving bundles are not available for checkout yet.',
+        );
+      });
+      return;
+    }
+
     final item = _CartLineItemData(
       title: deal.title,
       subtitle: 'Quick Cravings • ${deal.subtitle}',
@@ -849,6 +899,8 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
       );
     });
   }
+
+  bool _hasLiveQuickCravingCheckoutRoute() => false;
 
   double _quickCravingPriceValue(String priceLabel) {
     final match = RegExp(r'([0-9]+(?:\.[0-9]+)?)').firstMatch(priceLabel);

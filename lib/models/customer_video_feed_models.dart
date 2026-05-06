@@ -254,6 +254,31 @@ class CustomerVideoViewerState {
   }
 }
 
+class CustomerVideoEngagementSummary {
+  const CustomerVideoEngagementSummary({
+    required this.videoId,
+    required this.stats,
+    required this.viewerState,
+  });
+
+  final String videoId;
+  final CustomerVideoStats stats;
+  final CustomerVideoViewerState viewerState;
+
+  factory CustomerVideoEngagementSummary.fromPayload(
+    Map<String, dynamic> payload,
+  ) {
+    final data = _stringMap(payload['data']);
+    return CustomerVideoEngagementSummary(
+      videoId: _readString(data['video_id']) ?? '',
+      stats: CustomerVideoStats.fromJson(_stringMap(data['stats'])),
+      viewerState: CustomerVideoViewerState.fromJson(
+        _stringMap(data['viewer_state']),
+      ),
+    );
+  }
+}
+
 class CustomerVideoComment {
   const CustomerVideoComment({
     required this.id,

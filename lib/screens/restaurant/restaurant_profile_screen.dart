@@ -54,14 +54,19 @@ class _UploadedVideoPlayerScreenState
     final assetPath = _videoData.videoAssetPath?.trim() ?? '';
     VideoPlayerController? controller;
     if (filePath.isNotEmpty) {
-      final file = File(filePath);
-      if (file.existsSync()) {
-        controller = VideoPlayerController.file(file);
-      } else if (assetPath.isEmpty) {
-        setState(() {
-          _loadError = 'Video file is no longer available on this device.';
-        });
-        return;
+      final uri = Uri.tryParse(filePath);
+      if (uri != null && uri.hasScheme && uri.host.isNotEmpty) {
+        controller = VideoPlayerController.networkUrl(uri);
+      } else {
+        final file = File(filePath);
+        if (file.existsSync()) {
+          controller = VideoPlayerController.file(file);
+        } else if (assetPath.isEmpty) {
+          setState(() {
+            _loadError = 'Video file is no longer available on this device.';
+          });
+          return;
+        }
       }
     }
     controller ??= assetPath.isNotEmpty
@@ -752,38 +757,50 @@ class _UploadedVideoPlayerScreenState
 
 class _UploadedRestaurantVideo {
   const _UploadedRestaurantVideo({
+    this.backendId = '',
     required this.name,
     required this.sizeBytes,
     required this.uploadedAt,
     required this.caption,
     required this.hashtags,
+    this.moderationLabel = 'Under review',
+    this.moderationReason = '',
     this.videoFilePath,
     this.videoAssetPath,
   });
 
+  final String backendId;
   final String name;
   final int sizeBytes;
   final DateTime uploadedAt;
   final String caption;
   final String hashtags;
+  final String moderationLabel;
+  final String moderationReason;
   final String? videoFilePath;
   final String? videoAssetPath;
 
   _UploadedRestaurantVideo copyWith({
+    String? backendId,
     String? name,
     int? sizeBytes,
     DateTime? uploadedAt,
     String? caption,
     String? hashtags,
+    String? moderationLabel,
+    String? moderationReason,
     String? videoFilePath,
     String? videoAssetPath,
   }) {
     return _UploadedRestaurantVideo(
+      backendId: backendId ?? this.backendId,
       name: name ?? this.name,
       sizeBytes: sizeBytes ?? this.sizeBytes,
       uploadedAt: uploadedAt ?? this.uploadedAt,
       caption: caption ?? this.caption,
       hashtags: hashtags ?? this.hashtags,
+      moderationLabel: moderationLabel ?? this.moderationLabel,
+      moderationReason: moderationReason ?? this.moderationReason,
       videoFilePath: videoFilePath ?? this.videoFilePath,
       videoAssetPath: videoAssetPath ?? this.videoAssetPath,
     );
@@ -811,6 +828,7 @@ class _FollowersListScreen extends StatefulWidget {
     required this.token,
     required this.restaurantName,
     required this.profileApiService,
+    // ignore: unused_element_parameter
     this.restaurantId,
   });
 
@@ -1547,6 +1565,30 @@ class _UploadedVideoGridTile extends StatelessWidget {
                             color: Colors.white,
                             fontSize: _clampDouble(9 * metrics.scale, 8, 9),
                             fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      right: 4,
+                      bottom: 4,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xE6FFFFFF),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          video.moderationLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: const Color(0xFF6D4A38),
+                            fontSize: _clampDouble(8.5 * metrics.scale, 7, 8.5),
+                            fontWeight: FontWeight.w800,
                           ),
                         ),
                       ),
@@ -2920,15 +2962,15 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
   }
 
   bool _isValidRestaurantName(String value) {
-    return RegExp(r"^[A-Za-z0-9][A-Za-z0-9\s'.&-]{1,79}$").hasMatch(
-      value.trim(),
-    );
+    return RegExp(
+      r"^[A-Za-z0-9][A-Za-z0-9\s'.&-]{1,79}$",
+    ).hasMatch(value.trim());
   }
 
   bool _isValidLocationText(String value) {
-    return RegExp(r"^[A-Za-z0-9][A-Za-z0-9\s'.,#/-]{1,79}$").hasMatch(
-      value.trim(),
-    );
+    return RegExp(
+      r"^[A-Za-z0-9][A-Za-z0-9\s'.,#/-]{1,79}$",
+    ).hasMatch(value.trim());
   }
 
   bool _isValidPhone(String value) {
@@ -3221,9 +3263,7 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
                 label: 'Street',
                 hint: 'Hamra St, Bldg 42',
                 controller: _streetController,
-                inputFormatters: [
-                  LengthLimitingTextInputFormatter(80),
-                ],
+                inputFormatters: [LengthLimitingTextInputFormatter(80)],
               ),
               const SizedBox(height: 12),
               _EditProfileField(
@@ -4233,4 +4273,3 @@ class _RestaurantProfileInfo {
     return value;
   }
 }
-
