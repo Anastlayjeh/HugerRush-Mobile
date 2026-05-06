@@ -132,6 +132,9 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
           : showDiscover
           ? _DiscoverTabBody(
               userName: widget.userName,
+              authSession: widget.authSession,
+              onSessionUpdated: widget.onSessionUpdated,
+              onSessionExpired: widget.onSessionExpired,
               favoriteSpotTitles: _favoriteDiscoverSpotTitles,
               onSetSpotFavorite: _setDiscoverSpotFavorite,
               selectedBottomIndex: _selectedBottomIndex,
@@ -363,14 +366,14 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
       setState(() {
         _isLoadingFeed = false;
         _isLoadingMoreFeed = false;
-        _feedError = error.toString();
+        _feedError = 'Unable to load videos. Please try again.';
       });
     }
   }
 
   void _appendFeedItems(List<CustomerVideoFeedItem> items) {
     for (final item in items) {
-      if (item.id.trim().isEmpty || item.playbackUrl.isEmpty) {
+      if (item.id.trim().isEmpty || !item.isApprovedForFeed) {
         continue;
       }
       if (_feedItemsByPostId.containsKey(item.id)) {
@@ -1291,6 +1294,38 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
                 },
               ),
             ),
+            if (_feedVideos.isEmpty)
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 0,
+                bottom: navBarTotalHeight,
+                child: _FeedStatusOverlay(
+                  isLoading: _isLoadingFeed,
+                  message:
+                      _feedError ??
+                      (_activeSearchQuery == null
+                          ? 'No videos available yet.'
+                          : 'No videos matched "${_activeSearchQuery!}".'),
+                  onRetry: () => _loadInitialFeed(query: _activeSearchQuery),
+                ),
+              ),
+            if (_isLoadingMoreFeed)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: navBarTotalHeight + 16,
+                child: const Center(
+                  child: SizedBox(
+                    width: 26,
+                    height: 26,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.4,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
             Align(
               alignment: Alignment.bottomCenter,
               child: _BottomNavBar(

@@ -112,7 +112,7 @@ void main() {
       final result = await client.request(
         session: initialSession,
         method: 'GET',
-        endpoint: '/api/v1/protected/orders',
+        endpoint: '/v1/protected/orders',
       );
 
       expect(result.response.statusCode, 200);
@@ -162,7 +162,7 @@ void main() {
         client.request(
           session: session,
           method: 'GET',
-          endpoint: '/api/v1/protected/orders',
+          endpoint: '/v1/protected/orders',
         ),
         throwsA(
           isA<AuthSessionExpiredException>().having(

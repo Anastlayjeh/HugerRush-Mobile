@@ -1,17 +1,22 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import '../models/auth_session.dart';
 import '../models/demo_app_models.dart';
+import '../services/auth_api_service.dart';
+import '../services/auth_session_service.dart';
+import '../services/authenticated_api_client.dart';
 import '../services/demo_app_repository.dart';
 import '../services/moderation_support_models.dart';
+import '../services/notification_api_service.dart';
 import '../services/order_support_service.dart';
 import '../services/post_share_service.dart';
 import '../services/report_service.dart';
 import '../services/restaurant_menu_api_service.dart';
 import '../services/social_graph_service.dart';
-import '../services/support_request_service.dart';
 
 final Set<String> _customerSavedRestaurantKeys = <String>{};
 
@@ -5454,37 +5459,185 @@ class NotificationsScreen extends StatefulWidget {
 }
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
-  final _repository = DemoAppRepository.instance;
-  List<DemoNotificationItem> _items = const <DemoNotificationItem>[];
+  final _authSessionService = AuthSessionService();
+  late final NotificationApiService _notificationApiService;
+
+  AuthSession? _session;
+  List<AppNotification> _items = const <AppNotification>[];
   bool _isLoading = true;
+  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
+    _notificationApiService = NotificationApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+        onSessionUpdated: (session) async => _session = session,
+      ),
+    );
     _load();
   }
 
   Future<void> _load() async {
-    final items = await _repository.getNotifications();
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final session = await _resolveSession();
+      if (session == null) {
+        _setLoadError('Please log in again to view notifications.');
+        return;
+      }
+
+      final items = await _notificationApiService.fetchNotifications(
+        session: session,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _session = session;
+        _items = items;
+        _isLoading = false;
+      });
+    } on AuthSessionExpiredException {
+      await _authSessionService.clearSession();
+      _setLoadError('Please log in again to view notifications.');
+    } on AuthApiException catch (error, stackTrace) {
+      _debugNotificationError(error, stackTrace);
+      _setLoadError('We could not load your notifications. Please try again.');
+    } catch (error, stackTrace) {
+      _debugNotificationError(error, stackTrace);
+      _setLoadError('We could not load your notifications. Please try again.');
+    }
+  }
+
+  Future<AuthSession?> _resolveSession() async {
+    final cached = _session;
+    if (cached != null && cached.token.trim().isNotEmpty) {
+      return cached;
+    }
+    final session = await _authSessionService.readSession();
+    _session = session;
+    return session;
+  }
+
+  void _setLoadError(String message) {
     if (!mounted) {
       return;
     }
     setState(() {
-      _items = items;
+      _errorMessage = message;
       _isLoading = false;
     });
   }
 
   Future<void> _markAllRead() async {
-    setState(() => _isLoading = true);
-    final items = await _repository.markAllNotificationsRead();
+    final session = await _resolveSession();
+    if (session == null) {
+      _showFriendlySnackBar('Please log in again to update notifications.');
+      return;
+    }
+
+    final previousItems = _items;
+    setState(
+      () => _items = _items
+          .map((item) => item.copyWith(isRead: true, readAt: DateTime.now()))
+          .toList(growable: false),
+    );
+
+    try {
+      await _notificationApiService.markAllAsRead(session: session);
+    } catch (error, stackTrace) {
+      _debugNotificationError(error, stackTrace);
+      if (!mounted) {
+        return;
+      }
+      setState(() => _items = previousItems);
+      _showFriendlySnackBar(
+        'Could not update notifications. Please try again.',
+      );
+    }
+  }
+
+  Future<void> _markRead(AppNotification item) async {
+    if (item.isRead || item.id.trim().isEmpty) {
+      return;
+    }
+    final session = await _resolveSession();
+    if (session == null) {
+      _showFriendlySnackBar('Please log in again to update notifications.');
+      return;
+    }
+
+    final previousItems = _items;
+    final readItem = item.copyWith(isRead: true, readAt: DateTime.now());
+    setState(() => _replaceNotification(readItem));
+
+    try {
+      final updated = await _notificationApiService.markAsRead(
+        session: session,
+        notificationId: item.id,
+      );
+      if (updated != null && mounted) {
+        setState(() => _replaceNotification(updated));
+      }
+    } catch (error, stackTrace) {
+      _debugNotificationError(error, stackTrace);
+      if (!mounted) {
+        return;
+      }
+      setState(() => _items = previousItems);
+      _showFriendlySnackBar('Could not update notification. Please try again.');
+    }
+  }
+
+  void _replaceNotification(AppNotification updated) {
+    _items = _items
+        .map((item) => item.id == updated.id ? updated : item)
+        .toList(growable: false);
+  }
+
+  void _showFriendlySnackBar(String message) {
     if (!mounted) {
       return;
     }
-    setState(() {
-      _items = items;
-      _isLoading = false;
-    });
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _debugNotificationError(Object error, StackTrace stackTrace) {
+    if (!kDebugMode) {
+      return;
+    }
+    debugPrint('Notifications error: $error');
+    debugPrint('$stackTrace');
+  }
+
+  String _notificationTimeLabel(AppNotification item) {
+    final createdAt = item.createdAt;
+    if (createdAt == null) {
+      return 'Recently';
+    }
+    final difference = DateTime.now().difference(createdAt);
+    if (difference.inMinutes < 1) {
+      return 'Now';
+    }
+    if (difference.inHours < 1) {
+      return '${difference.inMinutes}m ago';
+    }
+    if (difference.inDays < 1) {
+      return '${difference.inHours}h ago';
+    }
+    if (difference.inDays < 7) {
+      return '${difference.inDays}d ago';
+    }
+    return '${createdAt.month}/${createdAt.day}/${createdAt.year}';
   }
 
   @override
@@ -5501,6 +5654,29 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
+          : _errorMessage != null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _errorMessage!,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyLarge,
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton(
+                      onPressed: _load,
+                      child: const Text('Try again'),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : _items.isEmpty
+          ? const Center(child: Text('No notifications yet.'))
           : ListView.separated(
               padding: const EdgeInsets.all(16),
               itemCount: _items.length,
@@ -5508,6 +5684,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               itemBuilder: (context, index) {
                 final item = _items[index];
                 return ListTile(
+                  onTap: item.isRead ? null : () => _markRead(item),
                   tileColor: item.isRead
                       ? const Color(0xFFF3F0EC)
                       : const Color(0xFFFFEFE8),
@@ -5520,8 +5697,29 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                     ),
                   ),
                   title: Text(item.title),
-                  subtitle: Text(item.body),
-                  trailing: Text(item.timeLabel),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (item.body.isNotEmpty) Text(item.body),
+                      const SizedBox(height: 6),
+                      Text(
+                        _notificationTimeLabel(item),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF7A6A5E),
+                        ),
+                      ),
+                    ],
+                  ),
+                  trailing: item.isRead
+                      ? const Icon(
+                          Icons.check_circle_rounded,
+                          color: Color(0xFF7A6A5E),
+                        )
+                      : IconButton(
+                          tooltip: 'Mark as read',
+                          onPressed: () => _markRead(item),
+                          icon: const Icon(Icons.mark_email_read_rounded),
+                        ),
                 );
               },
             ),

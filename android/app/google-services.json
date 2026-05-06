@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "158924178526",
+    "project_id": "hungerrush-45c84",
+    "storage_bucket": "hungerrush-45c84.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:158924178526:android:14dc1cecdcb66332fca0cf",
+        "android_client_info": {
+          "package_name": "com.example.flutter_application_1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAdhaYWdXgispAGQDN-rsX6Bdhr56vbkmQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,25 +1,16 @@
-import 'dart:convert';
-
 import 'package:http/http.dart' as http;
 
-import '../config/app_config.dart';
+import 'api_client.dart';
 
 class RestaurantMenuApiService {
   RestaurantMenuApiService({http.Client? client})
-    : _client = client ?? http.Client(),
+    : _apiClient = ApiClient(client: client),
       _ownsClient = client == null;
 
-  final http.Client _client;
+  final ApiClient _apiClient;
   final bool _ownsClient;
 
-  static const List<String> _candidateEndpoints = [
-    '/api/v1/restaurant/menu-items',
-    '/api/v1/restaurants/me/menu-items',
-    '/api/v1/restaurant/menu',
-    '/api/v1/restaurants/me/menu',
-    '/api/v1/menu-items',
-    '/api/v1/menu',
-  ];
+  static const List<String> _candidateEndpoints = ['/v1/restaurant/menu/items'];
 
   Future<List<RestaurantMenuItem>> fetchMenu({required String token}) async {
     final cleanedToken = token.trim();
@@ -33,29 +24,31 @@ class RestaurantMenuApiService {
     for (final endpoint in _candidateEndpoints) {
       http.Response response;
       try {
-        response = await _client.get(
-          AppConfig.apiUri(endpoint),
-          headers: {
-            'Accept': 'application/json',
-            'Authorization': 'Bearer $cleanedToken',
-          },
+        response = await _apiClient.request(
+          method: 'GET',
+          endpoint: endpoint,
+          token: cleanedToken,
         );
-      } catch (_) {
-        lastError =
-            'Unable to reach the server. Check your API URL and internet connection.';
+      } on ApiClientException catch (error) {
+        lastError = error.message;
         continue;
       }
 
       final payload = _decodeMap(response.body);
       if (response.statusCode >= 200 && response.statusCode < 300) {
-        return _extractRawItems(payload)
-            .map(RestaurantMenuItem.fromJson)
-            .toList();
+        return _extractRawItems(
+          payload,
+        ).map(RestaurantMenuItem.fromJson).toList();
       }
 
-      if (response.statusCode == 401 || response.statusCode == 403) {
+      if (response.statusCode == 401) {
         throw const RestaurantMenuApiException(
           'Your session expired. Please log in again.',
+        );
+      }
+      if (response.statusCode == 403) {
+        throw const RestaurantMenuApiException(
+          'You do not have permission to view this restaurant menu.',
         );
       }
 
@@ -63,7 +56,11 @@ class RestaurantMenuApiService {
         continue;
       }
 
-      lastError = _extractError(payload) ?? 'Failed to load restaurant menu.';
+      lastError = ApiClient.errorMessageForStatus(
+        response.statusCode,
+        payload,
+        fallback: 'Failed to load restaurant menu.',
+      );
     }
 
     if (lastError == null) {
@@ -74,21 +71,12 @@ class RestaurantMenuApiService {
 
   void dispose() {
     if (_ownsClient) {
-      _client.close();
+      _apiClient.close();
     }
   }
 
   Map<String, dynamic> _decodeMap(String body) {
-    if (body.isEmpty) {
-      return <String, dynamic>{};
-    }
-
-    final decoded = jsonDecode(body);
-    if (decoded is Map<String, dynamic>) {
-      return decoded;
-    }
-
-    return <String, dynamic>{};
+    return ApiClient.decodeMap(body);
   }
 
   List<Map<String, dynamic>> _extractRawItems(Map<String, dynamic> payload) {
@@ -118,7 +106,8 @@ class RestaurantMenuApiService {
       }
 
       if (node is Map) {
-        final list = _extractListOfMaps(node['items']) +
+        final list =
+            _extractListOfMaps(node['items']) +
             _extractListOfMaps(node['menu_items']) +
             _extractListOfMaps(node['menu']) +
             _extractListOfMaps(node['data']);
@@ -187,27 +176,6 @@ class RestaurantMenuApiService {
         map.containsKey('dish_name') ||
         map.containsKey('price');
   }
-
-  String? _extractError(Map<String, dynamic> payload) {
-    final message = payload['message'];
-    if (message is String && message.trim().isNotEmpty) {
-      return message;
-    }
-
-    final errors = payload['errors'];
-    if (errors is Map<String, dynamic>) {
-      for (final value in errors.values) {
-        if (value is List && value.isNotEmpty) {
-          final first = value.first;
-          if (first is String && first.trim().isNotEmpty) {
-            return first;
-          }
-        }
-      }
-    }
-
-    return null;
-  }
 }
 
 class RestaurantMenuItem {
@@ -236,12 +204,8 @@ class RestaurantMenuItem {
   final int? ordersCount;
 
   factory RestaurantMenuItem.fromJson(Map<String, dynamic> json) {
-    final title = _firstString(json, const [
-          'title',
-          'name',
-          'item_name',
-          'dish_name',
-        ]) ??
+    final title =
+        _firstString(json, const ['title', 'name', 'item_name', 'dish_name']) ??
         'Unnamed Item';
     final id =
         _firstString(json, const ['id', 'uuid', 'item_id', 'menu_item_id']) ??
@@ -249,14 +213,19 @@ class RestaurantMenuItem {
 
     final statusValue = json['status'];
     final availabilityFromStatus = statusValue is String
-        ? <String>['active', 'enabled', 'available', 'published']
-            .contains(statusValue.trim().toLowerCase())
+        ? <String>[
+            'active',
+            'enabled',
+            'available',
+            'published',
+          ].contains(statusValue.trim().toLowerCase())
         : null;
 
     return RestaurantMenuItem(
       id: id,
       title: title,
-      description: _firstString(json, const [
+      description:
+          _firstString(json, const [
             'description',
             'details',
             'subtitle',
@@ -264,7 +233,8 @@ class RestaurantMenuItem {
           ]) ??
           'No description provided.',
       price: _firstDouble(json, const ['price', 'amount', 'cost']),
-      imageUrl: _firstString(json, const [
+      imageUrl:
+          _firstString(json, const [
             'image_url',
             'image',
             'photo_url',
@@ -272,7 +242,8 @@ class RestaurantMenuItem {
             'cover_image',
           ]) ??
           'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=900&q=80',
-      category: _firstString(json, const [
+      category:
+          _firstString(json, const [
             'category',
             'section',
             'type',
@@ -284,8 +255,13 @@ class RestaurantMenuItem {
           availabilityFromStatus ??
           true,
       isPopular:
-          _firstBool(json, const ['is_popular', 'popular', 'featured']) ?? false,
-      rating: _firstDouble(json, const ['rating', 'avg_rating', 'average_rating']),
+          _firstBool(json, const ['is_popular', 'popular', 'featured']) ??
+          false,
+      rating: _firstDouble(json, const [
+        'rating',
+        'avg_rating',
+        'average_rating',
+      ]),
       ordersCount: _firstInt(json, const [
         'orders_count',
         'total_orders',

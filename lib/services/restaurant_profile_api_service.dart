@@ -1,31 +1,20 @@
-import 'dart:convert';
-
 import 'package:http/http.dart' as http;
 
-import '../config/app_config.dart';
+import 'api_client.dart';
 
 class RestaurantProfileApiService {
   RestaurantProfileApiService({http.Client? client})
-    : _client = client ?? http.Client(),
+    : _apiClient = ApiClient(client: client),
       _ownsClient = client == null;
 
-  final http.Client _client;
+  final ApiClient _apiClient;
   final bool _ownsClient;
 
   static const List<String> _candidateEndpoints = [
-    '/api/v1/restaurant/profile',
-    '/api/v1/restaurants/profile',
-    '/api/v1/restaurants/me',
-    '/api/v1/profile',
-    '/api/v1/auth/me',
-    '/api/user',
+    '/v1/restaurant/profile',
+    '/v1/auth/me',
   ];
-  static const List<String> _candidateFollowersEndpoints = [
-    '/api/v1/restaurant/followers',
-    '/api/v1/restaurants/me/followers',
-    '/api/v1/profile/followers',
-    '/api/v1/followers',
-  ];
+  static const List<String> _candidateFollowersEndpoints = <String>[];
 
   Future<Map<String, dynamic>> fetchProfile({required String token}) async {
     final cleanedToken = token.trim();
@@ -39,16 +28,13 @@ class RestaurantProfileApiService {
     for (final endpoint in _candidateEndpoints) {
       http.Response response;
       try {
-        response = await _client.get(
-          AppConfig.apiUri(endpoint),
-          headers: {
-            'Accept': 'application/json',
-            'Authorization': 'Bearer $cleanedToken',
-          },
+        response = await _apiClient.request(
+          method: 'GET',
+          endpoint: endpoint,
+          token: cleanedToken,
         );
-      } catch (_) {
-        lastError =
-            'Unable to reach the server. Check your API URL and internet connection.';
+      } on ApiClientException catch (error) {
+        lastError = error.message;
         continue;
       }
 
@@ -57,9 +43,14 @@ class RestaurantProfileApiService {
         return _extractProfileMap(payload);
       }
 
-      if (response.statusCode == 401 || response.statusCode == 403) {
+      if (response.statusCode == 401) {
         throw const RestaurantProfileApiException(
           'Your session expired. Please log in again.',
+        );
+      }
+      if (response.statusCode == 403) {
+        throw const RestaurantProfileApiException(
+          'You do not have permission to view this restaurant profile.',
         );
       }
 
@@ -67,7 +58,11 @@ class RestaurantProfileApiService {
         continue;
       }
 
-      lastError = _extractError(payload) ?? 'Failed to load restaurant profile.';
+      lastError = ApiClient.errorMessageForStatus(
+        response.statusCode,
+        payload,
+        fallback: 'Failed to load restaurant profile.',
+      );
     }
 
     if (lastError == null) {
@@ -88,29 +83,23 @@ class RestaurantProfileApiService {
       );
     }
 
-    final cleanedRestaurantId = restaurantId?.trim();
-    final endpoints = <String>[
-      ..._candidateFollowersEndpoints,
-      if (cleanedRestaurantId != null && cleanedRestaurantId.isNotEmpty)
-        '/api/v1/restaurants/$cleanedRestaurantId/followers',
-      if (cleanedRestaurantId != null && cleanedRestaurantId.isNotEmpty)
-        '/api/v1/restaurant/$cleanedRestaurantId/followers',
-    ];
+    final endpoints = <String>[..._candidateFollowersEndpoints];
+
+    if (endpoints.isEmpty) {
+      return const <RestaurantFollower>[];
+    }
 
     String? lastError;
     for (final endpoint in endpoints) {
       http.Response response;
       try {
-        response = await _client.get(
-          AppConfig.apiUri(endpoint),
-          headers: {
-            'Accept': 'application/json',
-            'Authorization': 'Bearer $cleanedToken',
-          },
+        response = await _apiClient.request(
+          method: 'GET',
+          endpoint: endpoint,
+          token: cleanedToken,
         );
-      } catch (_) {
-        lastError =
-            'Unable to reach the server. Check your API URL and internet connection.';
+      } on ApiClientException catch (error) {
+        lastError = error.message;
         continue;
       }
 
@@ -119,9 +108,14 @@ class RestaurantProfileApiService {
         return _extractFollowers(payload);
       }
 
-      if (response.statusCode == 401 || response.statusCode == 403) {
+      if (response.statusCode == 401) {
         throw const RestaurantProfileApiException(
           'Your session expired. Please log in again.',
+        );
+      }
+      if (response.statusCode == 403) {
+        throw const RestaurantProfileApiException(
+          'You do not have permission to view these followers.',
         );
       }
 
@@ -129,8 +123,11 @@ class RestaurantProfileApiService {
         continue;
       }
 
-      lastError =
-          _extractError(payload) ?? 'Failed to load followers for this page.';
+      lastError = ApiClient.errorMessageForStatus(
+        response.statusCode,
+        payload,
+        fallback: 'Failed to load followers for this page.',
+      );
     }
 
     if (lastError == null) {
@@ -142,24 +139,12 @@ class RestaurantProfileApiService {
 
   void dispose() {
     if (_ownsClient) {
-      _client.close();
+      _apiClient.close();
     }
   }
 
   Map<String, dynamic> _decodeMap(String body) {
-    if (body.isEmpty) {
-      return <String, dynamic>{};
-    }
-    try {
-      final decoded = jsonDecode(body);
-      if (decoded is Map<String, dynamic>) {
-        return decoded;
-      }
-    } on FormatException {
-      return <String, dynamic>{};
-    }
-
-    return <String, dynamic>{};
+    return ApiClient.decodeMap(body);
   }
 
   Map<String, dynamic> _extractProfileMap(Map<String, dynamic> payload) {
@@ -190,27 +175,6 @@ class RestaurantProfileApiService {
     }
 
     return payload;
-  }
-
-  String? _extractError(Map<String, dynamic> payload) {
-    final message = payload['message'];
-    if (message is String && message.trim().isNotEmpty) {
-      return message;
-    }
-
-    final errors = payload['errors'];
-    if (errors is Map<String, dynamic>) {
-      for (final value in errors.values) {
-        if (value is List && value.isNotEmpty) {
-          final first = value.first;
-          if (first is String && first.trim().isNotEmpty) {
-            return first;
-          }
-        }
-      }
-    }
-
-    return null;
   }
 
   List<RestaurantFollower> _extractFollowers(Map<String, dynamic> payload) {
@@ -394,9 +358,7 @@ class RestaurantFollower {
   String? get secondaryLabel {
     final cleanedHandle = handle?.trim();
     if (cleanedHandle != null && cleanedHandle.isNotEmpty) {
-      return cleanedHandle.startsWith('@')
-          ? cleanedHandle
-          : '@$cleanedHandle';
+      return cleanedHandle.startsWith('@') ? cleanedHandle : '@$cleanedHandle';
     }
     final cleanedEmail = email?.trim();
     if (cleanedEmail != null && cleanedEmail.isNotEmpty) {
