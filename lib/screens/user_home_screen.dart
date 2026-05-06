@@ -16,6 +16,7 @@ import '../services/customer_video_feed_api_service.dart';
 import '../services/demo_app_repository.dart';
 import '../services/moderation_support_models.dart';
 import '../services/post_share_service.dart';
+import '../services/push_notification_service.dart';
 import '../services/restaurant_menu_api_service.dart';
 import 'app_support_screens.dart';
 import 'login_screen.dart';

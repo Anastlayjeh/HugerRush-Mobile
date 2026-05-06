@@ -1170,6 +1170,12 @@ class _UserProfileMenuDrawer extends StatelessWidget {
                       onPressed: () async {
                         final authSessionService = AuthSessionService();
                         final session = await authSessionService.readSession();
+                        if (session != null) {
+                          unawaited(
+                            PushNotificationService.instance
+                                .deactivateCurrentDeviceToken(session: session),
+                          );
+                        }
                         final token = session?.token.trim();
                         if (token != null && token.isNotEmpty) {
                           try {
@@ -3530,4 +3536,3 @@ class _SupportFaqItemData {
   final String question;
   final String answer;
 }
-

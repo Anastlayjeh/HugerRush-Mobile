@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import '../config/api_config.dart';
 import '../models/auth_session.dart';
 import '../services/auth_api_service.dart';
 import '../services/auth_session_service.dart';
+import '../services/push_notification_service.dart';
 import '../widgets/auth_social_buttons.dart';
 import 'frontend_placeholder_screen.dart';
 import 'registration_screen.dart';
@@ -396,6 +398,11 @@ class _LoginScreenState extends State<LoginScreen> {
         user: result.user,
       );
       await _authSessionService.saveSession(session);
+      unawaited(
+        PushNotificationService.instance.registerCurrentDeviceToken(
+          session: session,
+        ),
+      );
       if (!mounted) {
         return;
       }
@@ -446,6 +453,11 @@ class _LoginScreenState extends State<LoginScreen> {
         user: result.user,
       );
       await _authSessionService.saveSession(customerSession);
+      unawaited(
+        PushNotificationService.instance.registerCurrentDeviceToken(
+          session: customerSession,
+        ),
+      );
       if (!mounted) {
         return;
       }

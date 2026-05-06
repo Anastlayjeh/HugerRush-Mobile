@@ -809,6 +809,15 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       return;
     }
 
+    final authSessionService = AuthSessionService();
+    final session = await authSessionService.readSession();
+    if (session != null) {
+      unawaited(
+        PushNotificationService.instance.deactivateCurrentDeviceToken(
+          session: session,
+        ),
+      );
+    }
     final token = widget.authToken?.trim();
     if (token != null && token.isNotEmpty) {
       try {
@@ -817,7 +826,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         // Local logout must still complete if the server token is invalid.
       }
     }
-    await AuthSessionService().clearSession();
+    await authSessionService.clearSession();
     if (!mounted) {
       return;
     }

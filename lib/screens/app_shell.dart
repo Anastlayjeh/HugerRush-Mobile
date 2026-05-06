@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models/auth_session.dart';
 import '../services/auth_api_service.dart';
 import '../services/auth_session_service.dart';
+import '../services/push_notification_service.dart';
 import 'login_screen.dart';
 import 'restaurant_feed_screen.dart';
 import 'user_home_screen.dart';
@@ -44,6 +47,13 @@ class _AppShellState extends State<AppShell> {
       _session = session;
       _isBootstrapping = false;
     });
+    if (session != null) {
+      unawaited(
+        PushNotificationService.instance.registerCurrentDeviceToken(
+          session: session,
+        ),
+      );
+    }
   }
 
   String _normalizeRole(String role) {
@@ -156,6 +166,14 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<void> _handleLogout() async {
+    final session = _session;
+    if (session != null) {
+      unawaited(
+        PushNotificationService.instance.deactivateCurrentDeviceToken(
+          session: session,
+        ),
+      );
+    }
     final token = _session?.token.trim();
     if (token != null && token.isNotEmpty) {
       try {
