@@ -139,6 +139,7 @@ void main() {
           ),
         ],
         address: OrderAddress(city: 'Beirut', street: 'Main', building: '1'),
+        phone: '+96170123456',
         paymentMethod: 'cash_on_delivery',
         deliveryMode: 'now',
         subtotal: 12.5,

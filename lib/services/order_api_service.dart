@@ -220,6 +220,7 @@ class CustomerOrderDraft {
     required this.restaurantName,
     required this.items,
     required this.address,
+    required this.phone,
     required this.paymentMethod,
     required this.deliveryMode,
     required this.subtotal,
@@ -228,6 +229,7 @@ class CustomerOrderDraft {
     required this.total,
     this.scheduledLabel = '',
     this.changeRequest = '',
+    this.orderNotes = '',
     this.useLoyalty = false,
     this.saveChangeInWallet = false,
     this.branchId,
@@ -238,6 +240,7 @@ class CustomerOrderDraft {
   final String restaurantName;
   final List<CustomerOrderDraftItem> items;
   final OrderAddress address;
+  final String phone;
   final String paymentMethod;
   final String deliveryMode;
   final double subtotal;
@@ -246,12 +249,14 @@ class CustomerOrderDraft {
   final double total;
   final String scheduledLabel;
   final String changeRequest;
+  final String orderNotes;
   final bool useLoyalty;
   final bool saveChangeInWallet;
   final String? branchId;
   final String? cartId;
 
   bool get canSyncCart =>
+      (cartId == null || cartId!.trim().isEmpty) &&
       restaurantId.trim().isNotEmpty &&
       items.isNotEmpty &&
       items.every((item) => item.menuItemId.trim().isNotEmpty);
@@ -263,6 +268,23 @@ class CustomerOrderDraft {
       if (restaurantId.trim().isNotEmpty) 'restaurant_id': restaurantId.trim(),
       if (branchId != null && branchId!.trim().isNotEmpty)
         'branch_id': branchId!.trim(),
+      'delivery_address': address.toJson(),
+      'delivery_address_label': address.label,
+      'delivery_phone': phone.trim(),
+      'payment_method': paymentMethod.trim(),
+      'delivery_mode': deliveryMode.trim(),
+      if (scheduledLabel.trim().isNotEmpty)
+        'scheduled_label': scheduledLabel.trim(),
+      if (changeRequest.trim().isNotEmpty)
+        'change_request': changeRequest.trim(),
+      if (orderNotes.trim().isNotEmpty) 'order_notes': orderNotes.trim(),
+      'use_loyalty': useLoyalty,
+      'save_change_in_wallet': saveChangeInWallet,
+      'client_subtotal': subtotal,
+      'client_delivery_fee': deliveryFee,
+      'client_service_fee': serviceFee,
+      'client_total': total,
+      'items': items.map((item) => item.toOrderJson()).toList(growable: false),
     };
   }
 }
@@ -356,11 +378,17 @@ class AppOrder {
     required this.status,
     required this.itemSummary,
     required this.total,
+    required this.subtotal,
+    required this.deliveryFee,
     required this.channelLabel,
+    required this.paymentMethodLabel,
     required this.etaLabel,
     required this.addressLabel,
+    required this.deliveryPhone,
+    required this.orderNotes,
     required this.createdAt,
     required this.items,
+    required this.statusHistory,
   });
 
   final String id;
@@ -371,11 +399,17 @@ class AppOrder {
   final String status;
   final String itemSummary;
   final double? total;
+  final double? subtotal;
+  final double? deliveryFee;
   final String channelLabel;
+  final String paymentMethodLabel;
   final String etaLabel;
   final String addressLabel;
+  final String deliveryPhone;
+  final String orderNotes;
   final DateTime? createdAt;
   final List<AppOrderItem> items;
+  final List<AppOrderStatusEvent> statusHistory;
 
   String get statusLabel => orderStatusLabel(status);
 
@@ -393,6 +427,11 @@ class AppOrder {
 
   bool get isActive => !isCompleted;
 
+  bool get canCustomerCancel {
+    final normalized = _normalizeStatus(status);
+    return normalized == 'pending' || normalized == 'accepted';
+  }
+
   factory AppOrder.fromJson(Map<String, dynamic> json) {
     final customer = _stringMap(json['customer']);
     final user = _stringMap(json['user']);
@@ -400,6 +439,9 @@ class AppOrder {
     final items = _extractOrderItems(
       json,
     ).map(AppOrderItem.fromJson).toList(growable: false);
+    final statusHistory = _extractStatusHistory(
+      json,
+    ).map(AppOrderStatusEvent.fromJson).toList(growable: false);
     final id =
         _firstString(json, const ['id', 'uuid', 'order_id']) ??
         _firstString(json, const ['number', 'order_number', 'reference']) ??
@@ -436,6 +478,18 @@ class AppOrder {
         _firstString(json, const ['address', 'delivery_address_label']) ??
         _addressLabelFromValue(json['delivery_address']) ??
         '';
+    final paymentMethod =
+        _firstString(json, const ['payment_method', 'payment_type']) ?? '';
+    final deliveryMode =
+        _firstString(json, const [
+          'delivery_mode',
+          'channel',
+          'delivery_method',
+          'delivery_type',
+          'fulfillment_type',
+          'order_type',
+        ]) ??
+        'Delivery';
     return AppOrder(
       id: id,
       displayId: displayId,
@@ -454,15 +508,12 @@ class AppOrder {
         'amount',
         'payable_total',
       ]),
-      channelLabel:
-          _firstString(json, const [
-            'channel',
-            'delivery_method',
-            'delivery_type',
-            'fulfillment_type',
-            'order_type',
-          ]) ??
-          'Delivery',
+      subtotal: _firstDouble(json, const ['subtotal']),
+      deliveryFee: _firstDouble(json, const ['delivery_fee', 'fees']),
+      channelLabel: _labelFromSnakeCase(deliveryMode),
+      paymentMethodLabel: paymentMethod.isEmpty
+          ? 'Payment not set'
+          : _labelFromSnakeCase(paymentMethod),
       etaLabel:
           _firstString(json, const [
             'eta_label',
@@ -472,12 +523,30 @@ class AppOrder {
           ]) ??
           '',
       addressLabel: addressLabel,
+      deliveryPhone:
+          _firstString(json, const ['delivery_phone', 'phone']) ?? '',
+      orderNotes: _firstString(json, const ['order_notes', 'notes']) ?? '',
       createdAt: _firstDate(json, const [
         'created_at',
         'placed_at',
         'ordered_at',
       ]),
       items: items,
+      statusHistory: statusHistory,
+    );
+  }
+}
+
+class AppOrderStatusEvent {
+  const AppOrderStatusEvent({required this.status, required this.changedAt});
+
+  final String status;
+  final DateTime? changedAt;
+
+  factory AppOrderStatusEvent.fromJson(Map<String, dynamic> json) {
+    return AppOrderStatusEvent(
+      status: _firstString(json, const ['status', 'state']) ?? '',
+      changedAt: _firstDate(json, const ['changed_at', 'created_at']),
     );
   }
 }
@@ -645,6 +714,22 @@ List<Map<String, dynamic>> _extractOrderItems(Map<String, dynamic> payload) {
   return const <Map<String, dynamic>>[];
 }
 
+List<Map<String, dynamic>> _extractStatusHistory(Map<String, dynamic> payload) {
+  final candidates = <dynamic>[
+    payload['status_history'],
+    payload['timeline'],
+    payload['events'],
+    payload['data'] is Map ? payload['data']['status_history'] : null,
+  ];
+  for (final candidate in candidates) {
+    final parsed = _listOfMaps(candidate);
+    if (parsed.isNotEmpty) {
+      return parsed;
+    }
+  }
+  return const <Map<String, dynamic>>[];
+}
+
 List<Map<String, dynamic>> _listOfMaps(dynamic value) {
   if (value is! List) {
     return const <Map<String, dynamic>>[];
@@ -780,4 +865,20 @@ DateTime? _readDateTime(dynamic value) {
 
 String _normalizeStatus(String value) {
   return value.trim().toLowerCase().replaceAll('-', '_');
+}
+
+String _labelFromSnakeCase(String value) {
+  final cleaned = value.trim();
+  if (cleaned.isEmpty) {
+    return '';
+  }
+  return cleaned
+      .replaceAll('-', '_')
+      .split('_')
+      .where((word) => word.trim().isNotEmpty)
+      .map((word) {
+        final lower = word.toLowerCase();
+        return '${lower[0].toUpperCase()}${lower.substring(1)}';
+      })
+      .join(' ');
 }

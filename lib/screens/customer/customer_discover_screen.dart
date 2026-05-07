@@ -22,115 +22,6 @@ class _DiscoverTabBody extends StatefulWidget {
   final int selectedBottomIndex;
   final ValueChanged<int> onBottomNavSelected;
 
-  static const List<_DiscoverCategoryData> _categories = [
-    _DiscoverCategoryData(
-      title: 'Pizza',
-      subtitle: 'Wood-fired',
-      icon: Icons.local_pizza_rounded,
-      backgroundColor: Color(0xFFFFF1E7),
-      accentColor: Color(0xFFFF8D5B),
-    ),
-    _DiscoverCategoryData(
-      title: 'Burgers',
-      subtitle: 'Stacked',
-      icon: Icons.lunch_dining_rounded,
-      backgroundColor: Color(0xFFFFF4EC),
-      accentColor: Color(0xFFB56A45),
-    ),
-    _DiscoverCategoryData(
-      title: 'Sushi',
-      subtitle: 'Fresh rolls',
-      icon: Icons.set_meal_rounded,
-      backgroundColor: Color(0xFFF2F8F5),
-      accentColor: Color(0xFF2F8A7E),
-    ),
-    _DiscoverCategoryData(
-      title: 'Desserts',
-      subtitle: 'Sweet picks',
-      icon: Icons.icecream_rounded,
-      backgroundColor: Color(0xFFFFF1F5),
-      accentColor: Color(0xFFE17B91),
-    ),
-  ];
-
-  static const List<_DiscoverSpotData> _popularSpots = [
-    _DiscoverSpotData(
-      title: 'The Golden Spoon',
-      handle: 'thegoldenspoon',
-      categoryTitle: 'Pizza',
-      subtitle: 'Italian comfort and signature pasta',
-      deliveryLabel: '12 min',
-      ratingLabel: '4.9',
-      priceTier: 2,
-      badge: 'Free delivery',
-      imageUrl:
-          'https://images.unsplash.com/photo-1552566626-52f8b828add9?auto=format&fit=crop&w=900&q=80',
-    ),
-    _DiscoverSpotData(
-      title: 'Ember Slice',
-      handle: 'emberslice',
-      categoryTitle: 'Burgers',
-      subtitle: 'Stone-baked pizza and burrata bites',
-      deliveryLabel: '18 min',
-      ratingLabel: '4.8',
-      priceTier: 2,
-      badge: 'Top rated',
-      imageUrl:
-          'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=900&q=80',
-    ),
-    _DiscoverSpotData(
-      title: 'Cedar Bowl',
-      handle: 'cedarbowl',
-      categoryTitle: 'Sushi',
-      subtitle: 'Fresh wraps, bowls, and grill plates',
-      deliveryLabel: '14 min',
-      ratingLabel: '4.7',
-      priceTier: 1,
-      badge: 'New menu',
-      imageUrl:
-          'https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&w=900&q=80',
-    ),
-    _DiscoverSpotData(
-      title: 'Sweet Dock',
-      handle: 'sweetdock',
-      categoryTitle: 'Desserts',
-      subtitle: 'Gelato cups, cookies, and warm brownies',
-      deliveryLabel: '16 min',
-      ratingLabel: '4.8',
-      priceTier: 1,
-      badge: 'Chef pick',
-      imageUrl:
-          'https://images.unsplash.com/photo-1488477181946-6428a0291777?auto=format&fit=crop&w=900&q=80',
-    ),
-  ];
-
-  static const List<_DiscoverDealData> _quickCravings = [
-    _DiscoverDealData(
-      title: 'Lunch Box Express',
-      subtitle: 'Wrap, fries, and a chilled drink',
-      priceLabel: '\$11.90',
-      promoLabel: '15% off',
-      icon: Icons.lunch_dining_rounded,
-      accentColor: Color(0xFFFF7E4D),
-    ),
-    _DiscoverDealData(
-      title: 'Sushi Night Combo',
-      subtitle: 'Eight rolls paired with miso soup',
-      priceLabel: '\$17.50',
-      promoLabel: 'Best seller',
-      icon: Icons.set_meal_rounded,
-      accentColor: Color(0xFF2F8A7E),
-    ),
-    _DiscoverDealData(
-      title: 'Dessert Drop',
-      subtitle: 'Cookies, brownies, and gelato cups',
-      priceLabel: '\$9.80',
-      promoLabel: 'Sweet pick',
-      icon: Icons.icecream_rounded,
-      accentColor: Color(0xFFE17B91),
-    ),
-  ];
-
   @override
   State<_DiscoverTabBody> createState() => _DiscoverTabBodyState();
 }
@@ -142,11 +33,16 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
   late final LoyaltyApiService _loyaltyApiService;
   AuthSession? _session;
   List<_DiscoverSpotData> _restaurantSpots = const <_DiscoverSpotData>[];
+  List<_DiscoverCategoryData> _cuisineCategories =
+      const <_DiscoverCategoryData>[];
+  List<_DiscoverDealData> _quickCravings = const <_DiscoverDealData>[];
   final Map<String, List<RestaurantMenuItem>> _menuItemsByRestaurantId =
       <String, List<RestaurantMenuItem>>{};
   final Set<String> _pendingFavoriteRestaurantIds = <String>{};
   bool _isLoadingRestaurants = true;
+  bool _isLoadingQuickCravings = true;
   String? _restaurantError;
+  String? _quickCravingsError;
   Set<String> _activeCuisineFilters = <String>{};
   double _minimumRatingFilter = 0;
   int? _maximumDeliveryMinutesFilter;
@@ -204,6 +100,10 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
   }
 
   List<_DiscoverCategoryData> get _availableCuisineCategories {
+    if (_cuisineCategories.isNotEmpty) {
+      return _cuisineCategories;
+    }
+
     final titlesByKey = <String, String>{};
     final countsByKey = <String, int>{};
 
@@ -215,10 +115,6 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
       }
       titlesByKey.putIfAbsent(key, () => title);
       countsByKey[key] = (countsByKey[key] ?? 0) + 1;
-    }
-
-    if (titlesByKey.isEmpty) {
-      return _DiscoverTabBody._categories;
     }
 
     final entries = titlesByKey.entries.toList()
@@ -262,7 +158,10 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
     return 'No restaurants match these filters yet.';
   }
 
-  void _applyCuisineFilter(_DiscoverCategoryData category) {
+  Future<void> _openCuisineRestaurantList(
+    BuildContext context,
+    _DiscoverCategoryData category,
+  ) async {
     setState(() {
       if (_activeCuisineFilters.length == 1 &&
           _cuisineSetContains(_activeCuisineFilters, category.title)) {
@@ -271,6 +170,45 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
         _activeCuisineFilters = <String>{category.title};
       }
     });
+    unawaited(_loadRestaurants());
+
+    final session = await _resolveSession();
+    if (session == null) {
+      _showDiscoverSnackBar('Please log in again to load restaurants.');
+      return;
+    }
+
+    try {
+      final page = await _restaurantApiService.fetchRestaurants(
+        session: session,
+        perPage: 100,
+        cuisine: category.title,
+      );
+      final spots = page.restaurants
+          .where(_isVisibleRestaurant)
+          .map(_spotFromRestaurant)
+          .toList();
+      spots.sort(_comparePopularSpots);
+
+      if (!mounted || !context.mounted) {
+        return;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => _DiscoverSpotsCatalogScreen(
+            title: '${category.title} Restaurants',
+            subtitle: 'Restaurants from the live HungerRush catalog',
+            spots: spots,
+            onOpenSpot: _openPopularSpot,
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      _showDiscoverSnackBar('Unable to load ${category.title} restaurants.');
+    }
   }
 
   bool _isCuisineFilterSelected(String title) {
@@ -407,6 +345,8 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
       ),
     );
     unawaited(_loadRestaurants());
+    unawaited(_loadCuisineCategories());
+    unawaited(_loadQuickCravings());
   }
 
   @override
@@ -415,6 +355,8 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
     if (oldWidget.authSession?.token != widget.authSession?.token) {
       _session = widget.authSession;
       unawaited(_loadRestaurants());
+      unawaited(_loadCuisineCategories());
+      unawaited(_loadQuickCravings());
     }
   }
 
@@ -452,6 +394,10 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
     try {
       final page = await _restaurantApiService.fetchRestaurants(
         session: session,
+        perPage: 100,
+        cuisine: _activeCuisineFilters.length == 1
+            ? _activeCuisineFilters.first
+            : null,
       );
       if (!mounted) {
         return;
@@ -472,6 +418,92 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
         _isLoadingRestaurants = false;
         _restaurantSpots = const <_DiscoverSpotData>[];
         _restaurantError = 'Unable to load restaurants. Please try again.';
+      });
+    }
+  }
+
+  Future<void> _loadCuisineCategories() async {
+    final session = await _resolveSession();
+    if (session == null) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _cuisineCategories = const <_DiscoverCategoryData>[]);
+      return;
+    }
+
+    try {
+      final cuisines = await _restaurantApiService.fetchCuisines(
+        session: session,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _cuisineCategories = cuisines
+            .where((cuisine) => cuisine.title.trim().isNotEmpty)
+            .map(
+              (cuisine) =>
+                  _categoryDataForCuisine(cuisine.title, count: cuisine.count),
+            )
+            .toList(growable: false);
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _cuisineCategories = const <_DiscoverCategoryData>[]);
+    }
+  }
+
+  Future<void> _loadQuickCravings() async {
+    setState(() {
+      _isLoadingQuickCravings = true;
+      _quickCravingsError = null;
+    });
+
+    final session = await _resolveSession();
+    if (session == null) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoadingQuickCravings = false;
+        _quickCravings = const <_DiscoverDealData>[];
+        _quickCravingsError = 'Please log in again to load quick cravings.';
+      });
+      return;
+    }
+
+    try {
+      final quickCravings = await _restaurantApiService.fetchQuickCravings(
+        session: session,
+        perPage: 6,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _quickCravings = quickCravings
+            .where(
+              (item) =>
+                  item.menuItem.id.trim().isNotEmpty &&
+                  item.restaurant.id.trim().isNotEmpty,
+            )
+            .map(_dealFromQuickCraving)
+            .toList(growable: false);
+        _isLoadingQuickCravings = false;
+        _quickCravingsError = null;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoadingQuickCravings = false;
+        _quickCravings = const <_DiscoverDealData>[];
+        _quickCravingsError =
+            'Unable to load quick cravings. Please try again.';
       });
     }
   }
@@ -516,6 +548,34 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
       reviewsCount: restaurant.reviewsCount,
       ordersCount: restaurant.ordersCount,
     );
+  }
+
+  _DiscoverDealData _dealFromQuickCraving(CustomerQuickCravingItem item) {
+    final menuItem = item.menuItem;
+    final restaurant = item.restaurant;
+    final spot = _spotFromRestaurant(restaurant);
+    final category = menuItem.category.trim().isNotEmpty
+        ? menuItem.category.trim()
+        : spot.categoryTitle;
+    final ordersCount = menuItem.ordersCount ?? 0;
+
+    return _DiscoverDealData(
+      title: menuItem.title,
+      subtitle: '${restaurant.name} • $category',
+      priceLabel: _formatMenuPrice(menuItem.price),
+      promoLabel: ordersCount > 0 ? '$ordersCount orders' : 'Popular pick',
+      icon: _iconForCuisine(category),
+      accentColor: _accentColorForCuisine(category),
+      menuItem: menuItem,
+      restaurantSpot: spot,
+    );
+  }
+
+  String _formatMenuPrice(double? value) {
+    if (value == null) {
+      return '--';
+    }
+    return '\$${value.toStringAsFixed(2)}';
   }
 
   String _popularBadgeForRestaurant(CustomerRestaurantItem restaurant) {
@@ -851,6 +911,7 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
       _maximumDeliveryMinutesFilter = result.maximumDeliveryMinutes;
       _maximumPriceTierFilter = result.maximumPriceTier;
     });
+    unawaited(_loadRestaurants());
   }
 
   Future<void> _openPopularSpot(
@@ -966,6 +1027,8 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
       locationLabel: locationLabel,
       followersCountLabel: followersCountLabel,
       profileImageUrl: profileImageUrl,
+      onAddToCart: (item) =>
+          unawaited(_addMenuItemToLiveCart(spot: resolvedSpot, item: item)),
     );
     setState(() {});
   }
@@ -1017,19 +1080,7 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
       }
     }
 
-    final category = spot.categoryTitle.trim().toLowerCase();
-    switch (category) {
-      case 'pizza':
-        return _discoverPizzaMenuItems;
-      case 'burgers':
-        return _discoverBurgerMenuItems;
-      case 'sushi':
-        return _discoverSushiMenuItems;
-      case 'desserts':
-        return _discoverDessertMenuItems;
-      default:
-        return _discoverPizzaMenuItems;
-    }
+    return const <RestaurantMenuItem>[];
   }
 
   void _showDiscoverSnackBar(String message) {
@@ -1181,64 +1232,82 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
     BuildContext sheetContext,
     _DiscoverDealData deal,
   ) {
-    if (!_hasLiveQuickCravingCheckoutRoute()) {
-      Navigator.of(sheetContext).pop();
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) {
-          return;
-        }
-        _showDiscoverSnackBar(
-          'Quick craving bundles are not available for checkout yet.',
-        );
-      });
-      return;
-    }
-
-    final item = _CartLineItemData(
-      title: deal.title,
-      subtitle: 'Quick Cravings • ${deal.subtitle}',
-      imageUrl: _quickCravingImageUrl(deal.title),
-      price: _quickCravingPriceValue(deal.priceLabel),
-      quantity: 1,
-      restaurantName: 'Quick Cravings',
-    );
     Navigator.of(sheetContext).pop();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
       }
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => _OrdersCartScreen(
-            initialItems: [item],
-            restaurantName: 'Quick Cravings',
-          ),
-        ),
+      unawaited(
+        _addMenuItemToLiveCart(spot: deal.restaurantSpot, item: deal.menuItem),
       );
     });
   }
 
-  bool _hasLiveQuickCravingCheckoutRoute() => false;
-
-  double _quickCravingPriceValue(String priceLabel) {
-    final match = RegExp(r'([0-9]+(?:\.[0-9]+)?)').firstMatch(priceLabel);
-    if (match == null) {
-      return 0;
+  Widget _buildQuickCravingsContent(
+    BuildContext context,
+    _ResponsiveMetrics metrics,
+  ) {
+    if (_isLoadingQuickCravings) {
+      return Padding(
+        padding: EdgeInsets.all(_clampDouble(18 * metrics.scale, 14, 18)),
+        child: const Center(
+          child: CircularProgressIndicator(color: Color(0xFFFF7E4D)),
+        ),
+      );
     }
-    return double.tryParse(match.group(1) ?? '') ?? 0;
-  }
 
-  String _quickCravingImageUrl(String title) {
-    switch (title) {
-      case 'Lunch Box Express':
-        return 'https://images.unsplash.com/photo-1626645738196-c2a7c87a8f58?auto=format&fit=crop&w=900&q=80';
-      case 'Sushi Night Combo':
-        return 'https://images.unsplash.com/photo-1579871494447-9811cf80d66c?auto=format&fit=crop&w=900&q=80';
-      case 'Dessert Drop':
-        return 'https://images.unsplash.com/photo-1488477181946-6428a0291777?auto=format&fit=crop&w=900&q=80';
-      default:
-        return 'https://images.unsplash.com/photo-1552566626-52f8b828add9?auto=format&fit=crop&w=900&q=80';
+    if (_quickCravingsError != null) {
+      return Padding(
+        padding: EdgeInsets.all(_clampDouble(18 * metrics.scale, 14, 18)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _quickCravingsError!,
+              style: const TextStyle(
+                color: Color(0xFF7D6C60),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: _loadQuickCravings,
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
     }
+
+    if (_quickCravings.isEmpty) {
+      return Padding(
+        padding: EdgeInsets.all(_clampDouble(18 * metrics.scale, 14, 18)),
+        child: const Text(
+          'No quick cravings available yet.',
+          style: TextStyle(
+            color: Color(0xFF7D6C60),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: List.generate(_quickCravings.length, (index) {
+        final item = _quickCravings[index];
+        return Column(
+          children: [
+            _DiscoverDealTile(
+              data: item,
+              metrics: metrics,
+              onTap: () => _openQuickCravingDetails(context, item),
+            ),
+            if (index != _quickCravings.length - 1)
+              const Divider(height: 1, color: Color(0xFFF0E2D3)),
+          ],
+        );
+      }),
+    );
   }
 
   @override
@@ -1359,38 +1428,58 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                                   14,
                                 ),
                               ),
-                              SizedBox(
-                                height: _clampDouble(
-                                  126 * metrics.scale,
-                                  112,
-                                  126,
-                                ),
-                                child: ListView.separated(
-                                  scrollDirection: Axis.horizontal,
-                                  physics: const BouncingScrollPhysics(),
-                                  itemCount: cuisineCategories.length,
-                                  separatorBuilder: (context, index) =>
-                                      SizedBox(
-                                        width: _clampDouble(
-                                          12 * metrics.scale,
-                                          8,
-                                          12,
+                              if (cuisineCategories.isEmpty)
+                                _ProfilePanel(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(
+                                      _clampDouble(18 * metrics.scale, 14, 18),
+                                    ),
+                                    child: const Text(
+                                      'No cuisines available yet.',
+                                      style: TextStyle(
+                                        color: Color(0xFF7D6C60),
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              else
+                                SizedBox(
+                                  height: _clampDouble(
+                                    126 * metrics.scale,
+                                    112,
+                                    126,
+                                  ),
+                                  child: ListView.separated(
+                                    scrollDirection: Axis.horizontal,
+                                    physics: const BouncingScrollPhysics(),
+                                    itemCount: cuisineCategories.length,
+                                    separatorBuilder: (context, index) =>
+                                        SizedBox(
+                                          width: _clampDouble(
+                                            12 * metrics.scale,
+                                            8,
+                                            12,
+                                          ),
                                         ),
-                                      ),
-                                  itemBuilder: (context, index) {
-                                    final category = cuisineCategories[index];
-                                    return _DiscoverCuisineChip(
-                                      data: category,
-                                      metrics: metrics,
-                                      isSelected: _isCuisineFilterSelected(
-                                        category.title,
-                                      ),
-                                      onTap: () =>
-                                          _applyCuisineFilter(category),
-                                    );
-                                  },
+                                    itemBuilder: (context, index) {
+                                      final category = cuisineCategories[index];
+                                      return _DiscoverCuisineChip(
+                                        data: category,
+                                        metrics: metrics,
+                                        isSelected: _isCuisineFilterSelected(
+                                          category.title,
+                                        ),
+                                        onTap: () => unawaited(
+                                          _openCuisineRestaurantList(
+                                            context,
+                                            category,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
                                 ),
-                              ),
                               SizedBox(
                                 height: _clampDouble(
                                   26 * metrics.scale,
@@ -1405,10 +1494,13 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                                     : 'Clear',
                                 onActionTap: _activeCuisineFilters.isEmpty
                                     ? () => _openPopularSpotList(context)
-                                    : () => setState(
-                                        () =>
-                                            _activeCuisineFilters = <String>{},
-                                      ),
+                                    : () {
+                                        setState(
+                                          () => _activeCuisineFilters =
+                                              <String>{},
+                                        );
+                                        unawaited(_loadRestaurants());
+                                      },
                               ),
                               SizedBox(
                                 height: _clampDouble(
@@ -1525,36 +1617,9 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
                                 ),
                               ),
                               _ProfilePanel(
-                                child: Column(
-                                  children: List.generate(
-                                    _DiscoverTabBody._quickCravings.length,
-                                    (index) {
-                                      final item = _DiscoverTabBody
-                                          ._quickCravings[index];
-                                      return Column(
-                                        children: [
-                                          _DiscoverDealTile(
-                                            data: item,
-                                            metrics: metrics,
-                                            onTap: () =>
-                                                _openQuickCravingDetails(
-                                                  context,
-                                                  item,
-                                                ),
-                                          ),
-                                          if (index !=
-                                              _DiscoverTabBody
-                                                      ._quickCravings
-                                                      .length -
-                                                  1)
-                                            const Divider(
-                                              height: 1,
-                                              color: Color(0xFFF0E2D3),
-                                            ),
-                                        ],
-                                      );
-                                    },
-                                  ),
+                                child: _buildQuickCravingsContent(
+                                  context,
+                                  metrics,
                                 ),
                               ),
                               SizedBox(
@@ -2234,6 +2299,7 @@ Future<void> _openDiscoverRestaurantProfile(
   String? locationLabel,
   String? followersCountLabel,
   String? profileImageUrl,
+  ValueChanged<RestaurantMenuItem>? onAddToCart,
 }) {
   return showRestaurantProfilePopup(
     context,
@@ -2248,7 +2314,7 @@ Future<void> _openDiscoverRestaurantProfile(
     locationLabel: locationLabel,
     followersCountLabel:
         followersCountLabel ??
-        '${_formatCompactCount(8400 + (spot.deliveryMinutes * 28))} followers',
+        '${_formatCompactCount(spot.followersCount)} followers',
     profileImageUrl: profileImageUrl,
     loyaltyPointsLabel: loyaltyPointsLabel,
     allowAddToCart: true,
@@ -2267,16 +2333,7 @@ Future<void> _openDiscoverRestaurantProfile(
         reviews: reviews ?? const <RestaurantProfileReviewPreview>[],
       );
     },
-    onAddToCart: (item) {
-      final messenger = ScaffoldMessenger.maybeOf(context);
-      if (messenger == null) {
-        return;
-      }
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(
-        SnackBar(content: Text('${item.title} added to cart')),
-      );
-    },
+    onAddToCart: onAddToCart,
   );
 }
 
@@ -3195,6 +3252,8 @@ class _DiscoverDealData {
     required this.promoLabel,
     required this.icon,
     required this.accentColor,
+    required this.menuItem,
+    required this.restaurantSpot,
   });
 
   final String title;
@@ -3203,227 +3262,9 @@ class _DiscoverDealData {
   final String promoLabel;
   final IconData icon;
   final Color accentColor;
+  final RestaurantMenuItem menuItem;
+  final _DiscoverSpotData restaurantSpot;
 }
-
-const List<RestaurantMenuItem> _discoverPizzaMenuItems = [
-  RestaurantMenuItem(
-    id: 'pizza-margherita',
-    title: 'Margherita Fire',
-    description: 'Fresh mozzarella, basil leaves, tomato sauce, and olive oil.',
-    price: 10.80,
-    imageUrl:
-        'https://images.unsplash.com/photo-1604382354936-07c5d9983bd3?auto=format&fit=crop&w=900&q=80',
-    category: 'Pizza',
-    isAvailable: true,
-    isPopular: true,
-    rating: 4.8,
-    ordersCount: 180,
-  ),
-  RestaurantMenuItem(
-    id: 'pizza-pepperoni',
-    title: 'Pepperoni Feast',
-    description: 'Loaded pepperoni slices, melted mozzarella, and oregano.',
-    price: 12.40,
-    imageUrl:
-        'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=900&q=80',
-    category: 'Pizza',
-    isAvailable: true,
-    isPopular: true,
-    rating: 4.9,
-    ordersCount: 216,
-  ),
-  RestaurantMenuItem(
-    id: 'pizza-truffle',
-    title: 'Truffle Burrata',
-    description: 'Burrata cream, mushrooms, truffle oil, and parmesan flakes.',
-    price: 14.60,
-    imageUrl:
-        'https://images.unsplash.com/photo-1593504049359-74330189a345?auto=format&fit=crop&w=900&q=80',
-    category: 'Signature',
-    isAvailable: true,
-    isPopular: false,
-    rating: 4.7,
-    ordersCount: 94,
-  ),
-  RestaurantMenuItem(
-    id: 'pizza-garlic-knots',
-    title: 'Garlic Knots',
-    description: 'Six golden knots brushed with butter, parsley, and parmesan.',
-    price: 4.90,
-    imageUrl:
-        'https://images.unsplash.com/photo-1619531038896-dc1a44a84f95?auto=format&fit=crop&w=900&q=80',
-    category: 'Starters',
-    isAvailable: true,
-    isPopular: false,
-    rating: 4.6,
-    ordersCount: 102,
-  ),
-];
-
-const List<RestaurantMenuItem> _discoverBurgerMenuItems = [
-  RestaurantMenuItem(
-    id: 'burger-angus',
-    title: 'Double Angus Stack',
-    description: 'Two smashed patties, cheddar, pickles, and signature sauce.',
-    price: 13.20,
-    imageUrl:
-        'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=900&q=80',
-    category: 'Burgers',
-    isAvailable: true,
-    isPopular: true,
-    rating: 4.8,
-    ordersCount: 228,
-  ),
-  RestaurantMenuItem(
-    id: 'burger-classic',
-    title: 'Classic Smash',
-    description: 'Smash beef patty, lettuce, tomato, onion, and burger sauce.',
-    price: 9.90,
-    imageUrl:
-        'https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&w=900&q=80',
-    category: 'Burgers',
-    isAvailable: true,
-    isPopular: true,
-    rating: 4.7,
-    ordersCount: 172,
-  ),
-  RestaurantMenuItem(
-    id: 'burger-cajun-fries',
-    title: 'Cajun Fries',
-    description: 'Seasoned crispy fries with smoky paprika and sea salt.',
-    price: 4.30,
-    imageUrl:
-        'https://images.unsplash.com/photo-1573080496219-bb080dd4f877?auto=format&fit=crop&w=900&q=80',
-    category: 'Sides',
-    isAvailable: true,
-    isPopular: false,
-    rating: 4.5,
-    ordersCount: 132,
-  ),
-  RestaurantMenuItem(
-    id: 'burger-milkshake',
-    title: 'Vanilla Milkshake',
-    description: 'Creamy vanilla shake topped with whipped cream.',
-    price: 3.80,
-    imageUrl:
-        'https://images.unsplash.com/photo-1572490122747-3968b75cc699?auto=format&fit=crop&w=900&q=80',
-    category: 'Drinks',
-    isAvailable: true,
-    isPopular: false,
-    rating: 4.4,
-    ordersCount: 88,
-  ),
-];
-
-const List<RestaurantMenuItem> _discoverSushiMenuItems = [
-  RestaurantMenuItem(
-    id: 'sushi-salmon-roll',
-    title: 'Salmon Crunch Roll',
-    description: 'Salmon, avocado, cucumber, crispy flakes, and teriyaki.',
-    price: 11.70,
-    imageUrl:
-        'https://images.unsplash.com/photo-1579871494447-9811cf80d66c?auto=format&fit=crop&w=900&q=80',
-    category: 'Sushi',
-    isAvailable: true,
-    isPopular: true,
-    rating: 4.8,
-    ordersCount: 166,
-  ),
-  RestaurantMenuItem(
-    id: 'sushi-dragon-roll',
-    title: 'Dragon Roll',
-    description: 'Shrimp tempura, avocado, eel sauce, and sesame.',
-    price: 13.90,
-    imageUrl:
-        'https://images.unsplash.com/photo-1617196034796-73dfa7b1fd56?auto=format&fit=crop&w=900&q=80',
-    category: 'Sushi',
-    isAvailable: true,
-    isPopular: true,
-    rating: 4.9,
-    ordersCount: 145,
-  ),
-  RestaurantMenuItem(
-    id: 'sushi-poke-bowl',
-    title: 'Tuna Poke Bowl',
-    description: 'Marinated tuna, rice, mango, edamame, and spicy mayo.',
-    price: 12.50,
-    imageUrl:
-        'https://images.unsplash.com/photo-1604908554027-6e8f3f2b54f8?auto=format&fit=crop&w=900&q=80',
-    category: 'Bowls',
-    isAvailable: true,
-    isPopular: false,
-    rating: 4.6,
-    ordersCount: 104,
-  ),
-  RestaurantMenuItem(
-    id: 'sushi-miso-soup',
-    title: 'Miso Soup',
-    description: 'Warm miso broth with tofu cubes, seaweed, and scallions.',
-    price: 3.20,
-    imageUrl:
-        'https://images.unsplash.com/photo-1623341214825-9f4f963727da?auto=format&fit=crop&w=900&q=80',
-    category: 'Sides',
-    isAvailable: true,
-    isPopular: false,
-    rating: 4.5,
-    ordersCount: 93,
-  ),
-];
-
-const List<RestaurantMenuItem> _discoverDessertMenuItems = [
-  RestaurantMenuItem(
-    id: 'dessert-lava-cake',
-    title: 'Chocolate Lava Cake',
-    description: 'Warm molten center cake with vanilla cream.',
-    price: 7.10,
-    imageUrl:
-        'https://images.unsplash.com/photo-1621303837174-89787a7d4729?auto=format&fit=crop&w=900&q=80',
-    category: 'Desserts',
-    isAvailable: true,
-    isPopular: true,
-    rating: 4.9,
-    ordersCount: 194,
-  ),
-  RestaurantMenuItem(
-    id: 'dessert-gelato',
-    title: 'Pistachio Gelato',
-    description: 'Small-batch gelato topped with crushed pistachio.',
-    price: 5.40,
-    imageUrl:
-        'https://images.unsplash.com/photo-1563805042-7684c019e1cb?auto=format&fit=crop&w=900&q=80',
-    category: 'Desserts',
-    isAvailable: true,
-    isPopular: true,
-    rating: 4.8,
-    ordersCount: 152,
-  ),
-  RestaurantMenuItem(
-    id: 'dessert-cheesecake',
-    title: 'Berry Cheesecake',
-    description: 'Creamy cheesecake with mixed berry compote.',
-    price: 6.70,
-    imageUrl:
-        'https://images.unsplash.com/photo-1533134242443-d4fd215305ad?auto=format&fit=crop&w=900&q=80',
-    category: 'Desserts',
-    isAvailable: true,
-    isPopular: false,
-    rating: 4.7,
-    ordersCount: 98,
-  ),
-  RestaurantMenuItem(
-    id: 'dessert-cookies',
-    title: 'Chocolate Chip Cookies',
-    description: 'Three soft-baked cookies with dark chocolate chunks.',
-    price: 4.20,
-    imageUrl:
-        'https://images.unsplash.com/photo-1499636136210-6f4ee915583e?auto=format&fit=crop&w=900&q=80',
-    category: 'Bakery',
-    isAvailable: true,
-    isPopular: false,
-    rating: 4.5,
-    ordersCount: 86,
-  ),
-];
 
 class _DiscoverFiltersState {
   const _DiscoverFiltersState({

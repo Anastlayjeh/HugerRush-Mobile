@@ -2590,97 +2590,108 @@ class _RestaurantProfileVideoDemoScreenState
       ),
       body: SafeArea(
         top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(18),
-                child: Container(
-                  width: double.infinity,
-                  color: const Color(0xFF151515),
-                  child: AspectRatio(
-                    aspectRatio: _isReady && controller != null
-                        ? controller.value.aspectRatio
-                        : 9 / 16,
-                    child: _hasError
-                        ? const Center(
-                            child: Text(
-                              'Video unavailable',
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          )
-                        : !_isReady || controller == null
-                        ? const Center(
-                            child: CircularProgressIndicator(
-                              color: Color(0xFFFF7E4D),
-                            ),
-                          )
-                        : VideoPlayer(controller),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 14),
-              Row(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final aspectRatio = _isReady && controller != null
+                ? controller.value.aspectRatio
+                : 9 / 16;
+            final maxVideoHeight = constraints.maxHeight * 0.68;
+            final naturalVideoHeight = constraints.maxWidth / aspectRatio;
+            final videoHeight = naturalVideoHeight > maxVideoHeight
+                ? maxVideoHeight
+                : naturalVideoHeight;
+
+            return SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  FilledButton.icon(
-                    onPressed: _hasError ? null : _togglePlayback,
-                    icon: Icon(
-                      isPlaying
-                          ? Icons.pause_rounded
-                          : Icons.play_arrow_rounded,
-                    ),
-                    label: Text(isPlaying ? 'Pause' : 'Play'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF7E4D),
-                      foregroundColor: Colors.white,
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(18),
+                    child: Container(
+                      width: double.infinity,
+                      height: videoHeight,
+                      color: const Color(0xFF151515),
+                      child: Center(
+                        child: _hasError
+                            ? const Text(
+                                'Video unavailable',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              )
+                            : !_isReady || controller == null
+                            ? const CircularProgressIndicator(
+                                color: Color(0xFFFF7E4D),
+                              )
+                            : AspectRatio(
+                                aspectRatio: aspectRatio,
+                                child: VideoPlayer(controller),
+                              ),
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      FilledButton.icon(
+                        onPressed: _hasError ? null : _togglePlayback,
+                        icon: Icon(
+                          isPlaying
+                              ? Icons.pause_rounded
+                              : Icons.play_arrow_rounded,
+                        ),
+                        label: Text(isPlaying ? 'Pause' : 'Play'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFFFF7E4D),
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        'Uploaded video',
+                        style: const TextStyle(
+                          color: Color(0xFF8A786B),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
                   Text(
-                    'Uploaded video',
+                    widget.video.title,
                     style: const TextStyle(
-                      color: Color(0xFF8A786B),
-                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF231A16),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
                     ),
                   ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${widget.restaurantName} • ${widget.video.meta}',
+                    style: const TextStyle(
+                      color: Color(0xFF7E6D62),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  if (widget.video.description.trim().isNotEmpty)
+                    Text(
+                      widget.video.description.trim(),
+                      style: const TextStyle(
+                        color: Color(0xFF6D5D53),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        height: 1.35,
+                      ),
+                    ),
                 ],
               ),
-              const SizedBox(height: 14),
-              Text(
-                widget.video.title,
-                style: const TextStyle(
-                  color: Color(0xFF231A16),
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '${widget.restaurantName} • ${widget.video.meta}',
-                style: const TextStyle(
-                  color: Color(0xFF7E6D62),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 10),
-              if (widget.video.description.trim().isNotEmpty)
-                Text(
-                  widget.video.description.trim(),
-                  style: const TextStyle(
-                    color: Color(0xFF6D5D53),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    height: 1.35,
-                  ),
-                ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
@@ -6945,11 +6956,19 @@ class _LiveRestaurantOrderDetailScreenState
                 const SizedBox(height: 14),
                 _OrderInfoRow(label: 'Restaurant', value: order.restaurantName),
                 _OrderInfoRow(label: 'Items', value: order.itemSummary),
-                _OrderInfoRow(label: 'Channel', value: order.channelLabel),
+                _OrderInfoRow(label: 'Delivery', value: order.channelLabel),
+                _OrderInfoRow(
+                  label: 'Payment',
+                  value: order.paymentMethodLabel,
+                ),
                 if (order.etaLabel.trim().isNotEmpty)
                   _OrderInfoRow(label: 'ETA', value: order.etaLabel),
                 if (order.addressLabel.trim().isNotEmpty)
                   _OrderInfoRow(label: 'Address', value: order.addressLabel),
+                if (order.deliveryPhone.trim().isNotEmpty)
+                  _OrderInfoRow(label: 'Phone', value: order.deliveryPhone),
+                if (order.orderNotes.trim().isNotEmpty)
+                  _OrderInfoRow(label: 'Notes', value: order.orderNotes),
                 _OrderInfoRow(label: 'Total', value: order.totalLabel),
                 if (order.items.isNotEmpty) ...[
                   const SizedBox(height: 16),

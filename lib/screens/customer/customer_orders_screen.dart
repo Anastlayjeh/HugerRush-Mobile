@@ -2464,6 +2464,8 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
     street: '',
     building: '',
   );
+  late final TextEditingController _phoneController;
+  late final TextEditingController _notesController;
   bool _isPlacingOrder = false;
   late final AuthSessionService _authSessionService;
   late final CustomerOrderApiService _orderApiService;
@@ -2471,6 +2473,8 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
   @override
   void initState() {
     super.initState();
+    _phoneController = TextEditingController();
+    _notesController = TextEditingController();
     _authSessionService = AuthSessionService();
     _orderApiService = CustomerOrderApiService(
       apiClient: AuthenticatedApiClient(
@@ -2478,6 +2482,24 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
         authSessionService: _authSessionService,
       ),
     );
+    unawaited(_prefillPhoneFromSession());
+  }
+
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    _notesController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _prefillPhoneFromSession() async {
+    final session = await _authSessionService.readSession();
+    final rawPhone = session?.user?['phone'];
+    final phone = rawPhone is String ? rawPhone.trim() : '';
+    if (!mounted || phone.isEmpty || _phoneController.text.trim().isNotEmpty) {
+      return;
+    }
+    _phoneController.text = phone;
   }
 
   double get _totalUsd => widget.subtotal + widget.deliveryFee;
@@ -2520,6 +2542,43 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
     return segments.isEmpty ? 'City, street, building' : segments.join(', ');
   }
 
+  InputDecoration _checkoutFieldDecoration({
+    required String label,
+    required String hint,
+    IconData? icon,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      hintText: hint,
+      prefixIcon: icon == null
+          ? null
+          : Icon(icon, color: const Color(0xFFFF7E4D), size: 20),
+      filled: true,
+      fillColor: const Color(0xFFFEFCFA),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFFE8D8C8)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFFE8D8C8)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFFFFB893)),
+      ),
+      labelStyle: const TextStyle(
+        color: Color(0xFF7D6C60),
+        fontWeight: FontWeight.w600,
+      ),
+      hintStyle: const TextStyle(
+        color: Color(0xFFB3A295),
+        fontWeight: FontWeight.w600,
+      ),
+    );
+  }
+
   Future<void> _placeOrder() async {
     if (!_location.hasRequiredFields) {
       final messenger = ScaffoldMessenger.maybeOf(context);
@@ -2533,6 +2592,17 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
           ),
         );
       _openLocationEditor();
+      return;
+    }
+    final phone = _phoneController.text.trim();
+    if (phone.isEmpty) {
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Please enter a phone number for this order.'),
+          ),
+        );
       return;
     }
     final liveItems = widget.items;
@@ -2594,10 +2664,12 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
             apartment: _location.apartment,
             landmark: _location.landmark,
           ),
+          phone: phone,
           paymentMethod: 'cash_on_delivery',
           deliveryMode: 'now',
           scheduledLabel: '',
           changeRequest: '',
+          orderNotes: _notesController.text.trim(),
           useLoyalty: false,
           saveChangeInWallet: false,
           subtotal: widget.subtotal,
@@ -2752,6 +2824,38 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              _CheckoutSectionCard(
+                title: 'Contact & Notes',
+                child: Column(
+                  children: [
+                    TextField(
+                      controller: _phoneController,
+                      keyboardType: TextInputType.phone,
+                      textInputAction: TextInputAction.next,
+                      decoration: _checkoutFieldDecoration(
+                        label: 'Phone number *',
+                        hint: '+961 70 123 456',
+                        icon: Icons.phone_outlined,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _notesController,
+                      minLines: 2,
+                      maxLines: 4,
+                      textInputAction: TextInputAction.newline,
+                      decoration: _checkoutFieldDecoration(
+                        label: 'Order notes',
+                        hint: 'Example: no cutlery, call on arrival',
+                        icon: Icons.sticky_note_2_outlined,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    const _CheckoutStaticPaymentTile(),
                   ],
                 ),
               ),
@@ -3380,6 +3484,38 @@ class _CheckoutSectionCard extends StatelessWidget {
   }
 }
 
+class _CheckoutStaticPaymentTile extends StatelessWidget {
+  const _CheckoutStaticPaymentTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8F2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFF0E2D4)),
+      ),
+      child: const Row(
+        children: [
+          Icon(Icons.payments_outlined, color: Color(0xFFFF7E4D), size: 20),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Payment: cash on delivery',
+              style: TextStyle(
+                color: Color(0xFF5D4C42),
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _OrdersBackground extends StatelessWidget {
   const _OrdersBackground();
 
@@ -3565,14 +3701,7 @@ class _ActiveOrderCard extends StatelessWidget {
   void _openOrderTracking(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => _OrderTrackingScreen(
-          orderId: order.displayId,
-          restaurantName: order.restaurantName,
-          itemSummary: order.itemSummary,
-          status: currentStatus,
-          etaLabel: order.etaLabel,
-          totalLabel: order.totalLabel,
-        ),
+        builder: (_) => _OrderTrackingScreen(order: order),
       ),
     );
   }
@@ -3665,7 +3794,7 @@ class _ActiveOrderCard extends StatelessWidget {
                   metrics: metrics,
                 ),
                 _OrdersInfoChip(
-                  label: order.channelLabel,
+                  label: order.paymentMethodLabel,
                   icon: Icons.credit_card_rounded,
                   metrics: metrics,
                 ),
@@ -4104,48 +4233,185 @@ class _OrdersActionPill extends StatelessWidget {
   }
 }
 
-class _OrderTrackingScreen extends StatelessWidget {
-  const _OrderTrackingScreen({
-    required this.orderId,
-    required this.restaurantName,
-    required this.itemSummary,
-    required this.status,
-    required this.etaLabel,
-    required this.totalLabel,
-  });
+class _OrderTrackingScreen extends StatefulWidget {
+  const _OrderTrackingScreen({required this.order});
 
-  final String orderId;
-  final String restaurantName;
-  final String itemSummary;
-  final _OrderStatus status;
-  final String etaLabel;
-  final String totalLabel;
+  final AppOrder order;
 
-  int _currentStepIndexForStatus() {
-    switch (status) {
-      case _OrderStatus.pending:
-        return 0;
-      case _OrderStatus.accepted:
-        return 1;
-      case _OrderStatus.preparing:
-        return 2;
-      case _OrderStatus.ready:
-        return 3;
-      case _OrderStatus.onTheWay:
-        return 4;
-      case _OrderStatus.delivered:
-        return 5;
-      case _OrderStatus.canceled:
-      case _OrderStatus.rejected:
-        return 1;
+  @override
+  State<_OrderTrackingScreen> createState() => _OrderTrackingScreenState();
+}
+
+class _OrderTrackingScreenState extends State<_OrderTrackingScreen> {
+  late AppOrder _order;
+  late final AuthSessionService _authSessionService;
+  late final CustomerOrderApiService _orderApiService;
+  bool _isCancelling = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _order = widget.order;
+    _authSessionService = AuthSessionService();
+    _orderApiService = CustomerOrderApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+      ),
+    );
+  }
+
+  _OrderStatus get _status => _orderStatusFromBackend(_order.status);
+
+  List<_OrderTrackingStep> _checkpointsForStatus(_OrderStatus status) {
+    if (status == _OrderStatus.canceled || status == _OrderStatus.rejected) {
+      return <_OrderTrackingStep>[
+        const _OrderTrackingStep(
+          status: _OrderStatus.pending,
+          label: 'Order placed',
+          subtitle: 'Payment confirmed and ticket sent to the restaurant.',
+          icon: Icons.shopping_bag_rounded,
+        ),
+        _OrderTrackingStep(
+          status: status,
+          label: _orderStatusLabel(status),
+          subtitle: _orderStatusDescription(status),
+          icon: _orderStatusIcon(status),
+        ),
+      ];
     }
+
+    return const <_OrderTrackingStep>[
+      _OrderTrackingStep(
+        status: _OrderStatus.pending,
+        label: 'Order placed',
+        subtitle: 'Payment confirmed and ticket sent to the restaurant.',
+        icon: Icons.shopping_bag_rounded,
+      ),
+      _OrderTrackingStep(
+        status: _OrderStatus.accepted,
+        label: 'Restaurant accepted',
+        subtitle: 'The kitchen accepted your order and queued it.',
+        icon: Icons.receipt_long_rounded,
+      ),
+      _OrderTrackingStep(
+        status: _OrderStatus.preparing,
+        label: 'Preparing',
+        subtitle: 'Your meal is being cooked fresh.',
+        icon: Icons.restaurant_rounded,
+      ),
+      _OrderTrackingStep(
+        status: _OrderStatus.ready,
+        label: 'Packed and ready',
+        subtitle: 'Order packed and assigned to a rider.',
+        icon: Icons.inventory_2_rounded,
+      ),
+      _OrderTrackingStep(
+        status: _OrderStatus.onTheWay,
+        label: 'On the way',
+        subtitle: 'Rider is heading to your location.',
+        icon: Icons.delivery_dining_rounded,
+      ),
+      _OrderTrackingStep(
+        status: _OrderStatus.delivered,
+        label: 'Delivered',
+        subtitle: 'Enjoy your meal!',
+        icon: Icons.check_circle_rounded,
+      ),
+    ];
+  }
+
+  int _currentStepIndexForStatus(
+    _OrderStatus status,
+    List<_OrderTrackingStep> checkpoints,
+  ) {
+    final index = checkpoints.indexWhere((step) => step.status == status);
+    if (index >= 0) {
+      return index;
+    }
+    return 0;
   }
 
   String _formatClockTime(DateTime time) {
-    final hour12 = time.hour % 12 == 0 ? 12 : time.hour % 12;
-    final minute = time.minute.toString().padLeft(2, '0');
-    final meridiem = time.hour >= 12 ? 'PM' : 'AM';
+    final local = time.toLocal();
+    final hour12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
+    final minute = local.minute.toString().padLeft(2, '0');
+    final meridiem = local.hour >= 12 ? 'PM' : 'AM';
     return '$hour12:$minute $meridiem';
+  }
+
+  String _formatDuration(Duration duration) {
+    final minutes = duration.inMinutes.abs();
+    if (minutes < 1) {
+      return '<1 min';
+    }
+    if (minutes < 60) {
+      return '$minutes min';
+    }
+    final hours = minutes ~/ 60;
+    final remainingMinutes = minutes % 60;
+    if (remainingMinutes == 0) {
+      return '${hours}h';
+    }
+    return '${hours}h ${remainingMinutes}m';
+  }
+
+  Set<String> _statusAliases(_OrderStatus status) {
+    switch (status) {
+      case _OrderStatus.pending:
+        return const {'pending'};
+      case _OrderStatus.accepted:
+        return const {'accepted'};
+      case _OrderStatus.preparing:
+        return const {'preparing'};
+      case _OrderStatus.ready:
+        return const {'ready', 'ready_for_pickup'};
+      case _OrderStatus.onTheWay:
+        return const {'picked_up', 'on_the_way', 'on the way'};
+      case _OrderStatus.delivered:
+        return const {'delivered', 'completed'};
+      case _OrderStatus.canceled:
+        return const {'cancelled', 'canceled'};
+      case _OrderStatus.rejected:
+        return const {'rejected'};
+    }
+  }
+
+  String _normalizeEventStatus(String value) {
+    return value.trim().toLowerCase().replaceAll('-', '_');
+  }
+
+  DateTime? _eventTimeForStatus(_OrderStatus status) {
+    final aliases = _statusAliases(status);
+    final matches =
+        _order.statusHistory
+            .where(
+              (event) => aliases.contains(_normalizeEventStatus(event.status)),
+            )
+            .map((event) => event.changedAt)
+            .whereType<DateTime>()
+            .toList(growable: false)
+          ..sort();
+    if (matches.isNotEmpty) {
+      return matches.first;
+    }
+    if (status == _OrderStatus.pending) {
+      return _order.createdAt;
+    }
+    return null;
+  }
+
+  DateTime? _previousKnownEventTime(
+    int index,
+    List<_OrderTrackingStep> checkpoints,
+  ) {
+    for (var previousIndex = index - 1; previousIndex >= 0; previousIndex--) {
+      final time = _eventTimeForStatus(checkpoints[previousIndex].status);
+      if (time != null) {
+        return time;
+      }
+    }
+    return null;
   }
 
   String _normalizedName(String value) {
@@ -4155,6 +4421,71 @@ class _OrderTrackingScreen extends StatelessWidget {
         .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
+  }
+
+  Future<void> _cancelOrder() async {
+    if (!_order.canCustomerCancel || _isCancelling) {
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Cancel order?'),
+          content: const Text(
+            'You can cancel only while the order is pending or accepted.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Keep order'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Cancel order'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) {
+      return;
+    }
+
+    setState(() => _isCancelling = true);
+    try {
+      final session = await _authSessionService.readSession();
+      if (session == null || session.token.trim().isEmpty) {
+        throw const AuthApiException('Please log in again.');
+      }
+      final updated = await _orderApiService.cancelOrder(
+        session: session,
+        orderId: _order.id,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() => _order = updated);
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('Order canceled.')));
+    } catch (error) {
+      debugPrint('Customer order cancel failed: $error');
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('This order cannot be canceled right now.'),
+          ),
+        );
+    } finally {
+      if (mounted) {
+        setState(() => _isCancelling = false);
+      }
+    }
   }
 
   Future<void> _openRestaurantDirectMessage(BuildContext context) async {
@@ -4175,7 +4506,7 @@ class _OrderTrackingScreen extends StatelessWidget {
       return;
     }
 
-    final targetName = _normalizedName(restaurantName);
+    final targetName = _normalizedName(_order.restaurantName);
     DemoConversationThread? matchedThread;
 
     for (final thread in threads) {
@@ -4222,51 +4553,16 @@ class _OrderTrackingScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final placedAt = now.subtract(const Duration(minutes: 26));
+    final status = _status;
     final viewport = MediaQuery.sizeOf(context);
     final trackingMetrics = _ResponsiveMetrics.from(
       BoxConstraints(maxWidth: viewport.width, maxHeight: viewport.height),
     );
-    final checkpoints = <_OrderTrackingStep>[
-      _OrderTrackingStep(
-        label: 'Order placed',
-        subtitle: 'Payment confirmed and ticket sent to the restaurant.',
-        time: placedAt,
-        icon: Icons.shopping_bag_rounded,
-      ),
-      _OrderTrackingStep(
-        label: 'Restaurant accepted',
-        subtitle: 'The kitchen accepted your order and queued it.',
-        time: placedAt.add(const Duration(minutes: 3)),
-        icon: Icons.receipt_long_rounded,
-      ),
-      _OrderTrackingStep(
-        label: 'Preparing',
-        subtitle: 'Your meal is being cooked fresh.',
-        time: placedAt.add(const Duration(minutes: 12)),
-        icon: Icons.restaurant_rounded,
-      ),
-      _OrderTrackingStep(
-        label: 'Packed and ready',
-        subtitle: 'Order packed and assigned to a rider.',
-        time: placedAt.add(const Duration(minutes: 17)),
-        icon: Icons.inventory_2_rounded,
-      ),
-      _OrderTrackingStep(
-        label: 'On the way',
-        subtitle: 'Rider is heading to your location.',
-        time: placedAt.add(const Duration(minutes: 20)),
-        icon: Icons.delivery_dining_rounded,
-      ),
-      _OrderTrackingStep(
-        label: 'Delivered',
-        subtitle: 'Enjoy your meal!',
-        time: placedAt.add(const Duration(minutes: 29)),
-        icon: Icons.check_circle_rounded,
-      ),
-    ];
-    final currentStepIndex = _currentStepIndexForStatus();
+    final checkpoints = _checkpointsForStatus(status);
+    final currentStepIndex = _currentStepIndexForStatus(status, checkpoints);
+    final progress = checkpoints.isEmpty
+        ? 0.0
+        : (currentStepIndex + 1) / checkpoints.length;
 
     return Scaffold(
       backgroundColor: const Color(0xFFFFFBF7),
@@ -4275,7 +4571,7 @@ class _OrderTrackingScreen extends StatelessWidget {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         title: Text(
-          'Track Order #$orderId',
+          'Track ${_order.displayId}',
           style: const TextStyle(
             color: Color(0xFF231A16),
             fontWeight: FontWeight.w900,
@@ -4294,7 +4590,7 @@ class _OrderTrackingScreen extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      restaurantName,
+                      _order.restaurantName,
                       style: const TextStyle(
                         color: Color(0xFF231A16),
                         fontSize: 20,
@@ -4303,7 +4599,7 @@ class _OrderTrackingScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      itemSummary,
+                      _order.itemSummary,
                       style: const TextStyle(
                         color: Color(0xFF7D6C60),
                         fontWeight: FontWeight.w600,
@@ -4314,13 +4610,14 @@ class _OrderTrackingScreen extends StatelessWidget {
                       spacing: 8,
                       runSpacing: 8,
                       children: [
+                        if (_order.etaLabel.trim().isNotEmpty)
+                          _OrdersInfoChip(
+                            label: 'ETA ${_order.etaLabel}',
+                            icon: Icons.timer_outlined,
+                            metrics: trackingMetrics,
+                          ),
                         _OrdersInfoChip(
-                          label: 'ETA $etaLabel',
-                          icon: Icons.timer_outlined,
-                          metrics: trackingMetrics,
-                        ),
-                        _OrdersInfoChip(
-                          label: totalLabel,
+                          label: _order.totalLabel,
                           icon: Icons.payments_rounded,
                           metrics: trackingMetrics,
                         ),
@@ -4333,7 +4630,7 @@ class _OrderTrackingScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
                     LinearProgressIndicator(
-                      value: (currentStepIndex + 1) / checkpoints.length,
+                      value: progress.clamp(0, 1).toDouble(),
                       minHeight: 9,
                       color: _orderStatusAccentColor(status),
                       backgroundColor: const Color(0xFFF2E4D7),
@@ -4350,24 +4647,30 @@ class _OrderTrackingScreen extends StatelessWidget {
                 child: Column(
                   children: List.generate(checkpoints.length, (index) {
                     final step = checkpoints[index];
-                    final isComplete = index <= currentStepIndex;
+                    final isPassed = index <= currentStepIndex;
                     final isCurrent = index == currentStepIndex;
-                    final previousTime = index == 0
+                    final eventTime = isPassed
+                        ? _eventTimeForStatus(step.status)
+                        : null;
+                    final previousTime = eventTime == null
                         ? null
-                        : checkpoints[index - 1].time;
-                    final durationLabel = previousTime == null
-                        ? 'Start'
-                        : '${step.time.difference(previousTime).inMinutes} min';
+                        : _previousKnownEventTime(index, checkpoints);
                     return Padding(
                       padding: EdgeInsets.only(
                         bottom: index == checkpoints.length - 1 ? 0 : 10,
                       ),
                       child: _OrderTrackingTimelineTile(
                         step: step,
-                        isComplete: isComplete,
+                        isComplete: index < currentStepIndex,
                         isCurrent: isCurrent,
-                        timeLabel: _formatClockTime(step.time),
-                        durationLabel: durationLabel,
+                        timeLabel: eventTime == null
+                            ? null
+                            : _formatClockTime(eventTime),
+                        durationLabel: previousTime == null || eventTime == null
+                            ? null
+                            : _formatDuration(
+                                eventTime.difference(previousTime),
+                              ),
                       ),
                     );
                   }),
@@ -4407,13 +4710,34 @@ class _OrderTrackingScreen extends StatelessWidget {
                           onTap: () {
                             showOrderIssueSheet(
                               context,
-                              orderId: orderId,
-                              restaurantName: restaurantName,
+                              orderId: _order.id,
+                              restaurantName: _order.restaurantName,
                             );
                           },
                         ),
+                        if (_order.canCustomerCancel)
+                          _OrdersActionPill(
+                            label: _isCancelling
+                                ? 'Cancelling...'
+                                : 'Cancel order',
+                            filled: false,
+                            metrics: trackingMetrics,
+                            onTap: _isCancelling ? null : _cancelOrder,
+                          ),
                       ],
                     ),
+                    if (!_order.canCustomerCancel &&
+                        !_orderStatusIsTerminal(status)) ...[
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Cancellation is available only while an order is pending or accepted.',
+                        style: TextStyle(
+                          color: Color(0xFF8D7D71),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -4427,15 +4751,15 @@ class _OrderTrackingScreen extends StatelessWidget {
 
 class _OrderTrackingStep {
   const _OrderTrackingStep({
+    required this.status,
     required this.label,
     required this.subtitle,
-    required this.time,
     required this.icon,
   });
 
+  final _OrderStatus status;
   final String label;
   final String subtitle;
-  final DateTime time;
   final IconData icon;
 }
 
@@ -4444,15 +4768,15 @@ class _OrderTrackingTimelineTile extends StatelessWidget {
     required this.step,
     required this.isComplete,
     required this.isCurrent,
-    required this.timeLabel,
-    required this.durationLabel,
+    this.timeLabel,
+    this.durationLabel,
   });
 
   final _OrderTrackingStep step;
   final bool isComplete;
   final bool isCurrent;
-  final String timeLabel;
-  final String durationLabel;
+  final String? timeLabel;
+  final String? durationLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -4507,21 +4831,25 @@ class _OrderTrackingTimelineTile extends StatelessWidget {
                     height: 1.25,
                   ),
                 ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _TrackingMetaPill(
-                      icon: Icons.schedule_rounded,
-                      label: timeLabel,
-                    ),
-                    _TrackingMetaPill(
-                      icon: Icons.timelapse_rounded,
-                      label: durationLabel,
-                    ),
-                  ],
-                ),
+                if (timeLabel != null || durationLabel != null) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      if (timeLabel != null)
+                        _TrackingMetaPill(
+                          icon: Icons.schedule_rounded,
+                          label: timeLabel!,
+                        ),
+                      if (durationLabel != null)
+                        _TrackingMetaPill(
+                          icon: Icons.timelapse_rounded,
+                          label: durationLabel!,
+                        ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
@@ -4666,8 +4994,8 @@ _OrderReceiptData _orderReceiptFromAppOrder(AppOrder order) {
     placedAtLabel: _orderDateLabel(order.createdAt),
     status: _orderStatusFromBackend(order.status),
     imageUrl: '',
-    paymentMethodLabel: order.channelLabel,
-    deliveryFee: 0,
+    paymentMethodLabel: order.paymentMethodLabel,
+    deliveryFee: order.deliveryFee ?? 0,
     serviceFee: 0,
     discountPercent: 0,
     loyaltyPointsUsed: 0,

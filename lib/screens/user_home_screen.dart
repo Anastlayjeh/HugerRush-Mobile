@@ -187,36 +187,6 @@ String _savedPlaceKey({required String title, required String handle}) {
   return title.trim().toLowerCase();
 }
 
-IconData _discoverSpotIcon(String categoryTitle) {
-  switch (categoryTitle.trim().toLowerCase()) {
-    case 'pizza':
-      return Icons.local_pizza_rounded;
-    case 'burgers':
-      return Icons.lunch_dining_rounded;
-    case 'sushi':
-      return Icons.set_meal_rounded;
-    case 'desserts':
-      return Icons.icecream_rounded;
-    default:
-      return Icons.restaurant_rounded;
-  }
-}
-
-_SavedPlaceData _savedPlaceFromDiscoverSpot(_DiscoverSpotData spot) {
-  return _SavedPlaceData(
-    title: spot.title,
-    subtitle: '${spot.categoryTitle} - ${spot.deliveryLabel}',
-    handle: spot.handle,
-    rating: spot.ratingValue,
-    caption: spot.subtitle,
-    cuisineSummary: '${spot.categoryTitle} Kitchen',
-    phoneLabel: '+961 1 554 100',
-    locationLabel: 'Nearby you',
-    followersCount: 8400 + (spot.deliveryMinutes * 28),
-    icon: _discoverSpotIcon(spot.categoryTitle),
-  );
-}
-
 _SavedPlaceData _savedPlaceFromFeedPost(DemoFeedPost post) {
   return _SavedPlaceData(
     title: post.restaurantName,
@@ -234,27 +204,8 @@ _SavedPlaceData _savedPlaceFromFeedPost(DemoFeedPost post) {
 
 List<_SavedPlaceData> _savedPlacesFromHeartedRestaurants({
   required DemoAppRepository repository,
-  required Set<String> favoriteSpotTitles,
 }) {
   final savedByKey = <String, _SavedPlaceData>{};
-  final normalizedFavoriteTitles = favoriteSpotTitles
-      .map((title) => title.trim().toLowerCase())
-      .toSet();
-
-  for (final spot in _DiscoverTabBody._popularSpots) {
-    final key = spot.title.trim().toLowerCase();
-    final savedFromDiscoverHeart = normalizedFavoriteTitles.contains(key);
-    final savedFromProfileHeart = isCustomerRestaurantSaved(
-      restaurantName: spot.title,
-      handle: spot.handle,
-    );
-    if (!savedFromDiscoverHeart && !savedFromProfileHeart) {
-      continue;
-    }
-    final saved = _savedPlaceFromDiscoverSpot(spot);
-    savedByKey[_savedPlaceKey(title: saved.title, handle: saved.handle)] =
-        saved;
-  }
 
   for (final post in _customerFeedPostsSnapshot(repository)) {
     if (!isCustomerRestaurantSaved(

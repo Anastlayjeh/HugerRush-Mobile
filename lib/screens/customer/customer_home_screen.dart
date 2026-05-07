@@ -203,7 +203,6 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
     final showProfile = _selectedBottomIndex == 4;
     final savedPlaces = _savedPlacesFromHeartedRestaurants(
       repository: DemoAppRepository.instance,
-      favoriteSpotTitles: _favoriteDiscoverSpotTitles,
     );
     final followedRestaurantPosts = _followedRestaurantPosts();
     return Scaffold(

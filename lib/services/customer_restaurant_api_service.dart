@@ -15,14 +15,17 @@ class CustomerRestaurantApiService {
     int page = 1,
     int perPage = 20,
     String? query,
+    String? cuisine,
   }) async {
     final result = await _apiClient.request(
       session: session,
       method: 'GET',
       endpoint: _endpoint('/v1/customer/restaurants', <String, String>{
         'page': page.toString(),
-        'per_page': perPage.clamp(1, 30).toString(),
+        'per_page': perPage.clamp(1, 100).toString(),
         if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
+        if (cuisine != null && cuisine.trim().isNotEmpty)
+          'cuisine': cuisine.trim(),
       }),
     );
     final payload = ApiClient.decodeMap(result.response.body);
@@ -40,6 +43,49 @@ class CustomerRestaurantApiService {
       restaurants: restaurants,
       meta: CustomerRestaurantMeta.fromJson(_extractMeta(payload)),
     );
+  }
+
+  Future<List<CustomerCuisineCategory>> fetchCuisines({
+    required AuthSession session,
+  }) async {
+    final result = await _apiClient.request(
+      session: session,
+      method: 'GET',
+      endpoint: '/v1/customer/restaurants/cuisines',
+    );
+    final payload = ApiClient.decodeMap(result.response.body);
+    _throwForFailure(
+      result.response.statusCode,
+      payload,
+      fallback: 'Failed to load cuisines.',
+    );
+
+    return _extractList(
+      payload,
+    ).map(CustomerCuisineCategory.fromJson).toList(growable: false);
+  }
+
+  Future<List<CustomerQuickCravingItem>> fetchQuickCravings({
+    required AuthSession session,
+    int perPage = 6,
+  }) async {
+    final result = await _apiClient.request(
+      session: session,
+      method: 'GET',
+      endpoint: _endpoint('/v1/customer/quick-cravings', <String, String>{
+        'per_page': perPage.clamp(1, 20).toString(),
+      }),
+    );
+    final payload = ApiClient.decodeMap(result.response.body);
+    _throwForFailure(
+      result.response.statusCode,
+      payload,
+      fallback: 'Failed to load quick cravings.',
+    );
+
+    return _extractList(
+      payload,
+    ).map(CustomerQuickCravingItem.fromJson).toList(growable: false);
   }
 
   Future<List<CustomerRestaurantItem>> fetchFollowing({
@@ -426,6 +472,45 @@ class CustomerRestaurantMeta {
       currentPage: _readInt(json['current_page']) ?? 1,
       perPage: _readInt(json['per_page']) ?? 20,
       total: _readInt(json['total']) ?? 0,
+    );
+  }
+}
+
+class CustomerCuisineCategory {
+  const CustomerCuisineCategory({required this.title, required this.count});
+
+  final String title;
+  final int count;
+
+  factory CustomerCuisineCategory.fromJson(Map<String, dynamic> json) {
+    return CustomerCuisineCategory(
+      title:
+          _firstString(json, const ['title', 'label', 'name', 'cuisine']) ??
+          'Restaurants',
+      count:
+          _readInt(json['restaurants_count']) ??
+          _readInt(json['count']) ??
+          _readInt(json['total']) ??
+          0,
+    );
+  }
+}
+
+class CustomerQuickCravingItem {
+  const CustomerQuickCravingItem({
+    required this.menuItem,
+    required this.restaurant,
+  });
+
+  final RestaurantMenuItem menuItem;
+  final CustomerRestaurantItem restaurant;
+
+  factory CustomerQuickCravingItem.fromJson(Map<String, dynamic> json) {
+    final menuItem = _stringMap(json['menu_item']);
+    final restaurant = _stringMap(json['restaurant']);
+    return CustomerQuickCravingItem(
+      menuItem: RestaurantMenuItem.fromJson(menuItem.isEmpty ? json : menuItem),
+      restaurant: CustomerRestaurantItem.fromJson(restaurant),
     );
   }
 }
