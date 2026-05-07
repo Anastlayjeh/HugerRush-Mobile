@@ -7129,11 +7129,16 @@ class ConversationScreen extends StatefulWidget {
     required this.threadId,
     required this.restaurantName,
     this.openComposerOnStart = false,
+    // When true the logged-in user is a customer, so their messages
+    // (fromRestaurant == false) appear on the RIGHT, restaurant on LEFT.
+    // When false (restaurant view) it is reversed.
+    this.viewerIsCustomer = false,
   });
 
   final String threadId;
   final String restaurantName;
   final bool openComposerOnStart;
+  final bool viewerIsCustomer;
 
   @override
   State<ConversationScreen> createState() => _ConversationScreenState();
@@ -7143,7 +7148,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
   final _authSessionService = AuthSessionService();
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
+  final _scrollController = ScrollController();
   late final ConversationApiService _conversationApiService;
+  Timer? _pollTimer;
 
   DemoConversationThread? _thread;
   bool _isSending = false;
@@ -7159,10 +7166,18 @@ class _ConversationScreenState extends State<ConversationScreen> {
       ),
     );
     _loadThread();
+    // Poll every 5 s for new messages (best-effort live chat without WebSockets).
+    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (mounted && !_isSending) {
+        _pollMessages();
+      }
+    });
   }
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
+    _scrollController.dispose();
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
@@ -7191,6 +7206,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
         _thread = _threadFromConversation(conversation);
         _error = null;
       });
+      _scrollToBottom();
       if (widget.openComposerOnStart) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
@@ -7204,6 +7220,64 @@ class _ConversationScreenState extends State<ConversationScreen> {
       }
       setState(() => _error = error.toString());
     }
+  }
+
+  /// Silent background poll — fetches the conversation and updates messages
+  /// only when new ones arrived, without resetting loading state.
+  Future<void> _pollMessages() async {
+    final currentThread = _thread;
+    if (currentThread == null) return;
+    try {
+      final session = await _authSessionService.readSession();
+      if (session == null || session.token.trim().isEmpty) return;
+      final conversation = await _conversationApiService.fetchConversation(
+        session: session,
+        conversationId: widget.threadId,
+      );
+      if (!mounted) return;
+      final newMessages = conversation.messages
+          .map(
+            (m) => DemoConversationMessage(
+              id: m.id,
+              senderName: m.senderName,
+              body: m.body,
+              sentAt: m.createdAt ?? DateTime.now(),
+              fromRestaurant: m.fromRestaurant,
+            ),
+          )
+          .toList(growable: false);
+      // Only setState when there are genuinely new messages.
+      if (newMessages.length != currentThread.messages.length) {
+        setState(() {
+          _thread = currentThread.copyWith(
+            messages: newMessages,
+            lastMessage: conversation.previewText,
+          );
+        });
+        _scrollToBottom();
+        // Mark new incoming messages as read.
+        unawaited(
+          _conversationApiService.markRead(
+            session: session,
+            conversationId: widget.threadId,
+          ),
+        );
+      }
+    } catch (_) {
+      // Silent — polling errors must never interrupt the user.
+    }
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   DemoConversationThread _threadFromConversation(
@@ -7281,9 +7355,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
         );
         _isSending = false;
       });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Reply sent')));
+      _scrollToBottom();
     } catch (error) {
       if (!mounted) {
         return;
@@ -7354,17 +7426,28 @@ class _ConversationScreenState extends State<ConversationScreen> {
               children: [
                 Expanded(
                   child: ListView.separated(
+                    controller: _scrollController,
                     padding: const EdgeInsets.all(16),
                     itemCount: thread.messages.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 10),
+                    separatorBuilder: (_, idx) => const SizedBox(height: 10),
                     itemBuilder: (context, index) {
                       final message = thread.messages[index];
-                      final align = message.fromRestaurant
+                      // For customer view: customer's own messages (fromRestaurant==false)
+                      // go to the RIGHT. For restaurant view it is reversed.
+                      final isMine = widget.viewerIsCustomer
+                          ? !message.fromRestaurant
+                          : message.fromRestaurant;
+                      final align = isMine
                           ? Alignment.centerRight
                           : Alignment.centerLeft;
-                      final color = message.fromRestaurant
+                      // Mine = orange tint, theirs = neutral.
+                      final color = isMine
                           ? const Color(0xFFFFEFE8)
                           : const Color(0xFFF3F0EC);
+                      final crossAlign = isMine
+                          ? CrossAxisAlignment.end
+                          : CrossAxisAlignment.start;
+                      final timeStr = _formatTime(message.sentAt);
                       return Align(
                         alignment: align,
                         child: ConstrainedBox(
@@ -7376,7 +7459,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                               borderRadius: BorderRadius.circular(16),
                             ),
                             child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                              crossAxisAlignment: crossAlign,
                               children: [
                                 Text(
                                   message.senderName,
@@ -7386,6 +7469,14 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(message.body),
+                                const SizedBox(height: 4),
+                                Text(
+                                  timeStr,
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    color: Color(0xFF9E8E84),
+                                  ),
+                                ),
                               ],
                             ),
                           ),

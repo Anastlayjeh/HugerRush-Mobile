@@ -253,13 +253,6 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
             onBottomNavSelected: _handleBottomNavSelected,
           ),
           _ProfileTabBody(
-            userName: _customerProfileData.fullName,
-            userHandle: _userHandle,
-            userEmail: _customerProfileData.nullableEmail,
-            userAvatarUrl: _customerProfileData.nullableAvatarUrl,
-            userAvatarBytes: _customerProfileData.profilePhotoBytes,
-            accountLabel: _customerProfileData.resolvedAccountLabel,
-            savedPlaces: savedPlaces,
             followedRestaurants: followedRestaurantPosts,
             selectedBottomIndex: _selectedBottomIndex,
             onOpenMenu: _openProfileMenu,

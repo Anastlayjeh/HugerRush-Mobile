@@ -99,7 +99,7 @@ class LoyaltyApiService {
       session: session,
       method: 'POST',
       endpoint: '/v1/customer/loyalty/offers/$cleanedOfferId/redeem',
-      fallback: 'Could not redeem loyalty offer.',
+      fallback: 'Could not add loyalty offer to your cart.',
     );
     final pointsMap = _stringMap(payload['points']);
     final restaurant = _stringMap(payload['restaurant']);
@@ -264,27 +264,78 @@ class LoyaltyOffer {
   const LoyaltyOffer({
     required this.id,
     required this.restaurantId,
+    required this.restaurantName,
     required this.title,
     required this.description,
     required this.requiredPoints,
     required this.isActive,
+    this.rewardType,
+    this.freeMenuItemId,
+    this.freeMenuItemName,
+    this.freeMenuItemImageUrl,
+    this.freeMenuItemPrice,
+    this.freeMenuItemAvailable,
+    this.freeItemQuantity = 1,
+    this.discountPercentage,
+    this.discountAmount,
+    this.discountedPrice,
+    this.expiresAt,
+    this.conditions,
   });
 
   final String id;
   final String restaurantId;
+  final String restaurantName;
   final String title;
   final String description;
   final int requiredPoints;
   final bool isActive;
+  final String? rewardType;
+  final String? freeMenuItemId;
+  final String? freeMenuItemName;
+  final String? freeMenuItemImageUrl;
+  final double? freeMenuItemPrice;
+  final bool? freeMenuItemAvailable;
+  final int freeItemQuantity;
+  final double? discountPercentage;
+  final double? discountAmount;
+  final double? discountedPrice;
+  final DateTime? expiresAt;
+  final String? conditions;
+
+  bool get isFreeItem => rewardType == 'free_item' && freeMenuItemId != null;
 
   factory LoyaltyOffer.fromJson(Map<String, dynamic> json) {
+    final restaurant = _stringMap(json['restaurant']);
+    final menuItem = _stringMap(json['menu_item']);
+    final expiresAtRaw =
+        _readString(json['expires_at']) ?? _readString(json['expiry_date']);
     return LoyaltyOffer(
       id: _readString(json['id']) ?? '',
       restaurantId: _readString(json['restaurant_id']) ?? '',
+      restaurantName:
+          _readString(json['restaurant_name']) ??
+          _readString(restaurant['name']) ??
+          'Restaurant',
       title: _readString(json['title']) ?? 'Offer',
       description: _readString(json['description']) ?? '',
       requiredPoints: _readInt(json['required_points']) ?? 0,
       isActive: _readBool(json['is_active']) ?? true,
+      rewardType: _readString(json['reward_type']),
+      freeMenuItemId:
+          _readString(json['free_menu_item_id']) ??
+          _readString(json['menu_item_id']) ??
+          _readString(menuItem['id']),
+      freeMenuItemName: _readString(menuItem['name']),
+      freeMenuItemImageUrl: _readString(menuItem['image_url']),
+      freeMenuItemPrice: _readDouble(menuItem['price']),
+      freeMenuItemAvailable: _readBool(menuItem['is_available']),
+      freeItemQuantity: _readInt(json['free_item_quantity']) ?? 1,
+      discountPercentage: _readDouble(json['discount_percentage']),
+      discountAmount: _readDouble(json['discount_amount']),
+      discountedPrice: _readDouble(json['discounted_price']),
+      expiresAt: expiresAtRaw == null ? null : DateTime.tryParse(expiresAtRaw),
+      conditions: _readString(json['conditions']) ?? _readString(json['terms']),
     );
   }
 }
@@ -380,6 +431,16 @@ int? _readInt(dynamic value) {
   }
   if (value is String) {
     return int.tryParse(value.trim());
+  }
+  return null;
+}
+
+double? _readDouble(dynamic value) {
+  if (value is num) {
+    return value.toDouble();
+  }
+  if (value is String) {
+    return double.tryParse(value.trim());
   }
   return null;
 }

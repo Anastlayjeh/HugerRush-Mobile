@@ -12,6 +12,7 @@ class _MessagesSection extends StatefulWidget {
 
 class _MessagesSectionState extends State<_MessagesSection> {
   final _authSessionService = AuthSessionService();
+  final _searchController = TextEditingController();
   late final ConversationApiService _conversationApiService;
 
   List<DemoConversationThread> _threads = const <DemoConversationThread>[];
@@ -21,6 +22,7 @@ class _MessagesSectionState extends State<_MessagesSection> {
   Timer? _searchDebounce;
   bool _needsReplyOnly = false;
   bool _isLoading = true;
+  bool _isSearching = false;
   String? _error;
 
   @override
@@ -37,15 +39,20 @@ class _MessagesSectionState extends State<_MessagesSection> {
 
   @override
   void dispose() {
+    _searchController.dispose();
     _searchDebounce?.cancel();
     super.dispose();
   }
 
-  Future<void> _loadThreads({String? query}) async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
+  Future<void> _loadThreads({String? query, bool isSearch = false}) async {
+    if (isSearch) {
+      setState(() => _isSearching = true);
+    } else {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+    }
     try {
       final session = await _authSessionService.readSession();
       if (session == null || session.token.trim().isEmpty) {
@@ -65,15 +72,17 @@ class _MessagesSectionState extends State<_MessagesSection> {
             .map(_threadFromConversation)
             .toList(growable: false);
         _isLoading = false;
+        _isSearching = false;
       });
     } catch (error) {
       if (!mounted) {
         return;
       }
       setState(() {
-        _threads = const <DemoConversationThread>[];
+        if (!isSearch) _threads = const <DemoConversationThread>[];
         _isLoading = false;
-        _error = error.toString();
+        _isSearching = false;
+        if (!isSearch) _error = error.toString();
       });
     }
   }
@@ -150,7 +159,7 @@ class _MessagesSectionState extends State<_MessagesSection> {
       if (!mounted) {
         return;
       }
-      _loadThreads(query: value);
+      _loadThreads(query: value, isSearch: true);
     });
   }
 
@@ -238,6 +247,7 @@ class _MessagesSectionState extends State<_MessagesSection> {
                     border: Border.all(color: const Color(0xFFE9D7C8)),
                   ),
                   child: TextField(
+                    controller: _searchController,
                     onChanged: _onSearchChanged,
                     decoration: const InputDecoration(
                       border: InputBorder.none,
@@ -249,6 +259,15 @@ class _MessagesSectionState extends State<_MessagesSection> {
                     ),
                   ),
                 ),
+                if (_isSearching)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: LinearProgressIndicator(
+                      backgroundColor: Color(0xFFFFE8DD),
+                      color: Color(0xFFFF7E4D),
+                      minHeight: 2,
+                    ),
+                  ),
                 SizedBox(
                   height: _clampDouble(12 * widget.metrics.scale, 8, 12),
                 ),

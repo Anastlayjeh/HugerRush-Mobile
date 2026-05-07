@@ -670,6 +670,9 @@ class _OrdersTabBody extends StatelessWidget {
             deliveryFee: cart.deliveryFee,
             totalLbp: cart.totalLbp,
             loyaltyPointsEstimate: cart.loyaltyPointsEstimate,
+            loyaltyPointsUsed: cart.loyaltyPointsUsed,
+            discount: cart.discount,
+            appliedLoyaltyOffer: cart.loyaltyOffer,
           ),
         ),
       );
@@ -1664,6 +1667,9 @@ class _OrdersCartListScreen extends StatelessWidget {
                                     totalLbp: cart.totalLbp,
                                     loyaltyPointsEstimate:
                                         cart.loyaltyPointsEstimate,
+                                    loyaltyPointsUsed: cart.loyaltyPointsUsed,
+                                    discount: cart.discount,
+                                    appliedLoyaltyOffer: cart.loyaltyOffer,
                                   ),
                                 ),
                               );
@@ -1780,6 +1786,9 @@ class _OrdersCartScreen extends StatefulWidget {
     this.deliveryFee = 0,
     this.totalLbp = 0,
     this.loyaltyPointsEstimate = 0,
+    this.loyaltyPointsUsed = 0,
+    this.discount = 0,
+    this.appliedLoyaltyOffer,
   });
 
   final List<_CartLineItemData> initialItems;
@@ -1789,6 +1798,9 @@ class _OrdersCartScreen extends StatefulWidget {
   final double deliveryFee;
   final int totalLbp;
   final int loyaltyPointsEstimate;
+  final int loyaltyPointsUsed;
+  final double discount;
+  final CartAppliedLoyaltyOffer? appliedLoyaltyOffer;
 
   @override
   State<_OrdersCartScreen> createState() => _OrdersCartScreenState();
@@ -1800,6 +1812,9 @@ class _OrdersCartScreenState extends State<_OrdersCartScreen> {
   late String _restaurantId;
   late String _cartId;
   late double _deliveryFee;
+  late int _loyaltyPointsUsed;
+  late double _discount;
+  late CartAppliedLoyaltyOffer? _appliedLoyaltyOffer;
   late final AuthSessionService _authSessionService;
   late final CustomerCartApiService _cartApiService;
   bool _isUpdatingCart = false;
@@ -1826,6 +1841,9 @@ class _OrdersCartScreenState extends State<_OrdersCartScreen> {
         : widget.restaurantId.trim();
     _cartId = widget.cartId.trim();
     _deliveryFee = widget.deliveryFee;
+    _loyaltyPointsUsed = widget.loyaltyPointsUsed;
+    _discount = widget.discount;
+    _appliedLoyaltyOffer = widget.appliedLoyaltyOffer;
 
     _items = widget.initialItems
         .map(
@@ -1851,7 +1869,8 @@ class _OrdersCartScreenState extends State<_OrdersCartScreen> {
     (total, item) => total + (item.price * item.quantity),
   );
 
-  double get _total => _subtotal + _deliveryFee;
+  double get _total =>
+      (_subtotal + _deliveryFee - _discount).clamp(0, double.infinity);
 
   String _formatMoney(double value) => '\$${value.toStringAsFixed(2)}';
 
@@ -1993,6 +2012,9 @@ class _OrdersCartScreenState extends State<_OrdersCartScreen> {
           totalItems: _totalItems,
           totalLbp: (_total * 90000).round(),
           loyaltyPointsEstimate: (_total.floor() * 20),
+          loyaltyPointsUsed: _loyaltyPointsUsed,
+          discount: _discount,
+          appliedLoyaltyOffer: _appliedLoyaltyOffer,
         ),
       ),
     );
@@ -2060,10 +2082,12 @@ class _OrdersCartScreenState extends State<_OrdersCartScreen> {
                         ),
                       ),
                       const SizedBox(height: 6),
-                      const Text(
-                        'Add menu items to continue to checkout.',
+                      Text(
+                        _appliedLoyaltyOffer == null
+                            ? 'Add menu items to continue to checkout.'
+                            : 'Offer "${_appliedLoyaltyOffer!.title}" is applied. Add menu items from this restaurant to continue.',
                         textAlign: TextAlign.center,
-                        style: TextStyle(
+                        style: const TextStyle(
                           color: Color(0xFF7D6C60),
                           fontWeight: FontWeight.w600,
                         ),
@@ -2111,6 +2135,39 @@ class _OrdersCartScreenState extends State<_OrdersCartScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
+                    if (_appliedLoyaltyOffer != null) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF2FAF7),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFD5ECE3)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _appliedLoyaltyOffer!.title,
+                              style: const TextStyle(
+                                color: Color(0xFF1C3A34),
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Applied with ${_loyaltyPointsUsed} points',
+                              style: const TextStyle(
+                                color: Color(0xFF2F8A7E),
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(14),
@@ -2137,6 +2194,20 @@ class _OrdersCartScreenState extends State<_OrdersCartScreen> {
                             label: 'Delivery fee',
                             value: _formatMoney(_deliveryFee),
                           ),
+                          if (_loyaltyPointsUsed > 0) ...[
+                            const SizedBox(height: 8),
+                            _OrdersPriceRow(
+                              label: 'Loyalty points used',
+                              value: '$_loyaltyPointsUsed pts',
+                            ),
+                          ],
+                          if (_discount > 0) ...[
+                            const SizedBox(height: 8),
+                            _OrdersPriceRow(
+                              label: 'Discount',
+                              value: '-${_formatMoney(_discount)}',
+                            ),
+                          ],
                           const SizedBox(height: 10),
                           const Divider(height: 1, color: Color(0xFFEADBCB)),
                           const SizedBox(height: 10),
@@ -2439,6 +2510,9 @@ class _OrdersCheckoutScreen extends StatefulWidget {
     required this.totalItems,
     this.totalLbp = 0,
     this.loyaltyPointsEstimate = 0,
+    this.loyaltyPointsUsed = 0,
+    this.discount = 0,
+    this.appliedLoyaltyOffer,
   });
 
   final List<_CartLineItemData> items;
@@ -2450,6 +2524,9 @@ class _OrdersCheckoutScreen extends StatefulWidget {
   final int totalItems;
   final int totalLbp;
   final int loyaltyPointsEstimate;
+  final int loyaltyPointsUsed;
+  final double discount;
+  final CartAppliedLoyaltyOffer? appliedLoyaltyOffer;
 
   @override
   State<_OrdersCheckoutScreen> createState() => _OrdersCheckoutScreenState();
@@ -2502,7 +2579,11 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
     _phoneController.text = phone;
   }
 
-  double get _totalUsd => widget.subtotal + widget.deliveryFee;
+  double get _totalUsd =>
+      (widget.subtotal + widget.deliveryFee - widget.discount).clamp(
+        0,
+        double.infinity,
+      );
 
   int get _totalLbp => widget.totalLbp > 0
       ? widget.totalLbp
@@ -2670,8 +2751,9 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
           scheduledLabel: '',
           changeRequest: '',
           orderNotes: _notesController.text.trim(),
-          useLoyalty: false,
+          useLoyalty: widget.appliedLoyaltyOffer != null,
           saveChangeInWallet: false,
+          loyaltyOfferId: widget.appliedLoyaltyOffer?.id,
           subtotal: widget.subtotal,
           deliveryFee: widget.deliveryFee,
           serviceFee: 0,
@@ -2864,6 +2946,19 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
                 title: 'Receipt Details',
                 child: Column(
                   children: [
+                    if (widget.appliedLoyaltyOffer != null) ...[
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Applied offer: ${widget.appliedLoyaltyOffer!.title}',
+                          style: const TextStyle(
+                            color: Color(0xFF2F8A7E),
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                     _OrdersPriceRow(
                       label: 'Subtotal',
                       value: _formatUsd(widget.subtotal),
@@ -2876,10 +2971,15 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
                     const SizedBox(height: 8),
                     _OrdersPriceRow(
                       label: 'Loyalty points used',
-                      value: '0 pts',
+                      value: '${widget.loyaltyPointsUsed} pts',
                     ),
                     const SizedBox(height: 8),
-                    _OrdersPriceRow(label: 'Discount', value: _formatUsd(0)),
+                    _OrdersPriceRow(
+                      label: 'Discount',
+                      value: widget.discount > 0
+                          ? '-${_formatUsd(widget.discount)}'
+                          : _formatUsd(0),
+                    ),
                     const SizedBox(height: 10),
                     const Divider(height: 1, color: Color(0xFFEADBCB)),
                     const SizedBox(height: 10),
@@ -4998,8 +5098,8 @@ _OrderReceiptData _orderReceiptFromAppOrder(AppOrder order) {
     deliveryFee: order.deliveryFee ?? 0,
     serviceFee: 0,
     discountPercent: 0,
-    loyaltyPointsUsed: 0,
-    loyaltyDiscountUsd: 0,
+    loyaltyPointsUsed: order.loyaltyPointsUsed,
+    loyaltyDiscountUsd: order.discount,
     items: lineItems.isEmpty
         ? <_OrderReceiptLineItemData>[
             _OrderReceiptLineItemData(

@@ -234,6 +234,7 @@ class CustomerOrderDraft {
     this.saveChangeInWallet = false,
     this.branchId,
     this.cartId,
+    this.loyaltyOfferId,
   });
 
   final String restaurantId;
@@ -254,6 +255,7 @@ class CustomerOrderDraft {
   final bool saveChangeInWallet;
   final String? branchId;
   final String? cartId;
+  final String? loyaltyOfferId;
 
   bool get canSyncCart =>
       (cartId == null || cartId!.trim().isEmpty) &&
@@ -268,6 +270,8 @@ class CustomerOrderDraft {
       if (restaurantId.trim().isNotEmpty) 'restaurant_id': restaurantId.trim(),
       if (branchId != null && branchId!.trim().isNotEmpty)
         'branch_id': branchId!.trim(),
+      if (loyaltyOfferId != null && loyaltyOfferId!.trim().isNotEmpty)
+        'loyalty_offer_id': loyaltyOfferId!.trim(),
       'delivery_address': address.toJson(),
       'delivery_address_label': address.label,
       'delivery_phone': phone.trim(),
@@ -380,6 +384,9 @@ class AppOrder {
     required this.total,
     required this.subtotal,
     required this.deliveryFee,
+    required this.discount,
+    required this.loyaltyPointsUsed,
+    required this.loyaltyOffer,
     required this.channelLabel,
     required this.paymentMethodLabel,
     required this.etaLabel,
@@ -401,6 +408,9 @@ class AppOrder {
   final double? total;
   final double? subtotal;
   final double? deliveryFee;
+  final double discount;
+  final int loyaltyPointsUsed;
+  final OrderLoyaltyOffer? loyaltyOffer;
   final String channelLabel;
   final String paymentMethodLabel;
   final String etaLabel;
@@ -510,6 +520,9 @@ class AppOrder {
       ]),
       subtotal: _firstDouble(json, const ['subtotal']),
       deliveryFee: _firstDouble(json, const ['delivery_fee', 'fees']),
+      discount: _firstDouble(json, const ['discount', 'loyalty_discount']) ?? 0,
+      loyaltyPointsUsed: _firstInt(json, const ['loyalty_points_used']) ?? 0,
+      loyaltyOffer: _parseOrderLoyaltyOffer(json['loyalty_offer']),
       channelLabel: _labelFromSnakeCase(deliveryMode),
       paymentMethodLabel: paymentMethod.isEmpty
           ? 'Payment not set'
@@ -535,6 +548,40 @@ class AppOrder {
       statusHistory: statusHistory,
     );
   }
+}
+
+class OrderLoyaltyOffer {
+  const OrderLoyaltyOffer({
+    required this.id,
+    required this.title,
+    required this.requiredPoints,
+    this.description = '',
+    this.rewardType,
+    this.conditions,
+    this.expiresAt,
+    this.menuItemId,
+    this.menuItemName,
+    this.menuItemPrice,
+    this.discountPercentage,
+    this.discountAmount,
+    this.discountedPrice,
+    this.freeItemQuantity = 1,
+  });
+
+  final String id;
+  final String title;
+  final int requiredPoints;
+  final String description;
+  final String? rewardType;
+  final String? conditions;
+  final DateTime? expiresAt;
+  final String? menuItemId;
+  final String? menuItemName;
+  final double? menuItemPrice;
+  final double? discountPercentage;
+  final double? discountAmount;
+  final double? discountedPrice;
+  final int freeItemQuantity;
 }
 
 class AppOrderStatusEvent {
@@ -817,6 +864,35 @@ DateTime? _firstDate(Map<String, dynamic> map, List<String> keys) {
     }
   }
   return null;
+}
+
+OrderLoyaltyOffer? _parseOrderLoyaltyOffer(dynamic value) {
+  if (value is! Map) {
+    return null;
+  }
+  final data = _stringMap(value);
+  if (data.isEmpty) {
+    return null;
+  }
+  final menuItem = _stringMap(data['menu_item']);
+  final expiresAtRaw = _readString(data['expires_at']);
+  return OrderLoyaltyOffer(
+    id: _readString(data['id']) ?? '',
+    title: _readString(data['title']) ?? 'Offer',
+    requiredPoints: _readInt(data['required_points']) ?? 0,
+    description: _readString(data['description']) ?? '',
+    rewardType: _readString(data['reward_type']),
+    conditions: _readString(data['conditions']) ?? _readString(data['terms']),
+    expiresAt: expiresAtRaw == null ? null : DateTime.tryParse(expiresAtRaw),
+    menuItemId:
+        _readString(data['menu_item_id']) ?? _readString(menuItem['id']),
+    menuItemName: _readString(menuItem['name']),
+    menuItemPrice: _readDouble(menuItem['price']),
+    discountPercentage: _readDouble(data['discount_percentage']),
+    discountAmount: _readDouble(data['discount_amount']),
+    discountedPrice: _readDouble(data['discounted_price']),
+    freeItemQuantity: _readInt(data['free_item_quantity']) ?? 1,
+  );
 }
 
 String? _readString(dynamic value) {

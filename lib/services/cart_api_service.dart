@@ -153,6 +153,10 @@ class CustomerCart {
     required this.total,
     required this.totalItems,
     this.loyaltyPointsEstimate = 0,
+    this.loyaltyPointsUsed = 0,
+    this.discount = 0,
+    this.loyaltyOfferId,
+    this.loyaltyOffer,
     this.totalLbp = 0,
     this.deliveryFee = 0,
   });
@@ -166,6 +170,10 @@ class CustomerCart {
   final double total;
   final int totalItems;
   final int loyaltyPointsEstimate;
+  final int loyaltyPointsUsed;
+  final double discount;
+  final String? loyaltyOfferId;
+  final CartAppliedLoyaltyOffer? loyaltyOffer;
   final int totalLbp;
   final double deliveryFee;
 
@@ -190,7 +198,14 @@ class CustomerCart {
       fees: _readDouble(json['fees']) ?? _readDouble(json['delivery_fee']) ?? 0,
       deliveryFee:
           _readDouble(json['delivery_fee']) ?? _readDouble(json['fees']) ?? 0,
-      total: _readDouble(json['total']) ?? 0,
+      total:
+          _readDouble(json['total']) ??
+          ((_readDouble(json['subtotal']) ??
+                  _sum(items, (item) => item.lineTotal)) +
+              (_readDouble(json['delivery_fee']) ??
+                  _readDouble(json['fees']) ??
+                  0) -
+              (_readDouble(json['discount']) ?? 0)),
       totalItems:
           _readInt(json['total_items']) ??
           items.fold<int>(0, (sum, item) => sum + item.quantity),
@@ -198,9 +213,55 @@ class CustomerCart {
           _readInt(json['loyalty_points_estimate']) ??
           _readInt(json['loyalty_points_earned']) ??
           0,
+      loyaltyPointsUsed: _readInt(json['loyalty_points_used']) ?? 0,
+      discount: _readDouble(json['discount']) ?? 0,
+      loyaltyOfferId:
+          _readString(json['loyalty_offer_id']) ??
+          _readString(_stringMap(json['loyalty_offer'])['id']),
+      loyaltyOffer: _parseLoyaltyOffer(json['loyalty_offer']),
       totalLbp: _readInt(json['total_lbp']) ?? 0,
     );
   }
+}
+
+class CartAppliedLoyaltyOffer {
+  const CartAppliedLoyaltyOffer({
+    required this.id,
+    required this.title,
+    required this.description,
+    required this.requiredPoints,
+    required this.isActive,
+    this.rewardType,
+    this.conditions,
+    this.expiresAt,
+    this.menuItemId,
+    this.menuItemName,
+    this.menuItemImageUrl,
+    this.menuItemPrice,
+    this.menuItemAvailable,
+    this.freeItemQuantity = 1,
+    this.discountPercentage,
+    this.discountAmount,
+    this.discountedPrice,
+  });
+
+  final String id;
+  final String title;
+  final String description;
+  final int requiredPoints;
+  final bool isActive;
+  final String? rewardType;
+  final String? conditions;
+  final DateTime? expiresAt;
+  final String? menuItemId;
+  final String? menuItemName;
+  final String? menuItemImageUrl;
+  final double? menuItemPrice;
+  final bool? menuItemAvailable;
+  final int freeItemQuantity;
+  final double? discountPercentage;
+  final double? discountAmount;
+  final double? discountedPrice;
 }
 
 class CustomerCartItem {
@@ -382,6 +443,35 @@ bool? _readBool(dynamic value) {
     }
   }
   return null;
+}
+
+CartAppliedLoyaltyOffer? _parseLoyaltyOffer(dynamic value) {
+  final data = _stringMap(value);
+  if (data.isEmpty) {
+    return null;
+  }
+  final menuItem = _stringMap(data['menu_item']);
+  final expiresAtRaw = _readString(data['expires_at']);
+  return CartAppliedLoyaltyOffer(
+    id: _readString(data['id']) ?? '',
+    title: _readString(data['title']) ?? 'Offer',
+    description: _readString(data['description']) ?? '',
+    requiredPoints: _readInt(data['required_points']) ?? 0,
+    isActive: _readBool(data['is_active']) ?? true,
+    rewardType: _readString(data['reward_type']),
+    conditions: _readString(data['conditions']) ?? _readString(data['terms']),
+    expiresAt: expiresAtRaw == null ? null : DateTime.tryParse(expiresAtRaw),
+    menuItemId:
+        _readString(data['menu_item_id']) ?? _readString(menuItem['id']),
+    menuItemName: _readString(menuItem['name']),
+    menuItemImageUrl: _readString(menuItem['image_url']),
+    menuItemPrice: _readDouble(menuItem['price']),
+    menuItemAvailable: _readBool(menuItem['is_available']),
+    freeItemQuantity: _readInt(data['free_item_quantity']) ?? 1,
+    discountPercentage: _readDouble(data['discount_percentage']),
+    discountAmount: _readDouble(data['discount_amount']),
+    discountedPrice: _readDouble(data['discounted_price']),
+  );
 }
 
 double _sum<T>(List<T> items, double Function(T item) value) {

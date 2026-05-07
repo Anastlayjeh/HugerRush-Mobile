@@ -116,14 +116,20 @@ class _CustomerMessagesSection extends StatefulWidget {
 
 class _CustomerMessagesSectionState extends State<_CustomerMessagesSection> {
   final _authSessionService = AuthSessionService();
+  // TextEditingController keeps the search field text alive across rebuilds.
+  final _searchController = TextEditingController();
   late final ConversationApiService _conversationApiService;
+  late final CustomerRestaurantApiService _restaurantApiService;
 
   List<DemoConversationThread> _threads = const <DemoConversationThread>[];
+  List<CustomerRestaurantItem> _suggestedRestaurants = const <CustomerRestaurantItem>[];
   MessageFilterType _selectedFilter = MessageFilterType.all;
   String? _selectedThreadId;
   String _searchQuery = '';
   Timer? _searchDebounce;
   bool _isLoading = true;
+  // Separate flag so search re-fetches don't blank the whole list.
+  bool _isSearching = false;
   String? _error;
 
   @override
@@ -135,20 +141,33 @@ class _CustomerMessagesSectionState extends State<_CustomerMessagesSection> {
         authSessionService: _authSessionService,
       ),
     );
+    _restaurantApiService = CustomerRestaurantApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+      ),
+    );
     _loadThreads();
   }
 
   @override
   void dispose() {
+    _searchController.dispose();
     _searchDebounce?.cancel();
     super.dispose();
   }
 
-  Future<void> _loadThreads({String? query}) async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
+  Future<void> _loadThreads({String? query, bool isSearch = false}) async {
+    if (isSearch) {
+      // For search re-fetches keep the existing list visible and show only
+      // a subtle indicator so the user doesn't lose the search field.
+      setState(() => _isSearching = true);
+    } else {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+    }
     try {
       final session = await _authSessionService.readSession();
       if (session == null || session.token.trim().isEmpty) {
@@ -160,6 +179,24 @@ class _CustomerMessagesSectionState extends State<_CustomerMessagesSection> {
         session: session,
         query: query ?? _searchQuery,
       );
+
+      List<CustomerRestaurantItem> suggestions = [];
+      if (isSearch && _searchQuery.trim().isNotEmpty) {
+        try {
+          final restaurantPage = await _restaurantApiService.fetchRestaurants(
+            session: session,
+            query: _searchQuery.trim(),
+          );
+          // Filter out restaurants that already have an active conversation
+          final activeIds = conversations.map((c) => c.restaurantId).toSet();
+          suggestions = restaurantPage.restaurants
+              .where((r) => !activeIds.contains(r.id))
+              .toList();
+        } catch (e) {
+          debugPrint('Failed to fetch restaurant suggestions: $e');
+        }
+      }
+
       if (!mounted) {
         return;
       }
@@ -167,7 +204,9 @@ class _CustomerMessagesSectionState extends State<_CustomerMessagesSection> {
         _threads = conversations
             .map(_threadFromConversation)
             .toList(growable: false);
+        _suggestedRestaurants = suggestions;
         _isLoading = false;
+        _isSearching = false;
         _error = null;
       });
     } catch (error) {
@@ -175,9 +214,14 @@ class _CustomerMessagesSectionState extends State<_CustomerMessagesSection> {
         return;
       }
       setState(() {
-        _threads = const <DemoConversationThread>[];
+        if (!isSearch) {
+          _threads = const <DemoConversationThread>[];
+          _suggestedRestaurants = const <CustomerRestaurantItem>[];
+        }
         _isLoading = false;
-        _error = error.toString();
+        _isSearching = false;
+        // Don't overlay an error during a background search re-fetch.
+        if (!isSearch) _error = error.toString();
       });
     }
   }
@@ -214,14 +258,6 @@ class _CustomerMessagesSectionState extends State<_CustomerMessagesSection> {
           )
           .toList(growable: false),
     );
-  }
-
-  String get _senderName {
-    final cleaned = widget.userName.trim();
-    if (cleaned.isEmpty) {
-      return 'You';
-    }
-    return cleaned;
   }
 
   List<DemoConversationThread> get _visibleThreads {
@@ -261,7 +297,7 @@ class _CustomerMessagesSectionState extends State<_CustomerMessagesSection> {
       if (!mounted) {
         return;
       }
-      _loadThreads(query: value);
+      _loadThreads(query: value, isSearch: true);
     });
   }
 
@@ -283,8 +319,10 @@ class _CustomerMessagesSectionState extends State<_CustomerMessagesSection> {
       MaterialPageRoute<void>(
         builder: (_) => ConversationScreen(
           threadId: thread.id,
-          restaurantName: _senderName,
+          restaurantName: _counterpartyName(thread),
           openComposerOnStart: openComposer,
+          // Customer view: the customer's messages appear on the right.
+          viewerIsCustomer: true,
         ),
       ),
     );
@@ -294,10 +332,43 @@ class _CustomerMessagesSectionState extends State<_CustomerMessagesSection> {
     await _loadThreads();
   }
 
+  Future<void> _openNewConversation(CustomerRestaurantItem restaurant) async {
+    setState(() => _isSearching = true);
+    try {
+      final session = await _authSessionService.readSession();
+      if (session == null || session.token.trim().isEmpty) {
+        throw const ConversationApiException('Please log in again.');
+      }
+      final conversation = await _conversationApiService.startConversation(
+        session: session,
+        restaurantId: restaurant.id,
+      );
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => ConversationScreen(
+            threadId: conversation.id,
+            restaurantName: conversation.restaurantName,
+            viewerIsCustomer: true,
+          ),
+        ),
+      );
+      _loadThreads();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
+    } finally {
+      if (mounted) setState(() => _isSearching = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final priorityThreads = _threads.where((item) => item.priority).toList();
     final visibleThreads = _visibleThreads;
+    final suggestions = _suggestedRestaurants;
 
     return RefreshIndicator(
       color: const Color(0xFFFF7E4D),
@@ -341,6 +412,7 @@ class _CustomerMessagesSectionState extends State<_CustomerMessagesSection> {
                     border: Border.all(color: const Color(0xFFE9D7C8)),
                   ),
                   child: TextField(
+                    controller: _searchController,
                     onChanged: _onSearchChanged,
                     decoration: const InputDecoration(
                       border: InputBorder.none,
@@ -348,10 +420,20 @@ class _CustomerMessagesSectionState extends State<_CustomerMessagesSection> {
                         Icons.search_rounded,
                         color: Color(0xFF8D7D71),
                       ),
-                      hintText: 'Search restaurants or customers',
+                      hintText: 'Search restaurants or conversations',
                     ),
                   ),
                 ),
+                // Subtle progress bar during background search re-fetch.
+                if (_isSearching)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: LinearProgressIndicator(
+                      backgroundColor: Color(0xFFFFE8DD),
+                      color: Color(0xFFFF7E4D),
+                      minHeight: 2,
+                    ),
+                  ),
                 SizedBox(
                   height: _clampDouble(12 * widget.metrics.scale, 8, 12),
                 ),
@@ -407,8 +489,130 @@ class _CustomerMessagesSectionState extends State<_CustomerMessagesSection> {
                       ),
                     );
                   }),
+
+                if (suggestions.isNotEmpty) ...[
+                  SizedBox(
+                    height: _clampDouble(24 * widget.metrics.scale, 18, 24),
+                  ),
+                  Text(
+                    'Start a new chat',
+                    style: TextStyle(
+                      color: const Color(0xFF1F1B19),
+                      fontSize: _clampDouble(20 * widget.metrics.scale, 16, 20),
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  SizedBox(
+                    height: _clampDouble(12 * widget.metrics.scale, 8, 12),
+                  ),
+                  ...List.generate(suggestions.length, (index) {
+                    final restaurant = suggestions[index];
+                    return Padding(
+                      padding: EdgeInsets.only(
+                        bottom: index == suggestions.length - 1
+                            ? _clampDouble(6 * widget.metrics.scale, 4, 6)
+                            : _clampDouble(10 * widget.metrics.scale, 8, 10),
+                      ),
+                      child: _NewChatRestaurantCard(
+                        metrics: widget.metrics,
+                        restaurant: restaurant,
+                        onTap: () => _openNewConversation(restaurant),
+                      ),
+                    );
+                  }),
+                ],
               ],
             ),
+    );
+  }
+}
+
+class _NewChatRestaurantCard extends StatelessWidget {
+  const _NewChatRestaurantCard({
+    required this.metrics,
+    required this.restaurant,
+    required this.onTap,
+  });
+
+  final _ResponsiveMetrics metrics;
+  final CustomerRestaurantItem restaurant;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: EdgeInsets.all(_clampDouble(12 * metrics.scale, 10, 12)),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0xFFE9D7C8)),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF231A16).withOpacity(0.04),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: _clampDouble(50 * metrics.scale, 40, 50),
+              height: _clampDouble(50 * metrics.scale, 40, 50),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFEFE8),
+                borderRadius: BorderRadius.circular(14),
+                image: restaurant.profilePhotoUrl.isNotEmpty
+                    ? DecorationImage(
+                        image: NetworkImage(restaurant.profilePhotoUrl),
+                        fit: BoxFit.cover,
+                      )
+                    : null,
+              ),
+              child: restaurant.profilePhotoUrl.isEmpty
+                  ? Icon(
+                      Icons.restaurant_rounded,
+                      color: const Color(0xFFFF7E4D),
+                      size: _clampDouble(24 * metrics.scale, 20, 24),
+                    )
+                  : null,
+            ),
+            SizedBox(width: _clampDouble(12 * metrics.scale, 10, 12)),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    restaurant.name,
+                    style: TextStyle(
+                      color: const Color(0xFF1F1B19),
+                      fontSize: _clampDouble(16 * metrics.scale, 14, 16),
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  SizedBox(height: _clampDouble(2 * metrics.scale, 2, 2)),
+                  Text(
+                    restaurant.categoryLabel,
+                    style: TextStyle(
+                      color: const Color(0xFF8F7F73),
+                      fontSize: _clampDouble(12 * metrics.scale, 10, 12),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.add_comment_rounded,
+              color: const Color(0xFFFF7E4D),
+              size: _clampDouble(22 * metrics.scale, 18, 22),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
