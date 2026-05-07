@@ -237,13 +237,20 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       if (!mounted) {
         return;
       }
+      final hasGlobalFeedVideos = visibleItems.isNotEmpty;
       setState(() {
         _uploadedVideos
           ..clear()
           ..addAll(ownerVideos.map(_uploadedVideoFromApiItem));
-        _replaceFeedVideos(visibleItems);
+        if (hasGlobalFeedVideos) {
+          _replaceFeedVideos(visibleItems);
+        } else {
+          _replaceFeedVideosFromOwnerVideos(ownerVideos);
+        }
         _isLoadingFeedVideos = false;
-        _feedVideosError = null;
+        _feedVideosError = _feedVideos.isEmpty
+            ? _emptyFeedMessage()
+            : null;
       });
     } catch (error) {
       debugPrint('Restaurant global feed refresh failed: $error');
@@ -254,9 +261,11 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         _uploadedVideos
           ..clear()
           ..addAll(ownerVideos.map(_uploadedVideoFromApiItem));
-        _replaceFeedVideos(const <CustomerVideoFeedItem>[]);
+        _replaceFeedVideosFromOwnerVideos(ownerVideos);
         _isLoadingFeedVideos = false;
-        _feedVideosError = 'Unable to load feed videos. Please try again.';
+        _feedVideosError = _feedVideos.isEmpty
+            ? 'Unable to load feed videos. Please try again.'
+            : null;
       });
     }
   }
@@ -279,7 +288,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     return item.viewerState.isFollowingRestaurant;
   }
 
-  void _replaceFeedVideos(List<CustomerVideoFeedItem> videos) {
+  void _resetFeedVideosState() {
     _videoPlaybackSyncVersion++;
     for (final controller in _videoControllers) {
       controller.dispose();
@@ -292,6 +301,10 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     _isVideoHoldActive = false;
     _videoHoldAction = _VideoHoldAction.none;
     _isVideoManuallyPaused = false;
+  }
+
+  void _replaceFeedVideos(List<CustomerVideoFeedItem> videos) {
+    _resetFeedVideosState();
 
     for (final item in videos) {
       if (!_isFeedItemVisibleForSelectedTopTab(item)) {
@@ -304,6 +317,31 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       _videoControllers.add(_buildFeedVideoController(video));
       _videoErrorLogged.add(false);
     }
+  }
+
+  void _replaceFeedVideosFromOwnerVideos(List<RestaurantVideoItem> videos) {
+    _resetFeedVideosState();
+    final fallbackVideos = _ownerVideosForFeed(videos);
+    for (final item in fallbackVideos) {
+      final video = _FeedVideoPostData.fromOwnerVideo(item);
+      final post = _postFromOwnerVideoItem(item, postId: video.postId);
+      _feedVideos.add(video);
+      _feedPostsById[video.postId] = post;
+      _videoControllers.add(_buildFeedVideoController(video));
+      _videoErrorLogged.add(false);
+    }
+  }
+
+  List<RestaurantVideoItem> _ownerVideosForFeed(List<RestaurantVideoItem> videos) {
+    final published = videos.where((video) {
+      return video.canAppearPublished && video.playbackUrl.trim().isNotEmpty;
+    }).toList(growable: false);
+    if (published.isNotEmpty) {
+      return published;
+    }
+    return videos.where((video) {
+      return video.playbackUrl.trim().isNotEmpty;
+    }).toList(growable: false);
   }
 
   VideoPlayerController _buildFeedVideoController(_FeedVideoPostData video) {
@@ -393,6 +431,40 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       thumbnailUrl: item.thumbnailUrl,
       previewUrl: item.streamPreviewUrl,
       shareCount: item.stats.sharesCount,
+    );
+  }
+
+  DemoFeedPost _postFromOwnerVideoItem(
+    RestaurantVideoItem item, {
+    required String postId,
+  }) {
+    final restaurantName = _restaurantName;
+    final title = item.title.trim();
+    final caption = item.description.trim().isNotEmpty
+        ? item.description.trim()
+        : (title.isNotEmpty ? title : 'Restaurant video');
+    final tags = _profileInfo.cuisineSummary.trim().isNotEmpty
+        ? _profileInfo.cuisineSummary
+        : _feedTagFromName(restaurantName);
+    final thumbnailUrl = item.thumbnailUrl.trim();
+    final previewUrl = item.streamPreviewUrl.trim();
+    return DemoFeedPost(
+      id: postId,
+      restaurantName: restaurantName,
+      restaurantHandle: _profileInfo.handle,
+      followersCount: item.viewsCount,
+      caption: caption,
+      tags: tags,
+      audioLabel: '',
+      rating: _ratingValueFromLabel(_profileInfo.ratingLabel),
+      likeCount: item.likesCount,
+      commentCount: 0,
+      isLiked: false,
+      isFollowing: true,
+      restaurantId: _profileInfo.id,
+      thumbnailUrl: thumbnailUrl.isEmpty ? null : thumbnailUrl,
+      previewUrl: previewUrl.isEmpty ? null : previewUrl,
+      shareCount: item.sharesCount,
     );
   }
 
@@ -1019,6 +1091,9 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     setState(() => _selectedBottomIndex = index);
     if (index == 0) {
       unawaited(_syncVideoPlayback());
+      if (_feedVideos.isEmpty && !_isLoadingFeedVideos) {
+        unawaited(_refreshRestaurantVideos());
+      }
     } else {
       _pauseAllFeedVideos();
     }
@@ -2099,6 +2174,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         _selectedProfileTabIndex = 0;
         _isCreatingPost = false;
       });
+      unawaited(_refreshRestaurantVideos());
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -2165,6 +2241,17 @@ class _FeedVideoPostData {
     return _FeedVideoPostData(
       videoUrl: item.playbackUrl,
       postId: item.id,
+      thumbnailUrl: item.thumbnailUrl,
+    );
+  }
+
+  factory _FeedVideoPostData.fromOwnerVideo(RestaurantVideoItem item) {
+    final postId = item.id.trim();
+    return _FeedVideoPostData(
+      videoUrl: item.playbackUrl,
+      postId: postId.isEmpty
+          ? 'restaurant-owner-video-${item.createdAt?.millisecondsSinceEpoch ?? DateTime.now().millisecondsSinceEpoch}'
+          : postId,
       thumbnailUrl: item.thumbnailUrl,
     );
   }
