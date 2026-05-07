@@ -158,6 +158,114 @@ class CustomerRestaurantApiService {
         .toList(growable: false);
   }
 
+  Future<List<CustomerRestaurantVideoItem>> fetchRestaurantVideos({
+    required AuthSession session,
+    required String restaurantId,
+    int page = 1,
+    int perPage = 20,
+  }) async {
+    final cleanedRestaurantId = restaurantId.trim();
+    if (cleanedRestaurantId.isEmpty) {
+      return const <CustomerRestaurantVideoItem>[];
+    }
+
+    final result = await _apiClient.request(
+      session: session,
+      method: 'GET',
+      endpoint: _endpoint(
+        '/v1/customer/restaurants/$cleanedRestaurantId/videos',
+        <String, String>{
+          'page': page.toString(),
+          'per_page': perPage.clamp(1, 50).toString(),
+        },
+      ),
+    );
+    final payload = ApiClient.decodeMap(result.response.body);
+    _throwForFailure(
+      result.response.statusCode,
+      payload,
+      fallback: 'Failed to load restaurant videos.',
+    );
+
+    return _extractList(
+      payload,
+    ).map(CustomerRestaurantVideoItem.fromJson).toList(growable: false);
+  }
+
+  Future<List<CustomerRestaurantReviewItem>> fetchRestaurantReviews({
+    required AuthSession session,
+    required String restaurantId,
+    int page = 1,
+    int perPage = 20,
+    int? rating,
+  }) async {
+    final cleanedRestaurantId = restaurantId.trim();
+    if (cleanedRestaurantId.isEmpty) {
+      return const <CustomerRestaurantReviewItem>[];
+    }
+
+    final result = await _apiClient.request(
+      session: session,
+      method: 'GET',
+      endpoint: _endpoint(
+        '/v1/customer/restaurants/$cleanedRestaurantId/reviews',
+        <String, String>{
+          'page': page.toString(),
+          'per_page': perPage.clamp(1, 50).toString(),
+          if (rating != null && rating >= 1 && rating <= 5)
+            'rating': rating.toString(),
+        },
+      ),
+    );
+    final payload = ApiClient.decodeMap(result.response.body);
+    _throwForFailure(
+      result.response.statusCode,
+      payload,
+      fallback: 'Failed to load restaurant reviews.',
+    );
+
+    return _extractList(
+      payload,
+    ).map(CustomerRestaurantReviewItem.fromJson).toList(growable: false);
+  }
+
+  Future<CustomerRestaurantReviewItem> submitRestaurantReview({
+    required AuthSession session,
+    required String restaurantId,
+    required int rating,
+    String? comment,
+    String? orderId,
+  }) async {
+    final cleanedRestaurantId = restaurantId.trim();
+    if (cleanedRestaurantId.isEmpty) {
+      throw const AuthApiException('Restaurant is required.');
+    }
+    final normalizedRating = rating.clamp(1, 5);
+    final cleanedComment = (comment ?? '').trim();
+    final cleanedOrderId = (orderId ?? '').trim();
+    final body = <String, dynamic>{
+      'rating': normalizedRating,
+      if (cleanedComment.isNotEmpty) 'comment': cleanedComment,
+      if (cleanedOrderId.isNotEmpty) 'order_id': cleanedOrderId,
+    };
+
+    final result = await _apiClient.request(
+      session: session,
+      method: 'POST',
+      endpoint: '/v1/customer/restaurants/$cleanedRestaurantId/reviews',
+      body: body,
+    );
+    final payload = ApiClient.decodeMap(result.response.body);
+    _throwForFailure(
+      result.response.statusCode,
+      payload,
+      fallback: 'Failed to submit review.',
+    );
+
+    final data = _stringMap(payload['data']);
+    return CustomerRestaurantReviewItem.fromJson(data.isEmpty ? payload : data);
+  }
+
   String _endpoint(String path, Map<String, String> queryParameters) {
     final cleaned = <String, String>{};
     for (final entry in queryParameters.entries) {
@@ -400,6 +508,129 @@ class CustomerRestaurantItem {
   }
 }
 
+class CustomerRestaurantVideoItem {
+  const CustomerRestaurantVideoItem({
+    required this.id,
+    required this.title,
+    required this.description,
+    required this.thumbnailUrl,
+    required this.streamHlsUrl,
+    required this.hlsUrl,
+    required this.playbackUrl,
+    required this.videoUrl,
+    required this.mediaUrl,
+    required this.streamPreviewUrl,
+    required this.status,
+    required this.moderationStatus,
+    required this.createdAt,
+    required this.publishedAt,
+    required this.viewsCount,
+    required this.likesCount,
+    required this.sharesCount,
+    required this.commentsCount,
+  });
+
+  final String id;
+  final String title;
+  final String description;
+  final String thumbnailUrl;
+  final String streamHlsUrl;
+  final String hlsUrl;
+  final String playbackUrl;
+  final String videoUrl;
+  final String mediaUrl;
+  final String streamPreviewUrl;
+  final String status;
+  final String moderationStatus;
+  final DateTime? createdAt;
+  final DateTime? publishedAt;
+  final int viewsCount;
+  final int likesCount;
+  final int sharesCount;
+  final int commentsCount;
+
+  String get resolvedPlaybackUrl {
+    final candidates =
+        <String>[streamHlsUrl, hlsUrl, playbackUrl, videoUrl, mediaUrl]
+            .map((url) => url.trim())
+            .where((url) => url.isNotEmpty)
+            .toList(growable: false);
+    if (candidates.isEmpty) {
+      return '';
+    }
+    for (final candidate in candidates) {
+      if (candidate.toLowerCase().contains('.m3u8')) {
+        return candidate;
+      }
+    }
+    return candidates.first;
+  }
+
+  factory CustomerRestaurantVideoItem.fromJson(Map<String, dynamic> json) {
+    final stats = _stringMap(json['stats']);
+    return CustomerRestaurantVideoItem(
+      id: _readString(json['id']) ?? '',
+      title: _readString(json['title']) ?? 'Untitled video',
+      description: _readString(json['description']) ?? '',
+      thumbnailUrl: _readString(json['thumbnail_url']) ?? '',
+      streamHlsUrl: _readString(json['stream_hls_url']) ?? '',
+      hlsUrl: _readString(json['hls_url']) ?? '',
+      playbackUrl: _readString(json['playback_url']) ?? '',
+      videoUrl: _readString(json['video_url']) ?? '',
+      mediaUrl: _readString(json['media_url']) ?? '',
+      streamPreviewUrl: _readString(json['stream_preview_url']) ?? '',
+      status: _readString(json['status']) ?? '',
+      moderationStatus: _readString(json['moderation_status']) ?? '',
+      createdAt: _readDateTime(json['created_at']),
+      publishedAt: _readDateTime(json['published_at']),
+      viewsCount:
+          _readInt(stats['views_count']) ?? _readInt(json['views_count']) ?? 0,
+      likesCount:
+          _readInt(stats['likes_count']) ?? _readInt(json['likes_count']) ?? 0,
+      sharesCount:
+          _readInt(stats['shares_count']) ??
+          _readInt(json['shares_count']) ??
+          0,
+      commentsCount:
+          _readInt(stats['comments_count']) ??
+          _readInt(json['comments_count']) ??
+          0,
+    );
+  }
+}
+
+class CustomerRestaurantReviewItem {
+  const CustomerRestaurantReviewItem({
+    required this.id,
+    required this.customerName,
+    required this.rating,
+    required this.comment,
+    required this.orderLabel,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String customerName;
+  final double rating;
+  final String comment;
+  final String orderLabel;
+  final DateTime createdAt;
+
+  factory CustomerRestaurantReviewItem.fromJson(Map<String, dynamic> json) {
+    final customer = _stringMap(json['customer']);
+    final orderId = _readString(json['order_id']) ?? '';
+    final fallbackId = _readString(json['id']) ?? orderId;
+    return CustomerRestaurantReviewItem(
+      id: fallbackId,
+      customerName: _readString(customer['name']) ?? 'Customer',
+      rating: _readDouble(json['rating']) ?? 0,
+      comment: _readString(json['comment']) ?? '',
+      orderLabel: orderId.isEmpty ? '--' : '#$orderId',
+      createdAt: _readDateTime(json['created_at']) ?? DateTime.now(),
+    );
+  }
+}
+
 Map<String, dynamic> _stringMap(dynamic value) {
   if (value is! Map) {
     return <String, dynamic>{};
@@ -472,6 +703,16 @@ bool? _readBool(dynamic value) {
     if (normalized == 'false' || normalized == '0' || normalized == 'no') {
       return false;
     }
+  }
+  return null;
+}
+
+DateTime? _readDateTime(dynamic value) {
+  if (value is DateTime) {
+    return value;
+  }
+  if (value is String) {
+    return DateTime.tryParse(value);
   }
   return null;
 }

@@ -621,8 +621,16 @@ class _CreatePostPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasSelectedVideo =
-        selectedVideoName != null && selectedVideoName!.trim().isNotEmpty;
+    // Keep constructor signature stable while this panel points users to web.
+    final _ = (
+      selectedVideoName,
+      selectedVideoSizeBytes,
+      isPickingVideo,
+      isCreatingPost,
+      onSelectVideo,
+      onClearVideo,
+      onCreatePost,
+    );
 
     return Container(
       width: double.infinity,
@@ -647,7 +655,7 @@ class _CreatePostPanel extends StatelessWidget {
                   color: Color(0xFFFFEFE8),
                 ),
                 child: Icon(
-                  Icons.video_call_rounded,
+                  Icons.open_in_new_rounded,
                   color: const Color(0xFFFF7E4D),
                   size: _clampDouble(20 * metrics.scale, 16, 20),
                 ),
@@ -658,7 +666,7 @@ class _CreatePostPanel extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Create Post',
+                      'Manage Videos From Dashboard',
                       style: TextStyle(
                         color: const Color(0xFF1F1B19),
                         fontSize: _clampDouble(18 * metrics.scale, 14, 18),
@@ -666,7 +674,7 @@ class _CreatePostPanel extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      'Upload a short promo or kitchen update video.',
+                      'Open the HungerRush Dashboard to upload and manage your videos.',
                       style: TextStyle(
                         color: const Color(0xFF8D7E73),
                         fontSize: _clampDouble(12 * metrics.scale, 9, 12),
@@ -681,152 +689,20 @@ class _CreatePostPanel extends StatelessWidget {
           SizedBox(height: _clampDouble(10 * metrics.scale, 8, 10)),
           Container(
             width: double.infinity,
-            padding: EdgeInsets.symmetric(
-              horizontal: _clampDouble(12 * metrics.scale, 10, 12),
-              vertical: _clampDouble(10 * metrics.scale, 8, 10),
-            ),
+            padding: EdgeInsets.all(_clampDouble(12 * metrics.scale, 10, 12)),
             decoration: BoxDecoration(
-              color: const Color(0xFFF8EFE8),
+              color: const Color(0xFFFEFCFA),
               borderRadius: BorderRadius.circular(14),
               border: Border.all(color: const Color(0xFFE0D4C9)),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.video_file_rounded,
-                      color: const Color(0xFFFF7E4D),
-                      size: _clampDouble(18 * metrics.scale, 14, 18),
-                    ),
-                    SizedBox(width: _clampDouble(8 * metrics.scale, 6, 8)),
-                    Expanded(
-                      child: Text(
-                        hasSelectedVideo
-                            ? selectedVideoName!
-                            : 'No video selected',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: hasSelectedVideo
-                              ? const Color(0xFF2A231E)
-                              : const Color(0xFF9B8C81),
-                          fontSize: _clampDouble(13 * metrics.scale, 10, 13),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    if (hasSelectedVideo)
-                      IconButton(
-                        onPressed: isPickingVideo ? null : onClearVideo,
-                        icon: Icon(
-                          Icons.close_rounded,
-                          color: const Color(0xFF9B8C81),
-                          size: _clampDouble(18 * metrics.scale, 14, 18),
-                        ),
-                        tooltip: 'Remove video',
-                      ),
-                  ],
-                ),
-                if (hasSelectedVideo && selectedVideoSizeBytes != null)
-                  Padding(
-                    padding: EdgeInsets.only(
-                      left: _clampDouble(26 * metrics.scale, 20, 26),
-                    ),
-                    child: Text(
-                      _formatFileSize(selectedVideoSizeBytes!),
-                      style: TextStyle(
-                        color: const Color(0xFF8D7E73),
-                        fontSize: _clampDouble(11 * metrics.scale, 9, 11),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-              ],
+            child: Text(
+              'Open the HungerRush Dashboard to upload and manage your videos.',
+              style: TextStyle(
+                color: const Color(0xFF65564C),
+                fontSize: _clampDouble(13 * metrics.scale, 10, 13),
+                fontWeight: FontWeight.w700,
+              ),
             ),
-          ),
-          SizedBox(height: _clampDouble(10 * metrics.scale, 8, 10)),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: isPickingVideo ? null : () => onSelectVideo(),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFFFF7E4D),
-                    side: const BorderSide(color: Color(0xFFFFC8B4)),
-                    padding: EdgeInsets.symmetric(
-                      vertical: _clampDouble(12 * metrics.scale, 10, 12),
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                  icon: isPickingVideo
-                      ? SizedBox(
-                          width: _clampDouble(16 * metrics.scale, 13, 16),
-                          height: _clampDouble(16 * metrics.scale, 13, 16),
-                          child: const CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Color(0xFFFF7E4D),
-                          ),
-                        )
-                      : Icon(
-                          Icons.video_library_rounded,
-                          size: _clampDouble(18 * metrics.scale, 14, 18),
-                        ),
-                  label: Text(
-                    isPickingVideo ? 'Picking...' : 'Upload Video',
-                    style: TextStyle(
-                      fontSize: _clampDouble(13 * metrics.scale, 10, 13),
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-              ),
-              SizedBox(width: _clampDouble(8 * metrics.scale, 6, 8)),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed:
-                      hasSelectedVideo && !isPickingVideo && !isCreatingPost
-                      ? onCreatePost
-                      : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF7E4D),
-                    foregroundColor: Colors.white,
-                    disabledBackgroundColor: const Color(0xFFE8DBD1),
-                    disabledForegroundColor: const Color(0xFFA69488),
-                    elevation: 0,
-                    padding: EdgeInsets.symmetric(
-                      vertical: _clampDouble(12 * metrics.scale, 10, 12),
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                  icon: isCreatingPost
-                      ? SizedBox(
-                          width: _clampDouble(16 * metrics.scale, 13, 16),
-                          height: _clampDouble(16 * metrics.scale, 13, 16),
-                          child: const CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : Icon(
-                          Icons.cloud_upload_rounded,
-                          size: _clampDouble(18 * metrics.scale, 14, 18),
-                        ),
-                  label: Text(
-                    isCreatingPost ? 'Creating...' : 'Create Post',
-                    style: TextStyle(
-                      fontSize: _clampDouble(14 * metrics.scale, 11, 14),
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-              ),
-            ],
           ),
         ],
       ),
@@ -847,6 +723,7 @@ class _DashboardLiveOrdersPanel extends StatelessWidget {
   final Future<void> Function() onOpenOrderManagement;
   final Future<void> Function(String orderId) onOpenOrderDetails;
 
+  // ignore: unused_field
   static const List<_DashboardLiveOrderData> _sampleOrders = [
     _DashboardLiveOrderData(
       orderId: '#4735',
@@ -877,10 +754,7 @@ class _DashboardLiveOrdersPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cardRadius = _clampDouble(22 * metrics.scale, 16, 22);
-    final listGap = _clampDouble(8 * metrics.scale, 6, 8);
-    final displayCount = _sampleOrders
-        .take(ordersInProgress.clamp(1, _sampleOrders.length))
-        .toList();
+    final _ = onOpenOrderDetails;
 
     return Container(
       width: double.infinity,
@@ -957,18 +831,23 @@ class _DashboardLiveOrdersPanel extends StatelessWidget {
             ],
           ),
           SizedBox(height: _clampDouble(10 * metrics.scale, 8, 10)),
-          ...List.generate(displayCount.length, (index) {
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: index == displayCount.length - 1 ? 0 : listGap,
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.all(_clampDouble(12 * metrics.scale, 10, 12)),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEFCFA),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE0D4C9)),
+            ),
+            child: Text(
+              'Orders are synchronized with your dashboard. Please manage order actions from the HungerRush Dashboard.',
+              style: TextStyle(
+                color: const Color(0xFF65564C),
+                fontSize: _clampDouble(13 * metrics.scale, 10, 13),
+                fontWeight: FontWeight.w700,
               ),
-              child: _DashboardLiveOrderRow(
-                metrics: metrics,
-                data: displayCount[index],
-                onTap: () => onOpenOrderDetails(displayCount[index].orderId),
-              ),
-            );
-          }),
+            ),
+          ),
           SizedBox(height: _clampDouble(10 * metrics.scale, 8, 10)),
           SizedBox(
             width: double.infinity,
@@ -1003,6 +882,7 @@ class _DashboardLiveOrdersPanel extends StatelessWidget {
   }
 }
 
+// ignore: unused_element
 class _DashboardLiveOrderRow extends StatelessWidget {
   const _DashboardLiveOrderRow({
     required this.metrics,
@@ -1126,6 +1006,7 @@ class _DashboardLiveOrderRow extends StatelessWidget {
   }
 }
 
+// ignore: unused_element
 class _DashboardLiveOrderData {
   const _DashboardLiveOrderData({
     required this.orderId,
@@ -1143,4 +1024,3 @@ class _DashboardLiveOrderData {
   final String statusLabel;
   final bool highlighted;
 }
-

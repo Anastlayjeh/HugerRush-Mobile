@@ -9,6 +9,7 @@ import 'package:flutter_application_1/services/auth_session_service.dart';
 import 'package:flutter_application_1/services/authenticated_api_client.dart';
 import 'package:flutter_application_1/services/cart_api_service.dart';
 import 'package:flutter_application_1/services/conversation_api_service.dart';
+import 'package:flutter_application_1/services/customer_restaurant_api_service.dart';
 import 'package:flutter_application_1/services/order_api_service.dart';
 import 'package:flutter_application_1/services/restaurant_owner_api_service.dart';
 
@@ -149,7 +150,7 @@ void main() {
 
     expect(paths, ['/api/v1/customer/cart/items', '/api/v1/customer/orders']);
     expect(bodies.first, contains('"menu_item_id":"42"'));
-    expect(bodies.last, '{}');
+    expect(bodies.last, contains('"restaurant_id":"5"'));
     expect(order.id, '77');
   });
 
@@ -177,6 +178,38 @@ void main() {
     expect(captured.url.path, '/api/v1/conversations/5/messages');
     expect(captured.body, '{"body":"Hello"}');
     expect(message.body, 'Hello');
+  });
+
+  test('customer review submit posts to restaurant review route', () async {
+    late http.Request captured;
+    final service = CustomerRestaurantApiService(
+      apiClient: _authenticatedClient(
+        MockClient((request) async {
+          captured = request;
+          return http.Response(
+            '{"data":{"id":15,"restaurant_id":3,"customer_id":8,"order_id":91,"rating":5,"comment":"Amazing food","customer":{"id":8,"name":"Ahmad"},"created_at":"2026-05-07T09:00:00Z","updated_at":"2026-05-07T09:00:00Z"}}',
+            201,
+          );
+        }),
+      ),
+    );
+
+    final created = await service.submitRestaurantReview(
+      session: _session,
+      restaurantId: '3',
+      rating: 5,
+      comment: 'Amazing food',
+      orderId: '91',
+    );
+
+    expect(captured.method, 'POST');
+    expect(captured.url.path, '/api/v1/customer/restaurants/3/reviews');
+    expect(captured.body, contains('"rating":5'));
+    expect(captured.body, contains('"comment":"Amazing food"'));
+    expect(captured.body, contains('"order_id":"91"'));
+    expect(created.id, '15');
+    expect(created.customerName, 'Ahmad');
+    expect(created.rating, 5);
   });
 
   test('restaurant status and moderation parsing use backend values', () {

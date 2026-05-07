@@ -50,36 +50,6 @@ String _profileEmail({required String handle, String? email}) {
   return _profileEmailFromHandle(handle);
 }
 
-List<RestaurantProfileReviewPreview> _buildDemoRestaurantReviews({
-  required String restaurantName,
-  required double rating,
-}) {
-  final base = rating.clamp(3.8, 5.0).toDouble();
-  return <RestaurantProfileReviewPreview>[
-    RestaurantProfileReviewPreview(
-      customerName: 'Lina M.',
-      rating: base,
-      comment: 'Great food quality and clean packaging.',
-      timeLabel: '2h ago',
-      orderLabel: '#4731',
-    ),
-    RestaurantProfileReviewPreview(
-      customerName: 'Karim D.',
-      rating: (base - 0.1).clamp(3.6, 5.0).toDouble(),
-      comment: 'Fast delivery and fresh taste from $restaurantName.',
-      timeLabel: 'Yesterday',
-      orderLabel: '#4728',
-    ),
-    RestaurantProfileReviewPreview(
-      customerName: 'Maya K.',
-      rating: (base + 0.1).clamp(3.6, 5.0).toDouble(),
-      comment: 'Very good portions, will order again.',
-      timeLabel: '2d ago',
-      orderLabel: '#4722',
-    ),
-  ];
-}
-
 bool _looksLikeHttpUrl(String? value) {
   final parsed = Uri.tryParse(value?.trim() ?? '');
   return parsed != null &&
@@ -116,6 +86,44 @@ String _formatRelativeTime(DateTime dateTime) {
     return '${difference.inHours}h';
   }
   return '${difference.inDays}d';
+}
+
+String _restaurantVideoMeta(CustomerRestaurantVideoItem item) {
+  final when = item.publishedAt ?? item.createdAt;
+  final timeLabel = when == null
+      ? 'Recent'
+      : _formatRelativeTime(when.toLocal());
+  if (item.viewsCount <= 0) {
+    return timeLabel;
+  }
+  return '${_formatCompactCount(item.viewsCount)} views | $timeLabel';
+}
+
+List<RestaurantProfileVideoPreview> _restaurantVideoPreviewsFromItems(
+  List<CustomerRestaurantVideoItem> items,
+) {
+  final videos = items
+      .where((item) => item.resolvedPlaybackUrl.trim().isNotEmpty)
+      .toList(growable: false);
+  videos.sort((a, b) {
+    final aTime =
+        a.publishedAt ?? a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+    final bTime =
+        b.publishedAt ?? b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+    return bTime.compareTo(aTime);
+  });
+  return videos
+      .map(
+        (video) => RestaurantProfileVideoPreview(
+          id: video.id,
+          title: video.title,
+          meta: _restaurantVideoMeta(video),
+          thumbnailUrl: video.thumbnailUrl,
+          videoUrl: video.resolvedPlaybackUrl,
+          description: video.description,
+        ),
+      )
+      .toList(growable: false);
 }
 
 String _feedCreatorLabel(String restaurantName) {

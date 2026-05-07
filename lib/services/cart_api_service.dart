@@ -8,11 +8,45 @@ class CustomerCartApiService {
 
   final AuthenticatedApiClient _apiClient;
 
-  Future<CustomerCart> fetchCart({required AuthSession session}) async {
+  Future<List<CustomerCart>> fetchCarts({required AuthSession session}) async {
     final result = await _apiClient.request(
       session: session,
       method: 'GET',
-      endpoint: '/v1/customer/cart',
+      endpoint: '/v1/customer/carts',
+    );
+    final payload = ApiClient.decodeMap(result.response.body);
+    _throwForFailure(
+      result.response.statusCode,
+      payload,
+      fallback: 'Failed to load carts.',
+    );
+    return _extractListFromPayload(payload)
+        .map(CustomerCart.fromJson)
+        .where((cart) => cart.items.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  Future<CustomerCart> fetchCart({
+    required AuthSession session,
+    String? restaurantId,
+    String? cartId,
+  }) async {
+    final queryParameters = <String, String>{
+      if (restaurantId != null && restaurantId.trim().isNotEmpty)
+        'restaurant_id': restaurantId.trim(),
+      if (cartId != null && cartId.trim().isNotEmpty) 'cart_id': cartId.trim(),
+    };
+    final endpoint = queryParameters.isEmpty
+        ? '/v1/customer/cart'
+        : Uri(
+            path: '/v1/customer/cart',
+            queryParameters: queryParameters,
+          ).toString();
+
+    final result = await _apiClient.request(
+      session: session,
+      method: 'GET',
+      endpoint: endpoint,
     );
     final payload = ApiClient.decodeMap(result.response.body);
     _throwForFailure(
@@ -28,6 +62,7 @@ class CustomerCartApiService {
     required String menuItemId,
     int quantity = 1,
     String notes = '',
+    String? restaurantId,
   }) async {
     final cleanedMenuItemId = menuItemId.trim();
     if (cleanedMenuItemId.isEmpty) {
@@ -42,6 +77,8 @@ class CustomerCartApiService {
         'menu_item_id': cleanedMenuItemId,
         'quantity': quantity.clamp(1, 999),
         if (notes.trim().isNotEmpty) 'notes': notes.trim(),
+        if (restaurantId != null && restaurantId.trim().isNotEmpty)
+          'restaurant_id': restaurantId.trim(),
       },
     );
     final payload = ApiClient.decodeMap(result.response.body);
@@ -115,6 +152,9 @@ class CustomerCart {
     required this.fees,
     required this.total,
     required this.totalItems,
+    this.loyaltyPointsEstimate = 0,
+    this.totalLbp = 0,
+    this.deliveryFee = 0,
   });
 
   final String id;
@@ -125,6 +165,9 @@ class CustomerCart {
   final double fees;
   final double total;
   final int totalItems;
+  final int loyaltyPointsEstimate;
+  final int totalLbp;
+  final double deliveryFee;
 
   bool get isEmpty => items.isEmpty;
 
@@ -144,11 +187,18 @@ class CustomerCart {
       subtotal:
           _readDouble(json['subtotal']) ??
           _sum(items, (item) => item.lineTotal),
-      fees: _readDouble(json['fees']) ?? 0,
+      fees: _readDouble(json['fees']) ?? _readDouble(json['delivery_fee']) ?? 0,
+      deliveryFee:
+          _readDouble(json['delivery_fee']) ?? _readDouble(json['fees']) ?? 0,
       total: _readDouble(json['total']) ?? 0,
       totalItems:
           _readInt(json['total_items']) ??
           items.fold<int>(0, (sum, item) => sum + item.quantity),
+      loyaltyPointsEstimate:
+          _readInt(json['loyalty_points_estimate']) ??
+          _readInt(json['loyalty_points_earned']) ??
+          0,
+      totalLbp: _readInt(json['total_lbp']) ?? 0,
     );
   }
 }
@@ -235,6 +285,22 @@ Map<String, dynamic> _extractObject(Map<String, dynamic> payload) {
 List<Map<String, dynamic>> _extractList(dynamic value) {
   if (value is List) {
     return value.whereType<Map>().map(_stringMap).toList(growable: false);
+  }
+  return const <Map<String, dynamic>>[];
+}
+
+List<Map<String, dynamic>> _extractListFromPayload(
+  Map<String, dynamic> payload,
+) {
+  final data = payload['data'];
+  if (data is List) {
+    return data.whereType<Map>().map(_stringMap).toList(growable: false);
+  }
+  if (data is Map && data['data'] is List) {
+    return (data['data'] as List)
+        .whereType<Map>()
+        .map(_stringMap)
+        .toList(growable: false);
   }
   return const <Map<String, dynamic>>[];
 }

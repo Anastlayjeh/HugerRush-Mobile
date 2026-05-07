@@ -177,7 +177,7 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
           : restaurant.categoryLabel,
       tags:
           '#${restaurant.categoryLabel.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '')}',
-      audioLabel: 'Restaurant',
+      audioLabel: '',
       rating: restaurant.averageRating ?? 0,
       likeCount: 0,
       commentCount: restaurant.reviewsCount,
@@ -218,55 +218,56 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
         userAvatarBytes: _customerProfileData.profilePhotoBytes,
         onEditProfile: _openCustomerEditProfile,
       ),
-      body: showProfile
-          ? _ProfileTabBody(
-              userName: _customerProfileData.fullName,
-              userHandle: _userHandle,
-              userEmail: _customerProfileData.nullableEmail,
-              userAvatarUrl: _customerProfileData.nullableAvatarUrl,
-              userAvatarBytes: _customerProfileData.profilePhotoBytes,
-              accountLabel: _customerProfileData.resolvedAccountLabel,
-              savedPlaces: savedPlaces,
-              followedRestaurants: followedRestaurantPosts,
-              selectedBottomIndex: _selectedBottomIndex,
-              onOpenMenu: _openProfileMenu,
-              onBottomNavSelected: _handleBottomNavSelected,
-            )
-          : showDiscover
-          ? _DiscoverTabBody(
-              userName: widget.userName,
-              authSession: widget.authSession,
-              onSessionUpdated: widget.onSessionUpdated,
-              onSessionExpired: widget.onSessionExpired,
-              favoriteSpotTitles: _favoriteDiscoverSpotTitles,
-              onSetSpotFavorite: _setDiscoverSpotFavorite,
-              selectedBottomIndex: _selectedBottomIndex,
-              onBottomNavSelected: _handleBottomNavSelected,
-            )
-          : showOrders
-          ? _OrdersTabBody(
-              userName: widget.userName,
-              selectedBottomIndex: _selectedBottomIndex,
-              onBottomNavSelected: _handleBottomNavSelected,
-            )
-          : showMessages
-          ? _MessagesTabBody(
-              userName: widget.userName,
-              selectedBottomIndex: _selectedBottomIndex,
-              onBottomNavSelected: _handleBottomNavSelected,
-            )
-          : _FeedTabBody(
-              authSession: widget.authSession,
-              onSessionUpdated: widget.onSessionUpdated,
-              onSessionExpired: widget.onSessionExpired,
-              selectedTopTab: _selectedTopTab,
-              selectedBottomIndex: _selectedBottomIndex,
-              onTopTabSelected: (index) {
-                setState(() => _selectedTopTab = index);
-              },
-              onBottomNavSelected: _handleBottomNavSelected,
-              onRestaurantFollowChanged: _refreshFollowedRestaurants,
-            ),
+      body: IndexedStack(
+        index: _selectedBottomIndex.clamp(0, 4),
+        children: [
+          _FeedTabBody(
+            authSession: widget.authSession,
+            onSessionUpdated: widget.onSessionUpdated,
+            onSessionExpired: widget.onSessionExpired,
+            selectedTopTab: _selectedTopTab,
+            selectedBottomIndex: _selectedBottomIndex,
+            onTopTabSelected: (index) {
+              setState(() => _selectedTopTab = index);
+            },
+            onBottomNavSelected: _handleBottomNavSelected,
+            onRestaurantFollowChanged: _refreshFollowedRestaurants,
+          ),
+          _DiscoverTabBody(
+            userName: widget.userName,
+            authSession: widget.authSession,
+            onSessionUpdated: widget.onSessionUpdated,
+            onSessionExpired: widget.onSessionExpired,
+            favoriteSpotTitles: _favoriteDiscoverSpotTitles,
+            onSetSpotFavorite: _setDiscoverSpotFavorite,
+            selectedBottomIndex: _selectedBottomIndex,
+            onBottomNavSelected: _handleBottomNavSelected,
+          ),
+          _OrdersTabBody(
+            userName: widget.userName,
+            selectedBottomIndex: _selectedBottomIndex,
+            onBottomNavSelected: _handleBottomNavSelected,
+          ),
+          _MessagesTabBody(
+            userName: widget.userName,
+            selectedBottomIndex: _selectedBottomIndex,
+            onBottomNavSelected: _handleBottomNavSelected,
+          ),
+          _ProfileTabBody(
+            userName: _customerProfileData.fullName,
+            userHandle: _userHandle,
+            userEmail: _customerProfileData.nullableEmail,
+            userAvatarUrl: _customerProfileData.nullableAvatarUrl,
+            userAvatarBytes: _customerProfileData.profilePhotoBytes,
+            accountLabel: _customerProfileData.resolvedAccountLabel,
+            savedPlaces: savedPlaces,
+            followedRestaurants: followedRestaurantPosts,
+            selectedBottomIndex: _selectedBottomIndex,
+            onOpenMenu: _openProfileMenu,
+            onBottomNavSelected: _handleBottomNavSelected,
+          ),
+        ],
+      ),
     );
   }
 }
@@ -296,7 +297,8 @@ class _FeedTabBody extends StatefulWidget {
   State<_FeedTabBody> createState() => _FeedTabBodyState();
 }
 
-class _FeedTabBodyState extends State<_FeedTabBody> {
+class _FeedTabBodyState extends State<_FeedTabBody>
+    with WidgetsBindingObserver {
   final _authSessionService = AuthSessionService();
   final Map<String, DemoFeedPost> _feedPostsById = <String, DemoFeedPost>{};
   final Map<String, CustomerVideoFeedItem> _feedItemsByPostId =
@@ -329,6 +331,8 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
   bool _hasMoreFeed = true;
   bool _isVideoHoldActive = false;
   bool _isVideoManuallyPaused = false;
+  bool _isAppInForeground = true;
+  int _feedOverlayDepth = 0;
   String? _feedError;
   String? _activeSearchQuery;
 
@@ -337,6 +341,7 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _session = widget.authSession;
     _videoFeedApiService = CustomerVideoFeedApiService(
       apiClient: AuthenticatedApiClient(
@@ -379,9 +384,29 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
     if (oldWidget.authSession?.token != widget.authSession?.token) {
       _session = widget.authSession;
     }
+    if (oldWidget.selectedBottomIndex != widget.selectedBottomIndex) {
+      if (widget.selectedBottomIndex != 0) {
+        _pauseAllFeedVideos();
+      } else {
+        _syncVideoPlayback();
+        _scheduleViewEngagementForCurrentVideo();
+      }
+    }
     if (oldWidget.selectedTopTab != widget.selectedTopTab) {
       unawaited(_loadInitialFeed(query: _activeSearchQuery));
     }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    _isAppInForeground = state == AppLifecycleState.resumed;
+    if (_isAppInForeground) {
+      _syncVideoPlayback();
+      _scheduleViewEngagementForCurrentVideo();
+      return;
+    }
+    _pauseAllFeedVideos();
   }
 
   Future<void> _handleApiSessionUpdated(AuthSession session) async {
@@ -621,7 +646,7 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
       followersCount: item.stats.viewsCount,
       caption: caption,
       tags: tags,
-      audioLabel: 'Original Audio - $restaurantName',
+      audioLabel: '',
       rating: 4.8,
       likeCount: item.stats.likesCount,
       commentCount: item.stats.commentsCount,
@@ -639,14 +664,16 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
   }
 
   Future<void> _openSearch() async {
-    final query = await Navigator.of(context).push<String>(
-      MaterialPageRoute<String>(
-        builder: (_) => const SearchScreen(
-          includeCustomers: false,
-          returnSubmittedQuery: true,
+    final query = await _runWithFeedPaused<String>(() {
+      return Navigator.of(context).push<String>(
+        MaterialPageRoute<String>(
+          builder: (_) => const SearchScreen(
+            includeCustomers: false,
+            returnSubmittedQuery: true,
+          ),
         ),
-      ),
-    );
+      );
+    });
     final cleanedQuery = query?.trim();
     if (cleanedQuery == null || cleanedQuery.isEmpty) {
       return;
@@ -664,29 +691,132 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
 
   Future<void> _openNotifications() async {
     // ignore: use_build_context_synchronously
-    // ignore: use_build_context_synchronously
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
-    );
+    await _runWithFeedPaused<void>(() {
+      // ignore: use_build_context_synchronously
+      return Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
+      );
+    });
+  }
+
+  Future<List<RestaurantProfileReviewPreview>> _loadRestaurantReviewPreviews(
+    DemoFeedPost post,
+  ) async {
+    final restaurantId = post.restaurantId?.trim();
+    if (restaurantId == null || restaurantId.isEmpty) {
+      return const <RestaurantProfileReviewPreview>[];
+    }
+
+    final session = await _resolveSession();
+    if (session == null) {
+      return const <RestaurantProfileReviewPreview>[];
+    }
+
+    try {
+      final reviews = await _restaurantApiService.fetchRestaurantReviews(
+        session: session,
+        restaurantId: restaurantId,
+      );
+      return reviews
+          .map((review) {
+            final createdAt = review.createdAt.toLocal();
+            return RestaurantProfileReviewPreview(
+              customerName: review.customerName,
+              rating: review.rating,
+              comment: review.comment,
+              timeLabel: _formatRelativeTime(createdAt),
+              orderLabel: review.orderLabel,
+            );
+          })
+          .toList(growable: false);
+    } catch (error) {
+      debugPrint('Feed restaurant reviews load failed: $error');
+      return const <RestaurantProfileReviewPreview>[];
+    }
   }
 
   Future<void> _openRestaurantDetails(DemoFeedPost post) async {
-    final reviewPreviews = <RestaurantProfileReviewPreview>[];
-    var menuItems = _menuItemsForPost(post);
+    var reviewPreviews = await _loadRestaurantReviewPreviews(post);
+    var menuItems = const <RestaurantMenuItem>[];
+    var uploadedVideos = const <RestaurantProfileVideoPreview>[];
+    var resolvedRestaurantName = post.restaurantName;
+    var resolvedHandle = post.restaurantHandle;
+    var resolvedRating = post.rating;
+    var resolvedCaption = post.caption;
+    String? cuisineSummary;
+    String? phoneLabel;
+    String? locationLabel;
+    String? followersCountLabel =
+        '${_formatCompactCount(post.followersCount)} followers';
+    String? profileImageUrl = post.thumbnailUrl;
     String? loyaltyPointsLabel;
     final restaurantId = post.restaurantId?.trim();
     if (restaurantId != null && restaurantId.isNotEmpty) {
       final session = await _resolveSession();
       if (session != null) {
         try {
+          final details = await _restaurantApiService.fetchRestaurant(
+            session: session,
+            restaurantId: restaurantId,
+          );
+          resolvedRestaurantName = details.name;
+          resolvedHandle = details.id.isEmpty
+              ? resolvedHandle
+              : 'restaurant-${details.id}';
+          resolvedRating = details.averageRating ?? resolvedRating;
+          if (details.description.trim().isNotEmpty) {
+            resolvedCaption = details.description.trim();
+          }
+          cuisineSummary = details.categoryLabel.trim().isEmpty
+              ? null
+              : details.categoryLabel.trim();
+          phoneLabel = details.phone.trim().isEmpty
+              ? null
+              : details.phone.trim();
+          locationLabel = details.address.trim().isEmpty
+              ? null
+              : details.address.trim();
+          followersCountLabel =
+              '${_formatCompactCount(details.followersCount)} followers';
+          profileImageUrl = details.profilePhotoUrl.trim().isEmpty
+              ? profileImageUrl
+              : details.profilePhotoUrl.trim();
+        } catch (_) {}
+        try {
           final liveMenuItems = await _restaurantApiService.fetchRestaurantMenu(
             session: session,
             restaurantId: restaurantId,
           );
           menuItems = liveMenuItems;
-        } catch (_) {
-          // Keep the feed-preview item fallback.
-        }
+        } catch (_) {}
+        try {
+          final videos = await _restaurantApiService.fetchRestaurantVideos(
+            session: session,
+            restaurantId: restaurantId,
+            perPage: 50,
+          );
+          uploadedVideos = _restaurantVideoPreviewsFromItems(videos);
+        } catch (_) {}
+        try {
+          final liveReviews = await _restaurantApiService
+              .fetchRestaurantReviews(
+                session: session,
+                restaurantId: restaurantId,
+                perPage: 50,
+              );
+          reviewPreviews = liveReviews
+              .map((review) {
+                final createdAt = review.createdAt.toLocal();
+                return RestaurantProfileReviewPreview(
+                  customerName: review.customerName,
+                  rating: review.rating,
+                  comment: review.comment,
+                  timeLabel: _formatRelativeTime(createdAt),
+                  orderLabel: review.orderLabel,
+                );
+              })
+              .toList(growable: false);
+        } catch (_) {}
         try {
           final points = await _loyaltyApiService.fetchCustomerRestaurantPoints(
             session: session,
@@ -701,35 +831,44 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
     if (!mounted || !context.mounted) {
       return;
     }
-    await showRestaurantProfilePopup(
-      context,
-      restaurantName: post.restaurantName,
-      handle: post.restaurantHandle,
-      rating: post.rating,
-      caption: post.caption,
-      followersCountLabel:
-          '${_formatCompactCount(post.followersCount)} followers',
-      loyaltyPointsLabel: loyaltyPointsLabel,
-      allowAddToCart: true,
-      menuItems: menuItems,
-      showFollowButton: true,
-      initiallyFollowing: post.isFollowing,
-      onToggleFollow: () {
-        _toggleFollow(post);
-      },
-      reviews: reviewPreviews,
-      onOpenReviews: () {
-        openRestaurantReviewsPage(
-          context,
-          restaurantName: post.restaurantName,
-          rating: post.rating,
-          reviews: reviewPreviews,
-        );
-      },
-      onAddToCart: (item) {
-        unawaited(_addProfileMenuItemToLiveCart(post: post, item: item));
-      },
-    );
+    await _runWithFeedPaused<void>(() {
+      return showRestaurantProfilePopup(
+        context,
+        restaurantName: resolvedRestaurantName,
+        handle: resolvedHandle,
+        rating: resolvedRating,
+        caption: resolvedCaption,
+        restaurantId: restaurantId,
+        cuisineSummary: cuisineSummary,
+        phoneLabel: phoneLabel,
+        locationLabel: locationLabel,
+        followersCountLabel: followersCountLabel,
+        profileImageUrl: profileImageUrl,
+        loyaltyPointsLabel: loyaltyPointsLabel,
+        allowAddToCart: true,
+        menuItems: menuItems,
+        uploadedVideos: uploadedVideos,
+        showFollowButton: true,
+        initiallyFollowing: post.isFollowing,
+        showMenuCategoryFilter: true,
+        onToggleFollow: () {
+          _toggleFollow(post);
+        },
+        reviews: reviewPreviews,
+        onOpenReviews: () {
+          openRestaurantReviewsPage(
+            context,
+            restaurantName: resolvedRestaurantName,
+            rating: resolvedRating,
+            restaurantId: restaurantId,
+            reviews: reviewPreviews,
+          );
+        },
+        onAddToCart: (item) {
+          unawaited(_addProfileMenuItemToLiveCart(post: post, item: item));
+        },
+      );
+    });
   }
 
   Future<void> _addProfileMenuItemToLiveCart({
@@ -764,14 +903,16 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
         restaurantId: restaurantId,
         restaurantName: post.restaurantName,
       );
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => _OrdersCartScreen(
-            initialItems: [cartItem],
-            restaurantName: post.restaurantName,
+      await _runWithFeedPaused<void>(() {
+        return Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => _OrdersCartScreen(
+              initialItems: [cartItem],
+              restaurantName: post.restaurantName,
+            ),
           ),
-        ),
-      );
+        );
+      });
     } catch (error) {
       debugPrint('Restaurant profile cart add failed: $error');
       _showFeedSnackBar('Could not add this item to cart. Try again.');
@@ -779,36 +920,38 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
   }
 
   Future<void> _openRestaurantReviews(DemoFeedPost post) async {
-    final resolvedReviews = _buildDemoRestaurantReviews(
-      restaurantName: post.restaurantName,
-      rating: post.rating,
-    );
+    final resolvedReviews = await _loadRestaurantReviewPreviews(post);
     var shouldOpenFullReviewsPage = false;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) => _FeedReviewsBottomSheet(
-        restaurantName: post.restaurantName,
-        rating: post.rating,
-        reviews: resolvedReviews,
-        onViewAllReviews: () {
-          shouldOpenFullReviewsPage = true;
-          Navigator.of(sheetContext).pop();
-        },
-      ),
-    );
+    await _runWithFeedPaused<void>(() {
+      return showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (sheetContext) => _FeedReviewsBottomSheet(
+          restaurantName: post.restaurantName,
+          rating: post.rating,
+          reviews: resolvedReviews,
+          onViewAllReviews: () {
+            shouldOpenFullReviewsPage = true;
+            Navigator.of(sheetContext).pop();
+          },
+        ),
+      );
+    });
 
     if (!mounted || !shouldOpenFullReviewsPage) {
       return;
     }
 
-    await openRestaurantReviewsPage(
-      context,
-      restaurantName: post.restaurantName,
-      rating: post.rating,
-      reviews: resolvedReviews,
-    );
+    await _runWithFeedPaused<void>(() {
+      return openRestaurantReviewsPage(
+        context,
+        restaurantName: post.restaurantName,
+        rating: post.rating,
+        restaurantId: post.restaurantId,
+        reviews: resolvedReviews,
+      );
+    });
   }
 
   Future<void> _toggleFollow(DemoFeedPost post) async {
@@ -906,27 +1049,6 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
     } finally {
       _pendingLikePostIds.remove(post.id);
     }
-  }
-
-  List<RestaurantMenuItem> _menuItemsForPost(DemoFeedPost post) {
-    final title = post.menuItemName?.trim();
-    if (title == null || title.isEmpty) {
-      return const <RestaurantMenuItem>[];
-    }
-    return <RestaurantMenuItem>[
-      RestaurantMenuItem(
-        id: post.id,
-        title: title,
-        description: post.caption,
-        price: post.menuItemPrice,
-        imageUrl:
-            post.thumbnailUrl ??
-            'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=900&q=80',
-        category: post.restaurantName,
-        isAvailable: true,
-        isPopular: false,
-      ),
-    ];
   }
 
   void _setFollowingForRestaurant(DemoFeedPost source, bool isFollowing) {
@@ -1113,14 +1235,16 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
         restaurantId: post.restaurantId ?? '',
         restaurantName: post.restaurantName,
       );
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => _OrdersCartScreen(
-            initialItems: [item],
-            restaurantName: post.restaurantName,
+      await _runWithFeedPaused<void>(() {
+        return Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => _OrdersCartScreen(
+              initialItems: [item],
+              restaurantName: post.restaurantName,
+            ),
           ),
-        ),
-      );
+        );
+      });
     } catch (error) {
       debugPrint('Order Now cart add failed: $error');
       _showFeedSnackBar('Could not add this item to cart. Try again.');
@@ -1141,14 +1265,16 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
       menuItemId: video.menuItemId,
     );
     // ignore: use_build_context_synchronously
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => _OrdersCartScreen(
-          initialItems: [item],
-          restaurantName: post.restaurantName,
+    await _runWithFeedPaused<void>(() {
+      return Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => _OrdersCartScreen(
+            initialItems: [item],
+            restaurantName: post.restaurantName,
+          ),
         ),
-      ),
-    );
+      );
+    });
   }
 
   Future<void> _openComments(DemoFeedPost post) async {
@@ -1160,35 +1286,49 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
     if (!mounted) {
       return;
     }
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _FeedCommentsBottomSheet(
-        postId: post.id,
-        postTitle: post.restaurantName,
-        session: session,
-        apiService: _videoFeedApiService,
-        onCommentCountChanged: (count) {
-          if (!mounted) {
-            return;
-          }
-          final current = _feedPostsById[post.id] ?? post;
-          setState(() {
-            _feedPostsById[post.id] = current.copyWith(commentCount: count);
-          });
-        },
-      ),
-    );
+    await _runWithFeedPaused<void>(() {
+      return showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => _FeedCommentsBottomSheet(
+          postId: post.id,
+          postTitle: post.restaurantName,
+          session: session,
+          apiService: _videoFeedApiService,
+          onCommentCountChanged: (count) {
+            if (!mounted) {
+              return;
+            }
+            final current = _feedPostsById[post.id] ?? post;
+            setState(() {
+              _feedPostsById[post.id] = current.copyWith(commentCount: count);
+            });
+          },
+        ),
+      );
+    });
   }
 
   Future<void> _sharePromo(DemoFeedPost post) async {
     final current = _feedPostsById[post.id] ?? post;
+    String? directUrl;
+    for (final video in _feedVideos) {
+      if (video.postId == post.id && video.videoUrl.trim().isNotEmpty) {
+        directUrl = video.videoUrl.trim();
+        break;
+      }
+    }
+    if ((directUrl == null || directUrl.isEmpty) &&
+        (current.previewUrl?.trim().isNotEmpty ?? false)) {
+      directUrl = current.previewUrl!.trim();
+    }
     final result = await PostShareService.instance.sharePost(
       postId: post.id,
       title: post.restaurantName,
       caption: post.caption,
       creatorHandle: post.restaurantHandle,
+      directUrl: directUrl,
     );
     if (!mounted) {
       return;
@@ -1255,24 +1395,29 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
   }
 
   Future<void> _reportFeedPost(DemoFeedPost post) async {
-    await showReportSheet(
-      context,
-      itemType: ReportItemType.feedPost,
-      itemId: post.id,
-      itemTitle: post.restaurantName,
-    );
+    await _runWithFeedPaused<void>(() {
+      return showReportSheet(
+        context,
+        itemType: ReportItemType.feedPost,
+        itemId: post.id,
+        itemTitle: post.restaurantName,
+        restaurantId: post.restaurantId,
+      );
+    });
   }
 
   Future<void> _openPromoDetails(DemoFeedPost post) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => PromoDetailsScreen(
-          title: post.restaurantName,
-          caption: post.caption,
-          audioLabel: post.audioLabel,
+    await _runWithFeedPaused<void>(() {
+      return Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => PromoDetailsScreen(
+            title: post.restaurantName,
+            caption: post.caption,
+            audioLabel: post.audioLabel,
+          ),
         ),
-      ),
-    );
+      );
+    });
   }
 
   void _handleVideoPageChanged(int index) {
@@ -1296,6 +1441,34 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
     }
   }
 
+  bool get _isFeedVisible =>
+      widget.selectedBottomIndex == 0 &&
+      _isAppInForeground &&
+      _feedOverlayDepth == 0;
+
+  void _pauseAllFeedVideos() {
+    _viewEngagementTimer?.cancel();
+    for (final controller in _videoControllers) {
+      if (controller.value.isInitialized) {
+        controller.pause();
+      }
+    }
+  }
+
+  Future<T?> _runWithFeedPaused<T>(Future<T?> Function() action) async {
+    _feedOverlayDepth += 1;
+    _pauseAllFeedVideos();
+    try {
+      return await action();
+    } finally {
+      _feedOverlayDepth = (_feedOverlayDepth - 1).clamp(0, 1 << 20).toInt();
+      if (mounted) {
+        _syncVideoPlayback();
+        _scheduleViewEngagementForCurrentVideo();
+      }
+    }
+  }
+
   void _syncVideoPlayback() {
     for (var i = 0; i < _videoControllers.length; i++) {
       final controller = _videoControllers[i];
@@ -1303,6 +1476,7 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
         continue;
       }
       if (i == _currentVideoIndex &&
+          _isFeedVisible &&
           !_isVideoHoldActive &&
           !_isVideoManuallyPaused) {
         controller.play();
@@ -1314,6 +1488,9 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
 
   void _scheduleViewEngagementForCurrentVideo() {
     _viewEngagementTimer?.cancel();
+    if (!_isFeedVisible) {
+      return;
+    }
     if (_currentVideoIndex < 0 || _currentVideoIndex >= _feedVideos.length) {
       return;
     }
@@ -1398,6 +1575,7 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _viewEngagementTimer?.cancel();
     for (final controller in _videoControllers) {
       controller.dispose();
@@ -1436,167 +1614,181 @@ class _FeedTabBodyState extends State<_FeedTabBody> {
               right: 0,
               top: 0,
               bottom: navBarTotalHeight,
-              child: PageView.builder(
-                scrollDirection: Axis.vertical,
-                physics: const BouncingScrollPhysics(),
-                onPageChanged: _handleVideoPageChanged,
-                itemCount: _feedVideos.length,
-                itemBuilder: (context, index) {
-                  final video = _feedVideos[index];
-                  final post = _postForVideo(video);
-                  final showOrderNow = _isOrderNowVisibleByVideoIndex[index];
-                  final itemSize = Size(
-                    constraints.maxWidth,
-                    pageViewportHeight > 0
-                        ? pageViewportHeight
-                        : (safeHeight > 0 ? safeHeight : constraints.maxHeight),
-                  );
-                  final likeBursts = _likeBurstsForPost(post.id);
-                  return GestureDetector(
-                    behavior: HitTestBehavior.translucent,
-                    onTap: () => _toggleVideoTapPlayback(index),
-                    onLongPressStart: (_) => _handleVideoLongPressStart(index),
-                    onLongPressEnd: (_) => _handleVideoLongPressEnd(),
-                    onDoubleTapDown: (details) =>
-                        _rememberDoubleTapPosition(post.id, details),
-                    onDoubleTap: () => _handleFeedDoubleTapLike(post, itemSize),
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          child: _FeedBackground(
-                            controller: _videoControllers[index],
-                            thumbnailUrl: video.thumbnailUrl,
-                          ),
-                        ),
-                        if (!_isVideoHoldActive) ...[
+              child: RefreshIndicator(
+                color: const Color(0xFFFF7E4D),
+                onRefresh: () => _loadInitialFeed(query: _activeSearchQuery),
+                child: PageView.builder(
+                  scrollDirection: Axis.vertical,
+                  physics: const BouncingScrollPhysics(
+                    parent: AlwaysScrollableScrollPhysics(),
+                  ),
+                  onPageChanged: _handleVideoPageChanged,
+                  itemCount: _feedVideos.length,
+                  itemBuilder: (context, index) {
+                    final video = _feedVideos[index];
+                    final post = _postForVideo(video);
+                    final showOrderNow = _isOrderNowVisibleByVideoIndex[index];
+                    final itemSize = Size(
+                      constraints.maxWidth,
+                      pageViewportHeight > 0
+                          ? pageViewportHeight
+                          : (safeHeight > 0
+                                ? safeHeight
+                                : constraints.maxHeight),
+                    );
+                    final likeBursts = _likeBurstsForPost(post.id);
+                    return GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onTap: () => _toggleVideoTapPlayback(index),
+                      onLongPressStart: (_) =>
+                          _handleVideoLongPressStart(index),
+                      onLongPressEnd: (_) => _handleVideoLongPressEnd(),
+                      onDoubleTapDown: (details) =>
+                          _rememberDoubleTapPosition(post.id, details),
+                      onDoubleTap: () =>
+                          _handleFeedDoubleTapLike(post, itemSize),
+                      child: Stack(
+                        children: [
                           Positioned.fill(
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                  colors: [
-                                    const Color(0x08000000),
-                                    const Color(0x6B000000),
-                                    const Color(0xD100131A),
-                                  ],
-                                  stops: const [0.0, 0.6, 1.0],
+                            child: _FeedBackground(
+                              controller: _videoControllers[index],
+                              thumbnailUrl: video.thumbnailUrl,
+                            ),
+                          ),
+                          if (!_isVideoHoldActive) ...[
+                            Positioned.fill(
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      const Color(0x08000000),
+                                      const Color(0x6B000000),
+                                      const Color(0xD100131A),
+                                    ],
+                                    stops: const [0.0, 0.6, 1.0],
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                          SafeArea(
-                            bottom: false,
-                            child: Padding(
-                              padding: EdgeInsets.fromLTRB(
-                                metrics.horizontalPadding,
-                                metrics.topPadding,
-                                metrics.horizontalPadding,
-                                0,
-                              ),
-                              child: Column(
-                                children: [
-                                  SizedBox(height: topOverlayReservedHeight),
-                                  Expanded(
-                                    child: Align(
-                                      alignment: Alignment.bottomCenter,
-                                      child: Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.end,
-                                        children: [
-                                          Expanded(
-                                            child: _FeedDetails(
-                                              post: post,
+                            SafeArea(
+                              bottom: false,
+                              child: Padding(
+                                padding: EdgeInsets.fromLTRB(
+                                  metrics.horizontalPadding,
+                                  metrics.topPadding,
+                                  metrics.horizontalPadding,
+                                  0,
+                                ),
+                                child: Column(
+                                  children: [
+                                    SizedBox(height: topOverlayReservedHeight),
+                                    Expanded(
+                                      child: Align(
+                                        alignment: Alignment.bottomCenter,
+                                        child: Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.end,
+                                          children: [
+                                            Expanded(
+                                              child: _FeedDetails(
+                                                post: post,
+                                                metrics: metrics,
+                                                onOpenRestaurant: () =>
+                                                    _openRestaurantDetails(
+                                                      post,
+                                                    ),
+                                                onOpenReviews: () =>
+                                                    _openRestaurantReviews(
+                                                      post,
+                                                    ),
+                                                onOpenAudio: () =>
+                                                    _openPromoDetails(post),
+                                                showOrderNow: showOrderNow,
+                                                orderNowPriceLabel:
+                                                    video.priceLabel,
+                                                onDismissOrderNow: () =>
+                                                    _dismissOrderNowForVideoIndex(
+                                                      index,
+                                                    ),
+                                                onOrderNowTap: () =>
+                                                    _openOrderNowCart(
+                                                      post,
+                                                      video,
+                                                      videoIndex: index,
+                                                    ),
+                                              ),
+                                            ),
+                                            SizedBox(width: metrics.railGap),
+                                            _ActionRail(
                                               metrics: metrics,
+                                              post: post,
                                               onOpenRestaurant: () =>
                                                   _openRestaurantDetails(post),
-                                              onOpenReviews: () =>
-                                                  _openRestaurantReviews(post),
-                                              onOpenAudio: () =>
-                                                  _openPromoDetails(post),
-                                              showOrderNow: showOrderNow,
-                                              orderNowPriceLabel:
-                                                  video.priceLabel,
-                                              onDismissOrderNow: () =>
-                                                  _dismissOrderNowForVideoIndex(
-                                                    index,
-                                                  ),
-                                              onOrderNowTap: () =>
-                                                  _openOrderNowCart(
-                                                    post,
-                                                    video,
-                                                    videoIndex: index,
-                                                  ),
+                                              onToggleFollow: () =>
+                                                  _toggleFollow(post),
+                                              onToggleLike: () =>
+                                                  _toggleLike(post),
+                                              onOpenComments: () =>
+                                                  _openComments(post),
+                                              onShare: () => _sharePromo(post),
+                                              onReport: () =>
+                                                  _reportFeedPost(post),
                                             ),
-                                          ),
-                                          SizedBox(width: metrics.railGap),
-                                          _ActionRail(
-                                            metrics: metrics,
-                                            post: post,
-                                            onOpenRestaurant: () =>
-                                                _openRestaurantDetails(post),
-                                            onToggleFollow: () =>
-                                                _toggleFollow(post),
-                                            onToggleLike: () =>
-                                                _toggleLike(post),
-                                            onOpenComments: () =>
-                                                _openComments(post),
-                                            onShare: () => _sharePromo(post),
-                                            onReport: () =>
-                                                _reportFeedPost(post),
-                                          ),
-                                        ],
+                                          ],
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                  SizedBox(
-                                    height: _clampDouble(
-                                      10 * metrics.scale,
-                                      6,
-                                      12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          if (likeBursts.isNotEmpty)
-                            Positioned.fill(
-                              child: IgnorePointer(
-                                child: Stack(
-                                  children: [
-                                    for (final burst in likeBursts)
-                                      _TastyLikeBurst(
-                                        key: ValueKey<int>(burst.id),
-                                        tapPosition: burst.tapPosition,
+                                    SizedBox(
+                                      height: _clampDouble(
+                                        10 * metrics.scale,
+                                        6,
+                                        12,
                                       ),
+                                    ),
                                   ],
                                 ),
                               ),
                             ),
-                          Positioned(
-                            left: _clampDouble(10 * metrics.scale, 8, 14),
-                            right: _clampDouble(10 * metrics.scale, 8, 14),
-                            bottom: _clampDouble(8 * metrics.scale, 6, 10),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(999),
-                              child: VideoProgressIndicator(
-                                _videoControllers[index],
-                                allowScrubbing: true,
-                                padding: EdgeInsets.zero,
-                                colors: const VideoProgressColors(
-                                  playedColor: Color(0xFFFF7E4D),
-                                  bufferedColor: Color(0x80FFFFFF),
-                                  backgroundColor: Color(0x50000000),
+                            if (likeBursts.isNotEmpty)
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  child: Stack(
+                                    children: [
+                                      for (final burst in likeBursts)
+                                        _TastyLikeBurst(
+                                          key: ValueKey<int>(burst.id),
+                                          tapPosition: burst.tapPosition,
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            Positioned(
+                              left: _clampDouble(10 * metrics.scale, 8, 14),
+                              right: _clampDouble(10 * metrics.scale, 8, 14),
+                              bottom: _clampDouble(8 * metrics.scale, 6, 10),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(999),
+                                child: VideoProgressIndicator(
+                                  _videoControllers[index],
+                                  allowScrubbing: true,
+                                  padding: EdgeInsets.zero,
+                                  colors: const VideoProgressColors(
+                                    playedColor: Color(0xFFFF7E4D),
+                                    bufferedColor: Color(0x80FFFFFF),
+                                    backgroundColor: Color(0x50000000),
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
+                          ],
                         ],
-                      ],
-                    ),
-                  );
-                },
+                      ),
+                    );
+                  },
+                ),
               ),
             ),
             if (_feedVideos.isEmpty)
@@ -2257,33 +2449,35 @@ class _FeedDetails extends StatelessWidget {
             fontWeight: FontWeight.w800,
           ),
         ),
-        SizedBox(height: _clampDouble(12 * metrics.scale, 6, 14)),
-        InkWell(
-          onTap: onOpenAudio,
-          borderRadius: BorderRadius.circular(16),
-          child: Row(
-            children: [
-              Icon(
-                Icons.music_note_rounded,
-                color: Colors.white,
-                size: _clampDouble(metrics.audioFontSize + 4, 14, 20),
-              ),
-              SizedBox(width: _clampDouble(6 * metrics.scale, 4, 6)),
-              Flexible(
-                child: Text(
-                  post.audioLabel,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: const Color(0xD9FFFFFF),
-                    fontSize: metrics.audioFontSize,
-                    fontWeight: FontWeight.w600,
+        if (post.audioLabel.trim().isNotEmpty) ...[
+          SizedBox(height: _clampDouble(12 * metrics.scale, 6, 14)),
+          InkWell(
+            onTap: onOpenAudio,
+            borderRadius: BorderRadius.circular(16),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.music_note_rounded,
+                  color: Colors.white,
+                  size: _clampDouble(metrics.audioFontSize + 4, 14, 20),
+                ),
+                SizedBox(width: _clampDouble(6 * metrics.scale, 4, 6)),
+                Flexible(
+                  child: Text(
+                    post.audioLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: const Color(0xD9FFFFFF),
+                      fontSize: metrics.audioFontSize,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -3206,6 +3400,7 @@ class _FeedCommentsBottomSheetState extends State<_FeedCommentsBottomSheet> {
         session: widget.session,
         videoId: widget.postId,
       );
+      comments.sort((a, b) => b.createdAt.compareTo(a.createdAt));
       if (!mounted) {
         return;
       }
@@ -3245,7 +3440,7 @@ class _FeedCommentsBottomSheetState extends State<_FeedCommentsBottomSheet> {
       _controller.clear();
       setState(() {
         if (created != null) {
-          _comments = <CustomerVideoComment>[..._comments, created];
+          _comments = <CustomerVideoComment>[created, ..._comments];
         }
         _isSending = false;
         _error = null;

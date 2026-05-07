@@ -121,6 +121,8 @@ class _CustomerMessagesSectionState extends State<_CustomerMessagesSection> {
   List<DemoConversationThread> _threads = const <DemoConversationThread>[];
   MessageFilterType _selectedFilter = MessageFilterType.all;
   String? _selectedThreadId;
+  String _searchQuery = '';
+  Timer? _searchDebounce;
   bool _isLoading = true;
   String? _error;
 
@@ -136,7 +138,13 @@ class _CustomerMessagesSectionState extends State<_CustomerMessagesSection> {
     _loadThreads();
   }
 
-  Future<void> _loadThreads() async {
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadThreads({String? query}) async {
     setState(() {
       _isLoading = true;
       _error = null;
@@ -150,6 +158,7 @@ class _CustomerMessagesSectionState extends State<_CustomerMessagesSection> {
       }
       final conversations = await _conversationApiService.fetchConversations(
         session: session,
+        query: query ?? _searchQuery,
       );
       if (!mounted) {
         return;
@@ -233,7 +242,27 @@ class _CustomerMessagesSectionState extends State<_CustomerMessagesSection> {
     if (_selectedThreadId != null) {
       items = items.where((thread) => thread.id == _selectedThreadId);
     }
+    final normalizedSearch = _searchQuery.trim().toLowerCase();
+    if (normalizedSearch.isNotEmpty) {
+      items = items.where((thread) {
+        return thread.customerName.toLowerCase().contains(normalizedSearch) ||
+            thread.lastMessage.toLowerCase().contains(normalizedSearch) ||
+            thread.channelLabel.toLowerCase().contains(normalizedSearch) ||
+            thread.orderLabel.toLowerCase().contains(normalizedSearch);
+      });
+    }
     return items.toList();
+  }
+
+  void _onSearchChanged(String value) {
+    setState(() => _searchQuery = value);
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted) {
+        return;
+      }
+      _loadThreads(query: value);
+    });
   }
 
   void _selectFilter(MessageFilterType filter) {
@@ -304,6 +333,28 @@ class _CustomerMessagesSectionState extends State<_CustomerMessagesSection> {
                 parent: AlwaysScrollableScrollPhysics(),
               ),
               children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEFCFA),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFE9D7C8)),
+                  ),
+                  child: TextField(
+                    onChanged: _onSearchChanged,
+                    decoration: const InputDecoration(
+                      border: InputBorder.none,
+                      icon: Icon(
+                        Icons.search_rounded,
+                        color: Color(0xFF8D7D71),
+                      ),
+                      hintText: 'Search restaurants or customers',
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  height: _clampDouble(12 * widget.metrics.scale, 8, 12),
+                ),
                 _CustomerMessagesFilterRow(
                   metrics: widget.metrics,
                   selectedFilter: _selectedFilter,

@@ -232,7 +232,13 @@ class RestaurantMenuItem {
             'short_description',
           ]) ??
           'No description provided.',
-      price: _firstDouble(json, const ['price', 'amount', 'cost']),
+      price: _firstDouble(json, const [
+        'final_price',
+        'price',
+        'amount',
+        'cost',
+        'base_price',
+      ]),
       imageUrl:
           _firstString(json, const [
             'image_url',
@@ -241,7 +247,7 @@ class RestaurantMenuItem {
             'thumbnail',
             'cover_image',
           ]) ??
-          'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=900&q=80',
+          '',
       category:
           _firstString(json, const [
             'category',

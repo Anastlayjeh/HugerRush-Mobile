@@ -14,7 +14,9 @@ class RestaurantProfileApiService {
     '/v1/restaurant/profile',
     '/v1/auth/me',
   ];
-  static const List<String> _candidateFollowersEndpoints = <String>[];
+  static const List<String> _candidateFollowersEndpoints = <String>[
+    '/v1/restaurant/followers',
+  ];
 
   Future<Map<String, dynamic>> fetchProfile({required String token}) async {
     final cleanedToken = token.trim();
@@ -83,7 +85,18 @@ class RestaurantProfileApiService {
       );
     }
 
-    final endpoints = <String>[..._candidateFollowersEndpoints];
+    final endpoints = <String>[
+      for (final endpoint in _candidateFollowersEndpoints)
+        if (restaurantId != null && restaurantId.trim().isNotEmpty)
+          Uri(
+            path: endpoint,
+            queryParameters: <String, String>{
+              'restaurant_id': restaurantId.trim(),
+            },
+          ).toString()
+        else
+          endpoint,
+    ];
 
     if (endpoints.isEmpty) {
       return const <RestaurantFollower>[];

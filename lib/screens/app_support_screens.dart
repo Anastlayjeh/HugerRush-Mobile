@@ -90,8 +90,13 @@ Future<bool> showReportSheet(
   required ReportItemType itemType,
   required String itemId,
   String? itemTitle,
+  String? restaurantId,
+  String? orderId,
   List<ReportReason> reasons = ReportReason.values,
 }) async {
+  if (!context.mounted) {
+    return false;
+  }
   final cleanItemId = itemId.trim();
   if (cleanItemId.isEmpty) {
     final messenger = ScaffoldMessenger.maybeOf(context);
@@ -103,209 +108,31 @@ Future<bool> showReportSheet(
     return false;
   }
 
-  final descriptionController = TextEditingController();
-  var selectedReason = reasons.first;
-  var isSubmitting = false;
-  var submitted = false;
-
-  await showModalBottomSheet<void>(
+  final availableReasons = reasons.isEmpty ? ReportReason.values : reasons;
+  // Opening from popup menus/sheets in the same frame can trigger unstable
+  // route teardown. Let that complete first, then present the report sheet.
+  await Future<void>.delayed(Duration.zero);
+  if (!context.mounted) {
+    return false;
+  }
+  final submitted = await showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
     backgroundColor: const Color(0xFFFFFBF7),
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
-    builder: (sheetContext) {
-      return StatefulBuilder(
-        builder: (context, setSheetState) {
-          final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
-          Future<void> submit() async {
-            if (isSubmitting) {
-              return;
-            }
-            setSheetState(() => isSubmitting = true);
-            try {
-              await ReportService.instance.submitReport(
-                itemType: itemType,
-                itemId: cleanItemId,
-                reason: selectedReason,
-                description: descriptionController.text,
-              );
-              submitted = true;
-              if (sheetContext.mounted) {
-                Navigator.of(sheetContext).pop();
-              }
-            } on ReportServiceException catch (error) {
-              if (!sheetContext.mounted) {
-                return;
-              }
-              final messenger = ScaffoldMessenger.maybeOf(sheetContext);
-              messenger
-                ?..hideCurrentSnackBar()
-                ..showSnackBar(SnackBar(content: Text(error.message)));
-              setSheetState(() => isSubmitting = false);
-            } catch (_) {
-              if (!sheetContext.mounted) {
-                return;
-              }
-              final messenger = ScaffoldMessenger.maybeOf(sheetContext);
-              messenger
-                ?..hideCurrentSnackBar()
-                ..showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'We could not submit your report. Please try again.',
-                    ),
-                  ),
-                );
-              setSheetState(() => isSubmitting = false);
-            }
-          }
-
-          return SafeArea(
-            top: false,
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(16, 14, 16, bottomInset + 16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Report',
-                    style: TextStyle(
-                      color: Color(0xFF231A16),
-                      fontSize: 20,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    itemTitle?.trim().isNotEmpty == true
-                        ? 'You are reporting: ${itemTitle!.trim()}'
-                        : 'You are reporting a ${itemType.label.toLowerCase()}.',
-                    style: const TextStyle(
-                      color: Color(0xFF7D6C60),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFEFCFA),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: const Color(0xFFEADBCB)),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<ReportReason>(
-                        value: selectedReason,
-                        isExpanded: true,
-                        items: reasons
-                            .map((reason) {
-                              return DropdownMenuItem<ReportReason>(
-                                value: reason,
-                                child: Text(
-                                  reason.label,
-                                  style: const TextStyle(
-                                    color: Color(0xFF2F241B),
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              );
-                            })
-                            .toList(growable: false),
-                        onChanged: isSubmitting
-                            ? null
-                            : (value) {
-                                if (value == null) {
-                                  return;
-                                }
-                                setSheetState(() => selectedReason = value);
-                              },
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: descriptionController,
-                    maxLines: 4,
-                    decoration: InputDecoration(
-                      hintText: 'Optional details',
-                      filled: true,
-                      fillColor: const Color(0xFFFEFCFA),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: const BorderSide(color: Color(0xFFEADBCB)),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: const BorderSide(color: Color(0xFFEADBCB)),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: isSubmitting
-                              ? null
-                              : () => Navigator.of(sheetContext).pop(),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: const Color(0xFF7B675A),
-                            side: const BorderSide(color: Color(0xFFE3D2C4)),
-                            minimumSize: const Size.fromHeight(46),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          child: const Text(
-                            'Cancel',
-                            style: TextStyle(fontWeight: FontWeight.w800),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: FilledButton(
-                          onPressed: isSubmitting ? null : submit,
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFFFF7E4D),
-                            minimumSize: const Size.fromHeight(46),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          child: isSubmitting
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : const Text(
-                                  'Submit',
-                                  style: TextStyle(fontWeight: FontWeight.w800),
-                                ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      );
-    },
+    builder: (_) => _ReportSheetContent(
+      itemType: itemType,
+      itemId: cleanItemId,
+      itemTitle: itemTitle,
+      restaurantId: restaurantId,
+      orderId: orderId,
+      reasons: availableReasons,
+    ),
   );
 
-  descriptionController.dispose();
-  if (submitted && context.mounted) {
+  if ((submitted ?? false) && context.mounted) {
     final messenger = ScaffoldMessenger.maybeOf(context);
     messenger
       ?..hideCurrentSnackBar()
@@ -315,7 +142,237 @@ Future<bool> showReportSheet(
         ),
       );
   }
-  return submitted;
+  return submitted ?? false;
+}
+
+class _ReportSheetContent extends StatefulWidget {
+  const _ReportSheetContent({
+    required this.itemType,
+    required this.itemId,
+    required this.itemTitle,
+    required this.restaurantId,
+    required this.orderId,
+    required this.reasons,
+  });
+
+  final ReportItemType itemType;
+  final String itemId;
+  final String? itemTitle;
+  final String? restaurantId;
+  final String? orderId;
+  final List<ReportReason> reasons;
+
+  @override
+  State<_ReportSheetContent> createState() => _ReportSheetContentState();
+}
+
+class _ReportSheetContentState extends State<_ReportSheetContent> {
+  late final TextEditingController _descriptionController;
+  late ReportReason _selectedReason;
+  bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _descriptionController = TextEditingController();
+    _selectedReason = widget.reasons.first;
+  }
+
+  @override
+  void dispose() {
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_isSubmitting) {
+      return;
+    }
+    setState(() => _isSubmitting = true);
+    try {
+      await ReportService.instance.submitReport(
+        itemType: widget.itemType,
+        itemId: widget.itemId,
+        reason: _selectedReason,
+        description: _descriptionController.text,
+        restaurantId: widget.restaurantId,
+        orderId: widget.orderId,
+      );
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pop(true);
+    } on ReportServiceException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(error.message)));
+      setState(() => _isSubmitting = false);
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('We could not submit your report. Please try again.'),
+          ),
+        );
+      setState(() => _isSubmitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    return SafeArea(
+      top: false,
+      child: AnimatedPadding(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        padding: EdgeInsets.fromLTRB(16, 14, 16, bottomInset + 16),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Report',
+                style: TextStyle(
+                  color: Color(0xFF231A16),
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                widget.itemTitle?.trim().isNotEmpty == true
+                    ? 'You are reporting: ${widget.itemTitle!.trim()}'
+                    : 'You are reporting a ${widget.itemType.label.toLowerCase()}.',
+                style: const TextStyle(
+                  color: Color(0xFF7D6C60),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEFCFA),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFEADBCB)),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<ReportReason>(
+                    value: _selectedReason,
+                    isExpanded: true,
+                    items: widget.reasons
+                        .map((reason) {
+                          return DropdownMenuItem<ReportReason>(
+                            value: reason,
+                            child: Text(
+                              reason.label,
+                              style: const TextStyle(
+                                color: Color(0xFF2F241B),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          );
+                        })
+                        .toList(growable: false),
+                    onChanged: _isSubmitting
+                        ? null
+                        : (value) {
+                            if (value == null) {
+                              return;
+                            }
+                            setState(() => _selectedReason = value);
+                          },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _descriptionController,
+                maxLines: 4,
+                textInputAction: TextInputAction.newline,
+                decoration: InputDecoration(
+                  hintText: 'Optional details',
+                  filled: true,
+                  fillColor: const Color(0xFFFEFCFA),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Color(0xFFEADBCB)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Color(0xFFEADBCB)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _isSubmitting
+                          ? null
+                          : () => Navigator.of(context).pop(false),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF7B675A),
+                        side: const BorderSide(color: Color(0xFFE3D2C4)),
+                        minimumSize: const Size.fromHeight(46),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: const Text(
+                        'Cancel',
+                        style: TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _isSubmitting ? null : _submit,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFFF7E4D),
+                        minimumSize: const Size.fromHeight(46),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: _isSubmitting
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text(
+                              'Submit',
+                              style: TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 Future<bool> showOrderIssueSheet(
@@ -567,6 +624,7 @@ Future<void> openRestaurantReviewsPage(
   BuildContext context, {
   required String restaurantName,
   required double rating,
+  String? restaurantId,
   List<RestaurantProfileReviewPreview> reviews =
       const <RestaurantProfileReviewPreview>[],
 }) {
@@ -575,6 +633,7 @@ Future<void> openRestaurantReviewsPage(
       builder: (_) => _RestaurantReviewsPage(
         restaurantName: restaurantName,
         rating: rating,
+        restaurantId: restaurantId,
         reviews: reviews,
       ),
     ),
@@ -587,6 +646,7 @@ Future<void> showRestaurantProfilePopup(
   required String handle,
   required double rating,
   required String caption,
+  String? restaurantId,
   int initialTabIndex = 0,
   String? cuisineSummary,
   String? phoneLabel,
@@ -610,6 +670,7 @@ Future<void> showRestaurantProfilePopup(
   bool showMenuCategoryFilter = false,
   bool enableReportButton = true,
 }) {
+  final hostContext = context;
   final resolvedInitiallySaved =
       showSaveButton &&
       (initiallySaved ||
@@ -628,12 +689,12 @@ Future<void> showRestaurantProfilePopup(
   }
 
   return showModalBottomSheet<void>(
-    context: context,
+    context: hostContext,
     isScrollControlled: true,
     backgroundColor: const Color(0xFFF6F2ED),
     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
     clipBehavior: Clip.none,
-    builder: (context) {
+    builder: (sheetContext) {
       return _RestaurantProfilePopup(
         restaurantName: restaurantName,
         handle: handle,
@@ -662,11 +723,28 @@ Future<void> showRestaurantProfilePopup(
         showMenuCategoryFilter: showMenuCategoryFilter,
         showReportButton: enableReportButton,
         onReport: () {
-          showReportSheet(
-            context,
-            itemType: ReportItemType.restaurantProfile,
-            itemId: handle.trim().isEmpty ? restaurantName : handle,
-            itemTitle: restaurantName,
+          if (sheetContext.mounted) {
+            Navigator.of(sheetContext).pop();
+          }
+          final cleanedRestaurantId = restaurantId?.trim() ?? '';
+          final reportItemId = cleanedRestaurantId.isNotEmpty
+              ? cleanedRestaurantId
+              : (handle.trim().isEmpty ? restaurantName : handle);
+          unawaited(
+            Future<void>.delayed(const Duration(milliseconds: 80), () async {
+              if (!hostContext.mounted) {
+                return;
+              }
+              await showReportSheet(
+                hostContext,
+                itemType: ReportItemType.restaurantProfile,
+                itemId: reportItemId,
+                itemTitle: restaurantName,
+                restaurantId: cleanedRestaurantId.isEmpty
+                    ? null
+                    : cleanedRestaurantId,
+              );
+            }),
           );
         },
       );
@@ -1048,10 +1126,18 @@ class RestaurantProfileVideoPreview {
   const RestaurantProfileVideoPreview({
     required this.title,
     required this.meta,
+    this.id = '',
+    this.thumbnailUrl = '',
+    this.videoUrl = '',
+    this.description = '',
   });
 
   final String title;
   final String meta;
+  final String id;
+  final String thumbnailUrl;
+  final String videoUrl;
+  final String description;
 }
 
 class RestaurantProfileReviewPreview {
@@ -1131,129 +1217,10 @@ class _RestaurantProfilePopup extends StatelessWidget {
 
   static const String _defaultProfileImage =
       'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=600&q=80';
-  static const List<RestaurantProfileVideoPreview> _fallbackVideos = [
-    RestaurantProfileVideoPreview(
-      title: 'Lunch Rush Kitchen Clip',
-      meta: '21 MB • 2h ago',
-    ),
-    RestaurantProfileVideoPreview(
-      title: 'Pizza Oven Timelapse',
-      meta: '17 MB • 5h ago',
-    ),
-    RestaurantProfileVideoPreview(
-      title: 'Plating Special Combo',
-      meta: '12 MB • Yesterday',
-    ),
-  ];
-  static const List<RestaurantProfileReviewPreview> _fallbackReviews = [
-    RestaurantProfileReviewPreview(
-      customerName: 'Lina M.',
-      rating: 4.8,
-      comment:
-          'Pizza arrived hot and fresh. Crust was perfect and delivery was very quick.',
-      timeLabel: '2h ago',
-      orderLabel: '#4731',
-    ),
-    RestaurantProfileReviewPreview(
-      customerName: 'Rami A.',
-      rating: 4.6,
-      comment:
-          'Great flavor and portion size. Please keep the same quality for the fries.',
-      timeLabel: '5h ago',
-      orderLabel: '#4728',
-    ),
-    RestaurantProfileReviewPreview(
-      customerName: 'Maya K.',
-      rating: 5.0,
-      comment:
-          'Excellent as always. Packaging was clean and food arrived on time.',
-      timeLabel: 'Yesterday',
-      orderLabel: '#4722',
-    ),
-  ];
-  static const List<RestaurantMenuItem> _fallbackMenuItems = [
-    RestaurantMenuItem(
-      id: 'margherita-special',
-      title: 'Margherita Special',
-      description:
-          'Fresh basil, mozzarella, tomato sauce, and olive oil drizzle.',
-      price: 11.00,
-      imageUrl:
-          'https://images.unsplash.com/photo-1604382354936-07c5d9983bd3?auto=format&fit=crop&w=900&q=80',
-      category: 'Pizza',
-      isAvailable: true,
-      isPopular: true,
-      rating: 4.8,
-      ordersCount: 148,
-    ),
-    RestaurantMenuItem(
-      id: 'crispy-wings',
-      title: 'Crispy Wings (6pcs)',
-      description: 'Golden fried wings served with spicy dipping sauce.',
-      price: 9.50,
-      imageUrl:
-          'https://images.unsplash.com/photo-1562967916-eb82221dfb92?auto=format&fit=crop&w=900&q=80',
-      category: 'Starters',
-      isAvailable: true,
-      isPopular: false,
-      rating: 4.6,
-      ordersCount: 96,
-    ),
-    RestaurantMenuItem(
-      id: 'creamy-carbonara',
-      title: 'Creamy Carbonara',
-      description: 'Spaghetti tossed in creamy parmesan sauce and herbs.',
-      price: 13.25,
-      imageUrl:
-          'https://images.unsplash.com/photo-1621996346565-e3dbc646d9a9?auto=format&fit=crop&w=900&q=80',
-      category: 'Pasta',
-      isAvailable: true,
-      isPopular: true,
-      rating: 4.9,
-      ordersCount: 121,
-    ),
-    RestaurantMenuItem(
-      id: 'smoked-bbq-burger',
-      title: 'Smoked BBQ Burger',
-      description: 'Beef patty, cheddar, caramelized onions, and BBQ sauce.',
-      price: 12.75,
-      imageUrl:
-          'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=900&q=80',
-      category: 'Burgers',
-      isAvailable: true,
-      isPopular: true,
-      rating: 4.7,
-      ordersCount: 134,
-    ),
-    RestaurantMenuItem(
-      id: 'garden-caesar-salad',
-      title: 'Garden Caesar Salad',
-      description:
-          'Romaine lettuce, parmesan flakes, croutons, and Caesar dressing.',
-      price: 8.40,
-      imageUrl:
-          'https://images.unsplash.com/photo-1546793665-c74683f339c1?auto=format&fit=crop&w=900&q=80',
-      category: 'Salads',
-      isAvailable: true,
-      isPopular: false,
-      rating: 4.4,
-      ordersCount: 58,
-    ),
-    RestaurantMenuItem(
-      id: 'double-chocolate-brownie',
-      title: 'Double Chocolate Brownie',
-      description:
-          'Warm brownie served with chocolate sauce and vanilla cream.',
-      price: 6.80,
-      imageUrl:
-          'https://images.unsplash.com/photo-1606313564200-e75d5e30476c?auto=format&fit=crop&w=900&q=80',
-      category: 'Desserts',
-      isAvailable: true,
-      isPopular: false,
-      rating: 4.8,
-      ordersCount: 73,
-    ),
-  ];
+  static const List<RestaurantProfileVideoPreview> _fallbackVideos =
+      <RestaurantProfileVideoPreview>[];
+  static const List<RestaurantMenuItem> _fallbackMenuItems =
+      <RestaurantMenuItem>[];
 
   String get _normalizedHandle {
     final cleaned = handle.trim();
@@ -1282,24 +1249,15 @@ class _RestaurantProfilePopup extends StatelessWidget {
   }
 
   List<RestaurantMenuItem> get _resolvedMenuItems {
-    if (menuItems == null) {
-      return _fallbackMenuItems;
-    }
-    return menuItems!;
+    return menuItems ?? _fallbackMenuItems;
   }
 
   List<RestaurantProfileVideoPreview> get _resolvedVideos {
-    if (uploadedVideos == null) {
-      return _fallbackVideos;
-    }
-    return uploadedVideos!;
+    return uploadedVideos ?? _fallbackVideos;
   }
 
   List<RestaurantProfileReviewPreview> get _resolvedReviews {
-    if (reviews == null || reviews!.isEmpty) {
-      return _fallbackReviews;
-    }
-    return reviews!;
+    return reviews ?? const <RestaurantProfileReviewPreview>[];
   }
 
   List<RestaurantMenuItem> get _popularChoices {
@@ -2427,11 +2385,24 @@ class _RestaurantProfileVideoGrid extends StatelessWidget {
           return _RestaurantProfileVideoGridTile(
             video: video,
             onTap: () {
-              openRestaurantProfileVideoFeed(
-                context,
-                restaurantName: restaurantName,
-                videos: videos,
-                initialIndex: index,
+              if (video.videoUrl.trim().isEmpty) {
+                final messenger = ScaffoldMessenger.maybeOf(context);
+                messenger
+                  ?..hideCurrentSnackBar()
+                  ..showSnackBar(
+                    const SnackBar(
+                      content: Text('This video is not available yet.'),
+                    ),
+                  );
+                return;
+              }
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => _RestaurantProfileVideoDemoScreen(
+                    restaurantName: restaurantName,
+                    video: video,
+                  ),
+                ),
               );
             },
           );
@@ -2468,18 +2439,31 @@ class _RestaurantProfileVideoGridTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Container(
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFEFE1),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Center(
-                    child: Icon(
-                      Icons.play_circle_fill_rounded,
-                      color: Color(0xFFF68B1F),
-                      size: 28,
-                    ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: DecoratedBox(
+                    decoration: const BoxDecoration(color: Color(0xFFFFEFE1)),
+                    child: video.thumbnailUrl.trim().isNotEmpty
+                        ? Image.network(
+                            video.thumbnailUrl.trim(),
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) {
+                              return const Center(
+                                child: Icon(
+                                  Icons.play_circle_fill_rounded,
+                                  color: Color(0xFFF68B1F),
+                                  size: 28,
+                                ),
+                              );
+                            },
+                          )
+                        : const Center(
+                            child: Icon(
+                              Icons.play_circle_fill_rounded,
+                              color: Color(0xFFF68B1F),
+                              size: 28,
+                            ),
+                          ),
                   ),
                 ),
               ),
@@ -2517,12 +2501,10 @@ class _RestaurantProfileVideoDemoScreen extends StatefulWidget {
   const _RestaurantProfileVideoDemoScreen({
     required this.restaurantName,
     required this.video,
-    required this.videoAssetPath,
   });
 
   final String restaurantName;
   final RestaurantProfileVideoPreview video;
-  final String videoAssetPath;
 
   @override
   State<_RestaurantProfileVideoDemoScreen> createState() =>
@@ -2542,15 +2524,16 @@ class _RestaurantProfileVideoDemoScreenState
   }
 
   Future<void> _initializeVideo() async {
-    final assetPath = widget.videoAssetPath.trim();
-    if (assetPath.isEmpty) {
+    final resolvedUrl = widget.video.videoUrl.trim();
+    final parsed = Uri.tryParse(resolvedUrl);
+    if (resolvedUrl.isEmpty || parsed == null || !parsed.hasScheme) {
       if (!mounted) {
         return;
       }
       setState(() => _hasError = true);
       return;
     }
-    final controller = VideoPlayerController.asset(assetPath);
+    final controller = VideoPlayerController.networkUrl(parsed);
     _controller = controller;
     try {
       await controller.initialize();
@@ -2597,7 +2580,7 @@ class _RestaurantProfileVideoDemoScreenState
         backgroundColor: const Color(0xFFF8EFE5),
         elevation: 0,
         title: const Text(
-          'Video Demo',
+          'Restaurant Video',
           style: TextStyle(
             color: Color(0xFF231A16),
             fontWeight: FontWeight.w800,
@@ -2624,7 +2607,7 @@ class _RestaurantProfileVideoDemoScreenState
                     child: _hasError
                         ? const Center(
                             child: Text(
-                              'Demo video unavailable',
+                              'Video unavailable',
                               style: TextStyle(
                                 color: Colors.white70,
                                 fontWeight: FontWeight.w600,
@@ -2659,7 +2642,7 @@ class _RestaurantProfileVideoDemoScreenState
                   ),
                   const SizedBox(width: 10),
                   Text(
-                    'Demo clip',
+                    'Uploaded video',
                     style: const TextStyle(
                       color: Color(0xFF8A786B),
                       fontWeight: FontWeight.w700,
@@ -2686,15 +2669,16 @@ class _RestaurantProfileVideoDemoScreenState
                 ),
               ),
               const SizedBox(height: 10),
-              const Text(
-                'This is a demo player. Connect uploaded video URLs here later for live restaurant clips.',
-                style: TextStyle(
-                  color: Color(0xFF6D5D53),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  height: 1.35,
+              if (widget.video.description.trim().isNotEmpty)
+                Text(
+                  widget.video.description.trim(),
+                  style: const TextStyle(
+                    color: Color(0xFF6D5D53),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    height: 1.35,
+                  ),
                 ),
-              ),
             ],
           ),
         ),
@@ -4527,11 +4511,13 @@ class _RestaurantReviewsPage extends StatefulWidget {
   const _RestaurantReviewsPage({
     required this.restaurantName,
     required this.rating,
+    required this.restaurantId,
     required this.reviews,
   });
 
   final String restaurantName;
   final double rating;
+  final String? restaurantId;
   final List<RestaurantProfileReviewPreview> reviews;
 
   @override
@@ -4539,15 +4525,28 @@ class _RestaurantReviewsPage extends StatefulWidget {
 }
 
 class _RestaurantReviewsPageState extends State<_RestaurantReviewsPage> {
+  final _authSessionService = AuthSessionService();
   late final TextEditingController _feedbackController;
+  late final CustomerRestaurantApiService _restaurantApiService;
   late List<RestaurantProfileReviewPreview> _reviews;
   double _selectedRating = 0;
+  bool _isLoadingReviews = false;
+  bool _isSubmittingReview = false;
+  bool _isReviewSubmitUnsupportedByServer = false;
+  String? _reviewsErrorMessage;
 
   @override
   void initState() {
     super.initState();
+    _restaurantApiService = CustomerRestaurantApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: _authSessionService,
+      ),
+    );
     _feedbackController = TextEditingController();
     _reviews = List<RestaurantProfileReviewPreview>.from(widget.reviews);
+    unawaited(_loadLiveReviews());
   }
 
   @override
@@ -4567,10 +4566,121 @@ class _RestaurantReviewsPageState extends State<_RestaurantReviewsPage> {
     return total / _reviews.length;
   }
 
-  bool get _canSubmitReview => _selectedRating > 0;
+  bool get _canSubmitReview =>
+      !_isSubmittingReview &&
+      !_isReviewSubmitUnsupportedByServer &&
+      _selectedRating > 0 &&
+      (widget.restaurantId?.trim().isNotEmpty ?? false);
 
-  void _submitReview() {
-    final feedback = _feedbackController.text.trim();
+  Future<AuthSession?> _resolveSession() async {
+    final session = await _authSessionService.readSession();
+    if (session == null || session.token.trim().isEmpty) {
+      return null;
+    }
+    return session;
+  }
+
+  Future<List<CustomerRestaurantReviewItem>> _fetchAllReviews({
+    required AuthSession session,
+    required String restaurantId,
+  }) async {
+    const perPage = 50;
+    const maxPages = 20;
+    final all = <CustomerRestaurantReviewItem>[];
+    for (var page = 1; page <= maxPages; page++) {
+      final pageItems = await _restaurantApiService.fetchRestaurantReviews(
+        session: session,
+        restaurantId: restaurantId,
+        page: page,
+        perPage: perPage,
+      );
+      if (pageItems.isEmpty) {
+        break;
+      }
+      all.addAll(pageItems);
+      if (pageItems.length < perPage) {
+        break;
+      }
+    }
+    return all;
+  }
+
+  Future<void> _loadLiveReviews({bool showErrorFeedback = false}) async {
+    final restaurantId = widget.restaurantId?.trim() ?? '';
+    if (restaurantId.isEmpty || _isLoadingReviews) {
+      return;
+    }
+    setState(() {
+      _isLoadingReviews = true;
+      _reviewsErrorMessage = null;
+    });
+
+    try {
+      final session = await _resolveSession();
+      if (session == null) {
+        throw const AuthApiException('Please log in again.');
+      }
+      final liveReviews = await _fetchAllReviews(
+        session: session,
+        restaurantId: restaurantId,
+      );
+      liveReviews.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      final mapped = liveReviews
+          .map((review) {
+            final createdAt = review.createdAt.toLocal();
+            return RestaurantProfileReviewPreview(
+              customerName: review.customerName,
+              rating: review.rating,
+              comment: review.comment,
+              timeLabel: _formatTime(createdAt),
+              orderLabel: review.orderLabel,
+            );
+          })
+          .toList(growable: false);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _reviews = mapped;
+        _isLoadingReviews = false;
+        _reviewsErrorMessage = null;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoadingReviews = false;
+        _reviewsErrorMessage = 'Could not refresh reviews right now.';
+      });
+      if (showErrorFeedback) {
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        messenger
+          ?..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text('Could not refresh reviews right now.'),
+            ),
+          );
+      }
+      debugPrint('Restaurant reviews page load failed: $error');
+    }
+  }
+
+  Future<void> _submitReview() async {
+    if (_isReviewSubmitUnsupportedByServer) {
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Review submission is not enabled on this server yet.',
+            ),
+          ),
+        );
+      return;
+    }
     if (_selectedRating <= 0) {
       final messenger = ScaffoldMessenger.maybeOf(context);
       messenger
@@ -4580,26 +4690,115 @@ class _RestaurantReviewsPageState extends State<_RestaurantReviewsPage> {
         );
       return;
     }
-
-    final newReview = RestaurantProfileReviewPreview(
-      customerName: 'You',
-      rating: _selectedRating,
-      comment: feedback,
-      timeLabel: 'Now',
-      orderLabel: '#NEW',
-    );
+    final restaurantId = widget.restaurantId?.trim() ?? '';
+    if (restaurantId.isEmpty) {
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Review submission is available only for live restaurant profiles.',
+            ),
+          ),
+        );
+      return;
+    }
+    final session = await _resolveSession();
+    if (!mounted) {
+      return;
+    }
+    if (session == null) {
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('Please log in again.')));
+      return;
+    }
 
     FocusScope.of(context).unfocus();
-    setState(() {
-      _reviews = <RestaurantProfileReviewPreview>[newReview, ..._reviews];
-      _selectedRating = 0;
-      _feedbackController.clear();
-    });
-
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger
-      ?..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(content: Text('Thanks for your review.')));
+    setState(() => _isSubmittingReview = true);
+    try {
+      final submitted = await _restaurantApiService.submitRestaurantReview(
+        session: session,
+        restaurantId: restaurantId,
+        rating: _selectedRating.round().clamp(1, 5),
+        comment: _feedbackController.text,
+      );
+      if (!mounted) {
+        return;
+      }
+      final createdAt = submitted.createdAt.toLocal();
+      final preview = RestaurantProfileReviewPreview(
+        customerName: submitted.customerName,
+        rating: submitted.rating,
+        comment: submitted.comment,
+        timeLabel: _formatTime(createdAt),
+        orderLabel: submitted.orderLabel,
+      );
+      setState(() {
+        _selectedRating = 0;
+        _feedbackController.clear();
+        _reviews = <RestaurantProfileReviewPreview>[
+          preview,
+          ..._reviews.where(
+            (review) =>
+                !(review.customerName == preview.customerName &&
+                    review.orderLabel == preview.orderLabel &&
+                    review.comment == preview.comment),
+          ),
+        ];
+      });
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Review submitted successfully.')),
+        );
+      unawaited(_loadLiveReviews());
+    } on AuthApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      final normalized = error.message.toLowerCase();
+      final submitUnsupported =
+          normalized.contains('http 405') ||
+          normalized.contains('post method is not supported') &&
+              normalized.contains('/reviews');
+      if (submitUnsupported) {
+        setState(() => _isReviewSubmitUnsupportedByServer = true);
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        messenger
+          ?..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Review submission endpoint is missing on server. Please update API routes.',
+              ),
+            ),
+          );
+        return;
+      }
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(error.message)));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Could not submit review right now.')),
+        );
+      debugPrint('Restaurant review submit failed: $error');
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmittingReview = false);
+      }
+    }
   }
 
   @override
@@ -4623,172 +4822,254 @@ class _RestaurantReviewsPageState extends State<_RestaurantReviewsPage> {
       ),
       body: SafeArea(
         top: false,
-        child: ListView(
-          physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 6, 16, 18),
-          children: [
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: const Color(0xFFE5DACF)),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 52,
-                    height: 52,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFFFF1CC),
-                      shape: BoxShape.circle,
+        child: RefreshIndicator(
+          onRefresh: () => _loadLiveReviews(showErrorFeedback: true),
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(
+              parent: BouncingScrollPhysics(),
+            ),
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 18),
+            children: [
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: const Color(0xFFE5DACF)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFFFF1CC),
+                        shape: BoxShape.circle,
+                      ),
+                      alignment: Alignment.center,
+                      child: const Icon(
+                        Icons.star_rounded,
+                        color: Color(0xFFB07800),
+                        size: 28,
+                      ),
                     ),
-                    alignment: Alignment.center,
-                    child: const Icon(
-                      Icons.star_rounded,
-                      color: Color(0xFFB07800),
-                      size: 28,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          average.toStringAsFixed(1),
-                          style: const TextStyle(
-                            color: Color(0xFF2B211B),
-                            fontSize: 22,
-                            fontWeight: FontWeight.w900,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            average.toStringAsFixed(1),
+                            style: const TextStyle(
+                              color: Color(0xFF2B211B),
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          reviewCount == 1
-                              ? '1 customer review'
-                              : '$reviewCount customer reviews',
+                          const SizedBox(height: 2),
+                          Text(
+                            reviewCount == 1
+                                ? '1 customer review'
+                                : '$reviewCount customer reviews',
+                            style: const TextStyle(
+                              color: Color(0xFF8A796C),
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (_isLoadingReviews) ...[
+                const SizedBox(height: 8),
+                const LinearProgressIndicator(minHeight: 2),
+              ],
+              if (_reviewsErrorMessage != null) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF4EE),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFFFD6C2)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.error_outline_rounded,
+                        size: 18,
+                        color: Color(0xFFC75B2A),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _reviewsErrorMessage!,
                           style: const TextStyle(
-                            color: Color(0xFF8A796C),
-                            fontSize: 12.5,
+                            color: Color(0xFF7B3E23),
                             fontWeight: FontWeight.w700,
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: const Color(0xFFE5DACF)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Leave a Review',
-                    style: TextStyle(
-                      color: Color(0xFF2B211B),
-                      fontSize: 16,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: List.generate(5, (index) {
-                      final starNumber = index + 1;
-                      final isSelected = _selectedRating >= starNumber;
-                      return IconButton(
-                        onPressed: () {
-                          setState(
-                            () => _selectedRating = starNumber.toDouble(),
-                          );
-                        },
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints.tightFor(
-                          width: 36,
-                          height: 36,
-                        ),
-                        splashRadius: 20,
-                        icon: Icon(
-                          isSelected
-                              ? Icons.star_rounded
-                              : Icons.star_border_rounded,
-                          color: isSelected
-                              ? const Color(0xFFF5B63F)
-                              : const Color(0xFFC5B8AB),
-                          size: 28,
-                        ),
-                      );
-                    }),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _feedbackController,
-                    maxLines: 4,
-                    onChanged: (_) => setState(() {}),
-                    decoration: InputDecoration(
-                      hintText: 'Share your feedback (optional)',
-                      filled: true,
-                      fillColor: const Color(0xFFFEFCFA),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: const BorderSide(color: Color(0xFFEADBCB)),
                       ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: const BorderSide(color: Color(0xFFEADBCB)),
+                      TextButton(
+                        onPressed: _isLoadingReviews
+                            ? null
+                            : () => _loadLiveReviews(showErrorFeedback: true),
+                        child: const Text('Retry'),
                       ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: const BorderSide(color: Color(0xFFFF9E70)),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: const Color(0xFFE5DACF)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Leave a Review',
+                      style: TextStyle(
+                        color: Color(0xFF2B211B),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: _canSubmitReview ? _submitReview : null,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFFFF7E4D),
-                        minimumSize: const Size.fromHeight(46),
-                        shape: RoundedRectangleBorder(
+                    const SizedBox(height: 10),
+                    Row(
+                      children: List.generate(5, (index) {
+                        final starNumber = index + 1;
+                        final isSelected = _selectedRating >= starNumber;
+                        return IconButton(
+                          onPressed: _isSubmittingReview
+                              ? null
+                              : () {
+                                  setState(
+                                    () =>
+                                        _selectedRating = starNumber.toDouble(),
+                                  );
+                                },
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints.tightFor(
+                            width: 36,
+                            height: 36,
+                          ),
+                          splashRadius: 20,
+                          icon: Icon(
+                            isSelected
+                                ? Icons.star_rounded
+                                : Icons.star_border_rounded,
+                            color: isSelected
+                                ? const Color(0xFFF5B63F)
+                                : const Color(0xFFC5B8AB),
+                            size: 28,
+                          ),
+                        );
+                      }),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _feedbackController,
+                      maxLines: 4,
+                      enabled: !_isSubmittingReview,
+                      onChanged: (_) => setState(() {}),
+                      decoration: InputDecoration(
+                        hintText: 'Share your feedback (optional)',
+                        filled: true,
+                        fillColor: const Color(0xFFFEFCFA),
+                        border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(
+                            color: Color(0xFFEADBCB),
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(
+                            color: Color(0xFFEADBCB),
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(
+                            color: Color(0xFFFF9E70),
+                          ),
                         ),
                       ),
-                      icon: const Icon(Icons.rate_review_rounded),
-                      label: const Text(
-                        'Submit Review',
-                        style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _canSubmitReview
+                            ? () => unawaited(_submitReview())
+                            : null,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFFFF7E4D),
+                          minimumSize: const Size.fromHeight(46),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        icon: _isSubmittingReview
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.rate_review_rounded),
+                        label: Text(
+                          _isSubmittingReview
+                              ? 'Submitting...'
+                              : 'Submit Review',
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
-            if (_reviews.isEmpty)
-              const _PopupEmptyState(
-                icon: Icons.rate_review_rounded,
-                title: 'No Reviews Yet',
-                message:
-                    'Customers have not left feedback for this restaurant yet.',
-              )
-            else
-              ..._reviews.map(
-                (review) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: _RestaurantProfileReviewTile(review: review),
+                    if (_isReviewSubmitUnsupportedByServer) ...[
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Review submission is currently unavailable on server.',
+                        style: TextStyle(
+                          color: Color(0xFF9A7B67),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
-          ],
+              const SizedBox(height: 10),
+              if (_reviews.isEmpty)
+                const _PopupEmptyState(
+                  icon: Icons.rate_review_rounded,
+                  title: 'No Reviews Yet',
+                  message:
+                      'Customers have not left feedback for this restaurant yet.',
+                )
+              else
+                ..._reviews.map(
+                  (review) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _RestaurantProfileReviewTile(review: review),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

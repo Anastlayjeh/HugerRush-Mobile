@@ -181,7 +181,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   bool get _isDashboardTabSelected =>
       _selectedBottomIndex == _dashboardTabIndex;
   bool get _isMessagesTabSelected => _selectedBottomIndex == _messagesTabIndex;
-  bool get _isFollowingFeedSelected => _selectedTopTab == 0;
+  bool get _isFollowingFeedSelected => false;
   List<RestaurantMenuItem> get _menuItemsForDisplay => _restaurantMenuItems;
 
   // ignore: unused_element
@@ -381,7 +381,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       followersCount: item.stats.viewsCount,
       caption: caption,
       tags: tags,
-      audioLabel: 'Original Audio - $restaurantName',
+      audioLabel: '',
       rating: 4.8,
       likeCount: item.stats.likesCount,
       commentCount: item.stats.commentsCount,
@@ -451,7 +451,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
       followersCount: 0,
       caption: 'Restaurant video',
       tags: _profileInfo.cuisineSummary,
-      audioLabel: 'Original Audio - $_restaurantName',
+      audioLabel: '',
       rating: _ratingValueFromLabel(_profileInfo.ratingLabel),
       likeCount: 0,
       commentCount: 0,
@@ -612,6 +612,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         handle: targetPost.restaurantHandle,
         rating: targetPost.rating,
         caption: targetPost.caption,
+        restaurantId: targetPost.restaurantId,
         cuisineSummary: _profileInfo.cuisineSummary,
         phoneLabel: _profileInfo.phoneLabel,
         locationLabel: _profileInfo.locationLabel,
@@ -767,24 +768,27 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
         ),
       ),
     );
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      final current = _feedPostsById[targetPost.id] ?? targetPost;
-      _feedPostsById[targetPost.id] = current.copyWith(
-        commentCount: _demoRepository.getComments(targetPost.id).length,
-      );
-    });
   }
 
   Future<void> _shareVendorPromo([DemoFeedPost? post]) async {
     final targetPost = post ?? _activeFeedPost;
+    String? directUrl;
+    for (final video in _feedVideos) {
+      if (video.postId == targetPost.id && video.videoUrl.trim().isNotEmpty) {
+        directUrl = video.videoUrl.trim();
+        break;
+      }
+    }
+    if ((directUrl == null || directUrl.isEmpty) &&
+        (targetPost.previewUrl?.trim().isNotEmpty ?? false)) {
+      directUrl = targetPost.previewUrl!.trim();
+    }
     final result = await PostShareService.instance.sharePost(
       postId: targetPost.id,
       title: targetPost.restaurantName,
       caption: targetPost.caption,
       creatorHandle: targetPost.restaurantHandle,
+      directUrl: directUrl,
     );
     if (!mounted) {
       return;
@@ -1024,11 +1028,10 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   }
 
   void _onTopFeedTabSelected(int index) {
-    if (_selectedTopTab == index) {
+    if (index == _selectedTopTab) {
       return;
     }
-    setState(() => _selectedTopTab = index);
-    unawaited(_refreshRestaurantVideos());
+    setState(() => _selectedTopTab = 1);
   }
 
   String _emptyFeedMessage() {
@@ -2410,15 +2413,8 @@ class _TopControls extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   _TopTab(
-                    label: 'Following',
-                    selected: selectedTab == 0,
-                    metrics: metrics,
-                    onTap: () => onTabSelected(0),
-                  ),
-                  SizedBox(width: _clampDouble(18 * metrics.scale, 8, 18)),
-                  _TopTab(
                     label: 'For You',
-                    selected: selectedTab == 1,
+                    selected: true,
                     metrics: metrics,
                     onTap: () => onTabSelected(1),
                   ),
@@ -2634,33 +2630,35 @@ class _FeedDetails extends StatelessWidget {
             fontWeight: FontWeight.w800,
           ),
         ),
-        SizedBox(height: _clampDouble(12 * metrics.scale, 6, 14)),
-        InkWell(
-          onTap: onOpenAudio,
-          borderRadius: BorderRadius.circular(16),
-          child: Row(
-            children: [
-              Icon(
-                Icons.music_note_rounded,
-                color: Colors.white,
-                size: _clampDouble(metrics.audioFontSize + 4, 14, 20),
-              ),
-              SizedBox(width: _clampDouble(6 * metrics.scale, 4, 6)),
-              Flexible(
-                child: Text(
-                  post.audioLabel,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: const Color(0xD9FFFFFF),
-                    fontSize: metrics.audioFontSize,
-                    fontWeight: FontWeight.w600,
+        if (post.audioLabel.trim().isNotEmpty) ...[
+          SizedBox(height: _clampDouble(12 * metrics.scale, 6, 14)),
+          InkWell(
+            onTap: onOpenAudio,
+            borderRadius: BorderRadius.circular(16),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.music_note_rounded,
+                  color: Colors.white,
+                  size: _clampDouble(metrics.audioFontSize + 4, 14, 20),
+                ),
+                SizedBox(width: _clampDouble(6 * metrics.scale, 4, 6)),
+                Flexible(
+                  child: Text(
+                    post.audioLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: const Color(0xD9FFFFFF),
+                      fontSize: metrics.audioFontSize,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -2995,16 +2993,15 @@ class _FeedCommentsBottomSheet extends StatefulWidget {
 }
 
 class _FeedCommentsBottomSheetState extends State<_FeedCommentsBottomSheet> {
-  final _repository = DemoAppRepository.instance;
   final _controller = TextEditingController();
+  final bool _isSending = false;
 
   late List<DemoComment> _comments;
-  bool _isSending = false;
 
   @override
   void initState() {
     super.initState();
-    _comments = _repository.getComments(widget.postId);
+    _comments = const <DemoComment>[];
   }
 
   @override
@@ -3014,25 +3011,15 @@ class _FeedCommentsBottomSheetState extends State<_FeedCommentsBottomSheet> {
   }
 
   Future<void> _sendComment() async {
-    final text = _controller.text.trim();
-    if (text.isEmpty || _isSending) {
-      return;
-    }
-    FocusScope.of(context).unfocus();
-    setState(() => _isSending = true);
-    final comments = await _repository.addComment(
-      postId: widget.postId,
-      authorName: 'You',
-      text: text,
-    );
-    if (!mounted) {
-      return;
-    }
-    _controller.clear();
-    setState(() {
-      _comments = comments;
-      _isSending = false;
-    });
+    ScaffoldMessenger.maybeOf(context)
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Commenting from restaurant accounts is not available yet.',
+          ),
+        ),
+      );
   }
 
   @override

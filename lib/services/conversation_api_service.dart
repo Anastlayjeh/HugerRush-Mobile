@@ -10,11 +10,18 @@ class ConversationApiService {
 
   Future<List<AppConversation>> fetchConversations({
     required AuthSession session,
+    String? query,
   }) async {
+    final endpoint = query == null || query.trim().isEmpty
+        ? '/v1/conversations'
+        : Uri(
+            path: '/v1/conversations',
+            queryParameters: <String, String>{'q': query.trim()},
+          ).toString();
     final result = await _apiClient.request(
       session: session,
       method: 'GET',
-      endpoint: '/v1/conversations',
+      endpoint: endpoint,
     );
     final payload = ApiClient.decodeMap(result.response.body);
     _throwForFailure(

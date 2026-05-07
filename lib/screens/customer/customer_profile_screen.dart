@@ -255,34 +255,159 @@ class _ProfileTabBody extends StatelessWidget {
     );
   }
 
+  String? _resolveRestaurantIdForSavedPlace(_SavedPlaceData place) {
+    final normalizedName = place.title.trim().toLowerCase();
+    final normalizedHandle = place.handle.trim().toLowerCase().replaceFirst(
+      '@',
+      '',
+    );
+    for (final post in followedRestaurants) {
+      final candidateId = post.restaurantId?.trim();
+      if (candidateId == null || candidateId.isEmpty) {
+        continue;
+      }
+      final postName = post.restaurantName.trim().toLowerCase();
+      final postHandle = post.restaurantHandle
+          .trim()
+          .toLowerCase()
+          .replaceFirst('@', '');
+      if (postName == normalizedName || postHandle == normalizedHandle) {
+        return candidateId;
+      }
+    }
+    return null;
+  }
+
   Future<void> _openSavedPlaceProfile(
     BuildContext context,
     _SavedPlaceData place,
   ) async {
-    final reviewPreviews = _buildDemoRestaurantReviews(
-      restaurantName: place.title,
-      rating: place.rating,
-    );
+    final restaurantId = _resolveRestaurantIdForSavedPlace(place);
+    var resolvedPlace = place;
+    var menuItems = const <RestaurantMenuItem>[];
+    var uploadedVideos = const <RestaurantProfileVideoPreview>[];
+    var reviewPreviews = const <RestaurantProfileReviewPreview>[];
+    String? profileImageUrl;
+    String? loyaltyPointsLabel;
+    final cleanedRestaurantId = restaurantId?.trim() ?? '';
+    if (cleanedRestaurantId.isNotEmpty) {
+      final authSessionService = AuthSessionService();
+      final session = await authSessionService.readSession();
+      if (session != null && session.token.trim().isNotEmpty) {
+        final authenticatedClient = AuthenticatedApiClient(
+          authApiService: AuthApiService(),
+          authSessionService: authSessionService,
+        );
+        final restaurantApi = CustomerRestaurantApiService(
+          apiClient: authenticatedClient,
+        );
+        final loyaltyApi = LoyaltyApiService(apiClient: authenticatedClient);
+        try {
+          final details = await restaurantApi.fetchRestaurant(
+            session: session,
+            restaurantId: cleanedRestaurantId,
+          );
+          resolvedPlace = _SavedPlaceData(
+            title: details.name,
+            subtitle: details.categoryLabel.trim().isEmpty
+                ? place.subtitle
+                : details.categoryLabel.trim(),
+            handle: details.id.isEmpty
+                ? place.handle
+                : 'restaurant-${details.id}',
+            cuisineSummary: details.categoryLabel,
+            caption: details.description.trim().isEmpty
+                ? place.caption
+                : details.description.trim(),
+            rating: details.averageRating ?? place.rating,
+            phoneLabel: details.phone.trim().isEmpty
+                ? place.phoneLabel
+                : details.phone.trim(),
+            locationLabel: details.address.trim().isEmpty
+                ? place.locationLabel
+                : details.address.trim(),
+            followersCount: details.followersCount,
+            icon: place.icon,
+          );
+          profileImageUrl = details.profilePhotoUrl.trim().isEmpty
+              ? null
+              : details.profilePhotoUrl.trim();
+        } catch (_) {}
+        try {
+          menuItems = await restaurantApi.fetchRestaurantMenu(
+            session: session,
+            restaurantId: cleanedRestaurantId,
+          );
+        } catch (_) {}
+        try {
+          final videos = await restaurantApi.fetchRestaurantVideos(
+            session: session,
+            restaurantId: cleanedRestaurantId,
+            perPage: 50,
+          );
+          uploadedVideos = _restaurantVideoPreviewsFromItems(videos);
+        } catch (_) {}
+        try {
+          final reviews = await restaurantApi.fetchRestaurantReviews(
+            session: session,
+            restaurantId: cleanedRestaurantId,
+            perPage: 50,
+          );
+          reviewPreviews = reviews
+              .map((review) {
+                final createdAt = review.createdAt.toLocal();
+                return RestaurantProfileReviewPreview(
+                  customerName: review.customerName,
+                  rating: review.rating,
+                  comment: review.comment,
+                  timeLabel: _formatRelativeTime(createdAt),
+                  orderLabel: review.orderLabel,
+                );
+              })
+              .toList(growable: false);
+        } catch (_) {}
+        try {
+          final points = await loyaltyApi.fetchCustomerRestaurantPoints(
+            session: session,
+            restaurantId: cleanedRestaurantId,
+          );
+          loyaltyPointsLabel = 'Your loyalty points: ${points.pointsBalance}';
+        } catch (_) {}
+      }
+    }
+    if (!context.mounted) {
+      return;
+    }
+
     await showRestaurantProfilePopup(
       context,
-      restaurantName: place.title,
-      handle: place.handle,
-      rating: place.rating,
-      caption: place.caption,
-      cuisineSummary: place.cuisineSummary,
-      phoneLabel: place.phoneLabel,
-      locationLabel: place.locationLabel,
+      restaurantName: resolvedPlace.title,
+      handle: resolvedPlace.handle,
+      rating: resolvedPlace.rating,
+      caption: resolvedPlace.caption,
+      restaurantId: cleanedRestaurantId.isEmpty ? null : cleanedRestaurantId,
+      cuisineSummary: resolvedPlace.cuisineSummary,
+      phoneLabel: resolvedPlace.phoneLabel,
+      locationLabel: resolvedPlace.locationLabel,
       followersCountLabel:
-          '${_formatCompactCount(place.followersCount)} followers',
+          '${_formatCompactCount(resolvedPlace.followersCount)} followers',
+      profileImageUrl: profileImageUrl,
+      loyaltyPointsLabel: loyaltyPointsLabel,
       allowAddToCart: true,
+      menuItems: menuItems,
+      uploadedVideos: uploadedVideos,
+      showMenuCategoryFilter: true,
       showFollowButton: true,
       showSaveButton: true,
       reviews: reviewPreviews,
       onOpenReviews: () {
         openRestaurantReviewsPage(
           context,
-          restaurantName: place.title,
-          rating: place.rating,
+          restaurantName: resolvedPlace.title,
+          rating: resolvedPlace.rating,
+          restaurantId: cleanedRestaurantId.isEmpty
+              ? null
+              : cleanedRestaurantId,
           reviews: reviewPreviews,
         );
       },
@@ -671,20 +796,81 @@ class _FollowingRestaurantsScreenState
   }
 
   Future<void> _openRestaurant(DemoFeedPost post) async {
-    final reviewPreviews = _buildDemoRestaurantReviews(
-      restaurantName: post.restaurantName,
-      rating: post.rating,
-    );
+    var reviewPreviews = const <RestaurantProfileReviewPreview>[];
+    var uploadedVideos = const <RestaurantProfileVideoPreview>[];
     final session = await _resolveSession();
     List<RestaurantMenuItem> menuItems = const <RestaurantMenuItem>[];
+    String? cuisineSummary;
+    String? phoneLabel;
+    String? locationLabel;
+    String? followersCountLabel =
+        '${_formatCompactCount(post.followersCount)} followers';
+    String? profileImageUrl = post.thumbnailUrl;
+    var resolvedRestaurantName = post.restaurantName;
+    var resolvedHandle = post.restaurantHandle;
+    var resolvedRating = post.rating;
+    var resolvedCaption = post.caption;
     String? loyaltyPointsLabel;
     final restaurantId = post.restaurantId?.trim();
     if (session != null && restaurantId != null && restaurantId.isNotEmpty) {
+      try {
+        final details = await _restaurantApiService.fetchRestaurant(
+          session: session,
+          restaurantId: restaurantId,
+        );
+        resolvedRestaurantName = details.name;
+        resolvedHandle = details.id.isEmpty
+            ? resolvedHandle
+            : 'restaurant-${details.id}';
+        resolvedRating = details.averageRating ?? resolvedRating;
+        if (details.description.trim().isNotEmpty) {
+          resolvedCaption = details.description.trim();
+        }
+        cuisineSummary = details.categoryLabel.trim().isEmpty
+            ? null
+            : details.categoryLabel.trim();
+        phoneLabel = details.phone.trim().isEmpty ? null : details.phone.trim();
+        locationLabel = details.address.trim().isEmpty
+            ? null
+            : details.address.trim();
+        followersCountLabel =
+            '${_formatCompactCount(details.followersCount)} followers';
+        profileImageUrl = details.profilePhotoUrl.trim().isEmpty
+            ? profileImageUrl
+            : details.profilePhotoUrl.trim();
+      } catch (_) {}
       try {
         menuItems = await _restaurantApiService.fetchRestaurantMenu(
           session: session,
           restaurantId: restaurantId,
         );
+      } catch (_) {}
+      try {
+        final videos = await _restaurantApiService.fetchRestaurantVideos(
+          session: session,
+          restaurantId: restaurantId,
+          perPage: 50,
+        );
+        uploadedVideos = _restaurantVideoPreviewsFromItems(videos);
+      } catch (_) {}
+      try {
+        final reviews = await _restaurantApiService.fetchRestaurantReviews(
+          session: session,
+          restaurantId: restaurantId,
+          perPage: 50,
+        );
+        reviewPreviews = reviews
+            .map((review) {
+              final createdAt = review.createdAt.toLocal();
+              return RestaurantProfileReviewPreview(
+                customerName: review.customerName,
+                rating: review.rating,
+                comment: review.comment,
+                timeLabel: _formatRelativeTime(createdAt),
+                orderLabel: review.orderLabel,
+              );
+            })
+            .toList(growable: false);
       } catch (_) {}
       try {
         final points = await _loyaltyApiService.fetchCustomerRestaurantPoints(
@@ -699,25 +885,32 @@ class _FollowingRestaurantsScreenState
     }
     await showRestaurantProfilePopup(
       context,
-      restaurantName: post.restaurantName,
-      handle: post.restaurantHandle,
-      rating: post.rating,
-      caption: post.caption,
-      followersCountLabel:
-          '${_formatCompactCount(post.followersCount)} followers',
+      restaurantName: resolvedRestaurantName,
+      handle: resolvedHandle,
+      rating: resolvedRating,
+      caption: resolvedCaption,
+      restaurantId: restaurantId,
+      cuisineSummary: cuisineSummary,
+      phoneLabel: phoneLabel,
+      locationLabel: locationLabel,
+      followersCountLabel: followersCountLabel,
+      profileImageUrl: profileImageUrl,
       loyaltyPointsLabel: loyaltyPointsLabel,
       allowAddToCart: true,
       menuItems: menuItems,
+      uploadedVideos: uploadedVideos,
       showFollowButton: true,
       showSaveButton: true,
       initiallyFollowing: post.isFollowing,
+      showMenuCategoryFilter: true,
       onToggleFollow: () => unawaited(_toggleFollow(post)),
       reviews: reviewPreviews,
       onOpenReviews: () {
         openRestaurantReviewsPage(
           context,
-          restaurantName: post.restaurantName,
-          rating: post.rating,
+          restaurantName: resolvedRestaurantName,
+          rating: resolvedRating,
+          restaurantId: restaurantId,
           reviews: reviewPreviews,
         );
       },
@@ -1127,11 +1320,6 @@ class _UserProfileMenuDrawer extends StatelessWidget {
       destination: _ProfileSettingsDestination.notifications,
     ),
     _ProfileSettingsItemData(
-      title: 'Payment Methods',
-      icon: Icons.credit_card_rounded,
-      destination: _ProfileSettingsDestination.paymentMethods,
-    ),
-    _ProfileSettingsItemData(
       title: 'Privacy & Security',
       icon: Icons.lock_outline_rounded,
       destination: _ProfileSettingsDestination.privacySecurity,
@@ -1156,13 +1344,6 @@ class _UserProfileMenuDrawer extends StatelessWidget {
       case _ProfileSettingsDestination.notifications:
         navigator.push(
           MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
-        );
-        return;
-      case _ProfileSettingsDestination.paymentMethods:
-        navigator.push(
-          MaterialPageRoute<void>(
-            builder: (_) => const _CustomerPaymentMethodsScreen(),
-          ),
         );
         return;
       case _ProfileSettingsDestination.privacySecurity:
@@ -1752,81 +1933,84 @@ class _CustomerPrivacySecurityScreen extends StatefulWidget {
 
 class _CustomerPrivacySecurityScreenState
     extends State<_CustomerPrivacySecurityScreen> {
-  bool _biometricLogin = true;
-  bool _twoFactorCode = false;
-  bool _hidePhoneNumber = true;
-  bool _shareUsageAnalytics = false;
+  final _authSessionService = AuthSessionService();
+  final _authApiService = AuthApiService();
+  final _oldPasswordController = TextEditingController();
+  final _newPasswordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
+  bool _isSubmitting = false;
 
-  Future<void> _openChangePasswordDialog() async {
-    final currentController = TextEditingController();
-    final nextController = TextEditingController();
+  @override
+  void dispose() {
+    _oldPasswordController.dispose();
+    _newPasswordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
+  }
 
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Change password'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: currentController,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Current password',
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: nextController,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: 'New password'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final current = currentController.text.trim();
-                final next = nextController.text.trim();
-                final messenger = ScaffoldMessenger.maybeOf(context);
-                if (current.isEmpty || next.length < 6) {
-                  messenger
-                    ?..hideCurrentSnackBar()
-                    ..showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Enter current password and a new one with at least 6 characters.',
-                        ),
-                      ),
-                    );
-                  return;
-                }
-                Navigator.of(dialogContext).pop();
-                messenger
-                  ?..hideCurrentSnackBar()
-                  ..showSnackBar(
-                    const SnackBar(
-                      content: Text('Password updated successfully.'),
-                    ),
-                  );
-              },
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFFF7E4D),
-              ),
-              child: const Text('Update'),
-            ),
-          ],
-        );
-      },
-    );
+  void _showMessage(String message) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
 
-    currentController.dispose();
-    nextController.dispose();
+  Future<void> _submitPasswordChange() async {
+    if (_isSubmitting) {
+      return;
+    }
+    final oldPassword = _oldPasswordController.text.trim();
+    final newPassword = _newPasswordController.text.trim();
+    final confirmPassword = _confirmPasswordController.text.trim();
+    if (oldPassword.isEmpty || newPassword.isEmpty || confirmPassword.isEmpty) {
+      _showMessage('Please complete all password fields.');
+      return;
+    }
+    if (newPassword.length < 8) {
+      _showMessage('New password must be at least 8 characters.');
+      return;
+    }
+    if (newPassword != confirmPassword) {
+      _showMessage('New password and confirmation do not match.');
+      return;
+    }
+
+    final session = await _authSessionService.readSession();
+    if (session == null || session.token.trim().isEmpty) {
+      _showMessage('Please log in again to update your password.');
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+    try {
+      await _authApiService.changePassword(
+        token: session.token,
+        oldPassword: oldPassword,
+        newPassword: newPassword,
+        confirmNewPassword: confirmPassword,
+      );
+      if (!mounted) {
+        return;
+      }
+      _oldPasswordController.clear();
+      _newPasswordController.clear();
+      _confirmPasswordController.clear();
+      _showMessage('Password updated successfully.');
+    } on AuthApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showMessage(error.message);
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      _showMessage('Could not update password. Please try again.');
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
   }
 
   @override
@@ -1850,7 +2034,7 @@ class _CustomerPrivacySecurityScreenState
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
           children: [
             const Text(
-              'Control how your account and personal data are protected.',
+              'Update your account password securely.',
               style: TextStyle(
                 color: Color(0xFF7D6C60),
                 fontSize: 13.5,
@@ -1861,50 +2045,32 @@ class _CustomerPrivacySecurityScreenState
             _ProfilePanel(
               child: Column(
                 children: [
-                  SwitchListTile.adaptive(
-                    value: _biometricLogin,
-                    activeThumbColor: const Color(0xFFFF7E4D),
-                    activeTrackColor: const Color(0xFFFFD8C7),
-                    title: const Text('Biometric login'),
-                    subtitle: const Text(
-                      'Use Face ID or fingerprint to sign in.',
+                  TextField(
+                    controller: _oldPasswordController,
+                    obscureText: true,
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(
+                      labelText: 'Old password',
                     ),
-                    onChanged: (value) =>
-                        setState(() => _biometricLogin = value),
                   ),
-                  const Divider(height: 1, color: Color(0xFFF0E2D3)),
-                  SwitchListTile.adaptive(
-                    value: _twoFactorCode,
-                    activeThumbColor: const Color(0xFFFF7E4D),
-                    activeTrackColor: const Color(0xFFFFD8C7),
-                    title: const Text('Two-step verification'),
-                    subtitle: const Text('Request a code when signing in.'),
-                    onChanged: (value) =>
-                        setState(() => _twoFactorCode = value),
-                  ),
-                  const Divider(height: 1, color: Color(0xFFF0E2D3)),
-                  SwitchListTile.adaptive(
-                    value: _hidePhoneNumber,
-                    activeThumbColor: const Color(0xFFFF7E4D),
-                    activeTrackColor: const Color(0xFFFFD8C7),
-                    title: const Text('Hide phone number on receipts'),
-                    subtitle: const Text(
-                      'Mask your number in receipt history.',
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _newPasswordController,
+                    obscureText: true,
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(
+                      labelText: 'New password',
                     ),
-                    onChanged: (value) =>
-                        setState(() => _hidePhoneNumber = value),
                   ),
-                  const Divider(height: 1, color: Color(0xFFF0E2D3)),
-                  SwitchListTile.adaptive(
-                    value: _shareUsageAnalytics,
-                    activeThumbColor: const Color(0xFFFF7E4D),
-                    activeTrackColor: const Color(0xFFFFD8C7),
-                    title: const Text('Share anonymous analytics'),
-                    subtitle: const Text(
-                      'Help us improve app performance and reliability.',
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _confirmPasswordController,
+                    obscureText: true,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => _submitPasswordChange(),
+                    decoration: const InputDecoration(
+                      labelText: 'Re-enter new password',
                     ),
-                    onChanged: (value) =>
-                        setState(() => _shareUsageAnalytics = value),
                   ),
                 ],
               ),
@@ -1913,10 +2079,16 @@ class _CustomerPrivacySecurityScreenState
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
-                onPressed: _openChangePasswordDialog,
-                icon: const Icon(Icons.lock_reset_rounded),
-                label: const Text(
-                  'Change Password',
+                onPressed: _isSubmitting ? null : _submitPasswordChange,
+                icon: _isSubmitting
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.lock_reset_rounded),
+                label: Text(
+                  _isSubmitting ? 'Updating...' : 'Update Password',
                   style: TextStyle(fontWeight: FontWeight.w800),
                 ),
                 style: OutlinedButton.styleFrom(
@@ -3718,7 +3890,6 @@ class _CustomerEditProfileField extends StatelessWidget {
 enum _ProfileSettingsDestination {
   editProfile,
   notifications,
-  paymentMethods,
   privacySecurity,
   helpSupport,
 }

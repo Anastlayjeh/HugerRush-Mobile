@@ -858,11 +858,88 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
     _DiscoverSpotData spot,
   ) async {
     final menuItems = await _discoverMenuItemsForSpot(spot);
+    var resolvedSpot = spot;
+    var reviewPreviews = const <RestaurantProfileReviewPreview>[];
+    var uploadedVideos = const <RestaurantProfileVideoPreview>[];
+    String? cuisineSummary;
+    String? phoneLabel;
+    String? locationLabel;
+    String? followersCountLabel;
+    String? profileImageUrl;
     String? loyaltyPointsLabel;
     final restaurantId = spot.id.trim();
     if (restaurantId.isNotEmpty) {
       final session = await _resolveSession();
       if (session != null) {
+        try {
+          final details = await _restaurantApiService.fetchRestaurant(
+            session: session,
+            restaurantId: restaurantId,
+          );
+          resolvedSpot = _DiscoverSpotData(
+            id: details.id,
+            title: details.name,
+            handle: details.id.isEmpty
+                ? spot.handle
+                : 'restaurant-${details.id}',
+            categoryTitle: details.categoryLabel,
+            subtitle: details.description.trim().isEmpty
+                ? spot.subtitle
+                : details.description.trim(),
+            deliveryLabel: spot.deliveryLabel,
+            ratingLabel: (details.averageRating ?? spot.ratingValue)
+                .toStringAsFixed(1),
+            priceTier: spot.priceTier,
+            badge: spot.badge,
+            imageUrl: details.profilePhotoUrl.trim().isEmpty
+                ? spot.imageUrl
+                : details.profilePhotoUrl.trim(),
+            followersCount: details.followersCount,
+            reviewsCount: details.reviewsCount,
+            ordersCount: details.ordersCount,
+          );
+          cuisineSummary = details.categoryLabel.trim().isEmpty
+              ? null
+              : details.categoryLabel.trim();
+          phoneLabel = details.phone.trim().isEmpty
+              ? null
+              : details.phone.trim();
+          locationLabel = details.address.trim().isEmpty
+              ? null
+              : details.address.trim();
+          followersCountLabel =
+              '${_formatCompactCount(details.followersCount)} followers';
+          profileImageUrl = details.profilePhotoUrl.trim().isEmpty
+              ? null
+              : details.profilePhotoUrl.trim();
+        } catch (_) {}
+        try {
+          final reviews = await _restaurantApiService.fetchRestaurantReviews(
+            session: session,
+            restaurantId: restaurantId,
+            perPage: 50,
+          );
+          reviewPreviews = reviews
+              .map((review) {
+                final createdAt = review.createdAt.toLocal();
+                return RestaurantProfileReviewPreview(
+                  customerName: review.customerName,
+                  rating: review.rating,
+                  comment: review.comment,
+                  timeLabel: _formatRelativeTime(createdAt),
+                  orderLabel: review.orderLabel,
+                );
+              })
+              .toList(growable: false);
+        } catch (_) {}
+        try {
+          final videos = await _restaurantApiService.fetchRestaurantVideos(
+            session: session,
+            restaurantId: restaurantId,
+            perPage: 50,
+          );
+          uploadedVideos = _restaurantVideoPreviewsFromItems(videos);
+        } catch (_) {}
         try {
           final points = await _loyaltyApiService.fetchCustomerRestaurantPoints(
             session: session,
@@ -879,9 +956,16 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
     }
     await _openDiscoverRestaurantProfile(
       context,
-      spot,
+      resolvedSpot,
       menuItems: menuItems,
+      uploadedVideos: uploadedVideos,
+      reviews: reviewPreviews,
       loyaltyPointsLabel: loyaltyPointsLabel,
+      cuisineSummary: cuisineSummary,
+      phoneLabel: phoneLabel,
+      locationLabel: locationLabel,
+      followersCountLabel: followersCountLabel,
+      profileImageUrl: profileImageUrl,
     );
     setState(() {});
   }
@@ -1021,8 +1105,10 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
   Future<void> _openPopularSpotList(BuildContext context) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            _DiscoverPopularSpotsScreen(spots: _filteredPopularSpots),
+        builder: (_) => _DiscoverPopularSpotsScreen(
+          spots: _filteredPopularSpots,
+          onOpenSpot: _openPopularSpot,
+        ),
       ),
     );
   }
@@ -2140,35 +2226,45 @@ Future<void> _openDiscoverRestaurantProfile(
   _DiscoverSpotData spot, {
   int initialTabIndex = 0,
   List<RestaurantMenuItem>? menuItems,
+  List<RestaurantProfileVideoPreview>? uploadedVideos,
+  List<RestaurantProfileReviewPreview>? reviews,
   String? loyaltyPointsLabel,
+  String? cuisineSummary,
+  String? phoneLabel,
+  String? locationLabel,
+  String? followersCountLabel,
+  String? profileImageUrl,
 }) {
-  final reviewPreviews = _buildDemoRestaurantReviews(
-    restaurantName: spot.title,
-    rating: spot.ratingValue,
-  );
   return showRestaurantProfilePopup(
     context,
     restaurantName: spot.title,
     handle: spot.handle,
     rating: spot.ratingValue,
     caption: spot.subtitle,
+    restaurantId: spot.id,
     initialTabIndex: initialTabIndex,
+    cuisineSummary: cuisineSummary,
+    phoneLabel: phoneLabel,
+    locationLabel: locationLabel,
     followersCountLabel:
+        followersCountLabel ??
         '${_formatCompactCount(8400 + (spot.deliveryMinutes * 28))} followers',
+    profileImageUrl: profileImageUrl,
     loyaltyPointsLabel: loyaltyPointsLabel,
     allowAddToCart: true,
-    menuItems:
-        menuItems ??
-        (spot.id.trim().isNotEmpty ? const <RestaurantMenuItem>[] : null),
+    menuItems: menuItems ?? const <RestaurantMenuItem>[],
+    uploadedVideos: uploadedVideos ?? const <RestaurantProfileVideoPreview>[],
+    showMenuCategoryFilter: true,
     showFollowButton: true,
     showSaveButton: true,
-    reviews: reviewPreviews,
+    reviews: reviews ?? const <RestaurantProfileReviewPreview>[],
     onOpenReviews: () {
       openRestaurantReviewsPage(
         context,
         restaurantName: spot.title,
         rating: spot.ratingValue,
-        reviews: reviewPreviews,
+        restaurantId: spot.id,
+        reviews: reviews ?? const <RestaurantProfileReviewPreview>[],
       );
     },
     onAddToCart: (item) {
@@ -2185,9 +2281,14 @@ Future<void> _openDiscoverRestaurantProfile(
 }
 
 class _DiscoverPopularSpotsScreen extends StatelessWidget {
-  const _DiscoverPopularSpotsScreen({required this.spots});
+  const _DiscoverPopularSpotsScreen({
+    required this.spots,
+    required this.onOpenSpot,
+  });
 
   final List<_DiscoverSpotData> spots;
+  final Future<void> Function(BuildContext context, _DiscoverSpotData spot)
+  onOpenSpot;
 
   @override
   Widget build(BuildContext context) {
@@ -2195,6 +2296,7 @@ class _DiscoverPopularSpotsScreen extends StatelessWidget {
       title: 'Popular Restaurants',
       subtitle: 'Top picks around your area',
       spots: spots,
+      onOpenSpot: onOpenSpot,
     );
   }
 }
@@ -2204,11 +2306,14 @@ class _DiscoverSpotsCatalogScreen extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.spots,
+    required this.onOpenSpot,
   });
 
   final String title;
   final String subtitle;
   final List<_DiscoverSpotData> spots;
+  final Future<void> Function(BuildContext context, _DiscoverSpotData spot)
+  onOpenSpot;
 
   @override
   Widget build(BuildContext context) {
@@ -2258,7 +2363,10 @@ class _DiscoverSpotsCatalogScreen extends StatelessWidget {
                         separatorBuilder: (context, index) =>
                             const SizedBox(height: 12),
                         itemBuilder: (context, index) {
-                          return _DiscoverSpotPreviewTile(spot: spots[index]);
+                          return _DiscoverSpotPreviewTile(
+                            spot: spots[index],
+                            onOpenSpot: onOpenSpot,
+                          );
                         },
                       ),
               ),
@@ -2271,9 +2379,14 @@ class _DiscoverSpotsCatalogScreen extends StatelessWidget {
 }
 
 class _DiscoverSpotPreviewTile extends StatelessWidget {
-  const _DiscoverSpotPreviewTile({required this.spot});
+  const _DiscoverSpotPreviewTile({
+    required this.spot,
+    required this.onOpenSpot,
+  });
 
   final _DiscoverSpotData spot;
+  final Future<void> Function(BuildContext context, _DiscoverSpotData spot)
+  onOpenSpot;
 
   @override
   Widget build(BuildContext context) {
@@ -2281,7 +2394,7 @@ class _DiscoverSpotPreviewTile extends StatelessWidget {
       color: const Color(0xFFFEFCFA),
       borderRadius: BorderRadius.circular(20),
       child: InkWell(
-        onTap: () => _openDiscoverRestaurantProfile(context, spot),
+        onTap: () => unawaited(onOpenSpot(context, spot)),
         borderRadius: BorderRadius.circular(20),
         child: Padding(
           padding: const EdgeInsets.all(12),

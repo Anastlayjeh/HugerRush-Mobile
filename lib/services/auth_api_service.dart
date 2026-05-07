@@ -94,6 +94,49 @@ class AuthApiService {
     );
   }
 
+  Future<void> changePassword({
+    required String token,
+    required String oldPassword,
+    required String newPassword,
+    required String confirmNewPassword,
+  }) async {
+    final cleanedToken = token.trim();
+    if (cleanedToken.isEmpty) {
+      throw const AuthApiException('Missing authentication token.');
+    }
+    if (oldPassword.trim().isEmpty || newPassword.trim().isEmpty) {
+      throw const AuthApiException('Please fill all password fields.');
+    }
+    if (newPassword != confirmNewPassword) {
+      throw const AuthApiException('New passwords do not match.');
+    }
+
+    http.Response response;
+    try {
+      response = await _apiClient.request(
+        method: 'PATCH',
+        endpoint: '/v1/auth/change-password',
+        token: cleanedToken,
+        body: <String, dynamic>{
+          'old_password': oldPassword,
+          'new_password': newPassword,
+          'new_password_confirmation': confirmNewPassword,
+        },
+      );
+    } on ApiClientException catch (error) {
+      throw AuthApiException(error.message);
+    }
+
+    final data = ApiClient.decodeMap(response.body);
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return;
+    }
+
+    throw AuthApiException(
+      '${ApiClient.errorMessageForStatus(response.statusCode, data, fallback: 'Could not update password.')} (HTTP ${response.statusCode})',
+    );
+  }
+
   Map<String, String> authorizationHeaders(String token) {
     return ApiClient.jsonHeaders(token: token);
   }

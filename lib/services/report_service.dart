@@ -32,15 +32,16 @@ class ReportService {
   final List<ReportSubmission> _submissions = <ReportSubmission>[];
   final AuthSessionService _sessionService = AuthSessionService();
 
-  List<ReportSubmission> get submissions => List<ReportSubmission>.from(
-    _submissions,
-  );
+  List<ReportSubmission> get submissions =>
+      List<ReportSubmission>.from(_submissions);
 
   Future<ReportSubmission> submitReport({
     required ReportItemType itemType,
     required String itemId,
     required ReportReason reason,
     String description = '',
+    String? restaurantId,
+    String? orderId,
   }) async {
     final cleanedItemId = itemId.trim();
     if (cleanedItemId.isEmpty) {
@@ -54,17 +55,26 @@ class ReportService {
 
     final subject = '${itemType.label}: ${reason.label}';
     final message = <String>[
+      'Reported type: ${itemType.label}',
       'Reported item: $cleanedItemId',
       if (description.trim().isNotEmpty) description.trim(),
     ].join('\n\n');
+    final cleanedRestaurantId = restaurantId?.trim();
+    final cleanedOrderId = orderId?.trim();
+    final resolvedRestaurantId =
+        int.tryParse(cleanedRestaurantId ?? '') ??
+        (itemType == ReportItemType.restaurantProfile
+            ? int.tryParse(cleanedItemId)
+            : null);
+    final resolvedOrderId =
+        int.tryParse(cleanedOrderId ?? '') ??
+        (itemType == ReportItemType.order ? int.tryParse(cleanedItemId) : null);
     final body = <String, dynamic>{
       'subject': subject,
       'message': message,
-      if (itemType == ReportItemType.restaurantProfile &&
-          int.tryParse(cleanedItemId) != null)
-        'restaurant_id': cleanedItemId,
-      if (itemType == ReportItemType.order && int.tryParse(cleanedItemId) != null)
-        'order_id': cleanedItemId,
+      if (resolvedRestaurantId != null)
+        'restaurant_id': resolvedRestaurantId.toString(),
+      if (resolvedOrderId != null) 'order_id': resolvedOrderId.toString(),
     };
 
     final apiClient = AuthenticatedApiClient(
@@ -93,7 +103,8 @@ class ReportService {
         : <String, dynamic>{};
 
     final submission = ReportSubmission(
-      id: (data['id'] as Object?)?.toString() ??
+      id:
+          (data['id'] as Object?)?.toString() ??
           'report-${DateTime.now().microsecondsSinceEpoch}',
       itemType: itemType,
       itemId: cleanedItemId,

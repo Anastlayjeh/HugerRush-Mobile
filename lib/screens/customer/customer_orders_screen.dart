@@ -551,24 +551,34 @@ class _OrdersTabBody extends StatelessWidget {
     ];
   }
 
-  void _showUnavailableReorder(BuildContext context) {
-    ScaffoldMessenger.maybeOf(context)
-      ?..hideCurrentSnackBar()
-      ..showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Reorder is not available yet. Please add items from the live restaurant menu.',
-          ),
-        ),
-      );
-  }
-
-  void _openOrderHistory(BuildContext context) {
+  void _openOrderHistory(
+    BuildContext context,
+    List<_OrderReceiptData> receipts,
+  ) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => const _OrdersReceiptsScreen(receipts: []),
+        builder: (_) => _OrdersReceiptsScreen(receipts: receipts),
       ),
     );
+  }
+
+  Future<void> _openOrderHistoryFromApi(BuildContext context) async {
+    try {
+      final live = await _loadLiveOrders();
+      if (!context.mounted) {
+        return;
+      }
+      _openOrderHistory(context, live.receipts);
+    } catch (_) {
+      if (!context.mounted) {
+        return;
+      }
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Could not load order history.')),
+        );
+    }
   }
 
   void _openCart(
@@ -594,13 +604,87 @@ class _OrdersTabBody extends StatelessWidget {
     );
   }
 
-  // ignore: unused_element
-  void _reorderPastOrder(BuildContext context, _PastOrderEntryData order) {
-    _openCart(
-      context,
-      initialItems: order.reorderItems,
-      restaurantName: order.title,
+  Future<void> _reorderPastOrder(
+    BuildContext context,
+    _PastOrderEntryData order,
+  ) async {
+    if (order.reorderItems.isEmpty || order.restaurantId.trim().isEmpty) {
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Reorder is not available for this order yet.'),
+          ),
+        );
+      return;
+    }
+
+    final authSessionService = AuthSessionService();
+    final session = await authSessionService.readSession();
+    if (session == null || session.token.trim().isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.maybeOf(context)
+          ?..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(content: Text('Please log in again to reorder.')),
+          );
+      }
+      return;
+    }
+
+    final cartService = CustomerCartApiService(
+      apiClient: AuthenticatedApiClient(
+        authApiService: AuthApiService(),
+        authSessionService: authSessionService,
+      ),
     );
+
+    try {
+      for (final item in order.reorderItems) {
+        if (item.menuItemId.trim().isEmpty) {
+          continue;
+        }
+        await cartService.addItem(
+          session: session,
+          menuItemId: item.menuItemId,
+          quantity: item.quantity,
+          notes: item.subtitle,
+          restaurantId: order.restaurantId,
+        );
+      }
+      final cart = await cartService.fetchCart(
+        session: session,
+        restaurantId: order.restaurantId,
+      );
+      if (!context.mounted) {
+        return;
+      }
+      final items = _cartLineItemsFromCustomerCart(cart);
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => _OrdersCartScreen(
+            initialItems: items,
+            restaurantName: cart.restaurantName,
+            restaurantId: cart.restaurantId,
+            cartId: cart.id,
+            deliveryFee: cart.deliveryFee,
+            totalLbp: cart.totalLbp,
+            loyaltyPointsEstimate: cart.loyaltyPointsEstimate,
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!context.mounted) {
+        return;
+      }
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Could not reorder these items right now.'),
+          ),
+        );
+    }
   }
 
   @override
@@ -683,7 +767,7 @@ class _OrdersTabBody extends StatelessWidget {
                           _ProfileIconButton(
                             icon: Icons.receipt_long_rounded,
                             metrics: metrics,
-                            onTap: () => _openOrderHistory(context),
+                            onTap: () => _openOrderHistoryFromApi(context),
                           ),
                           SizedBox(
                             width: _clampDouble(10 * metrics.scale, 8, 10),
@@ -728,6 +812,9 @@ class _OrdersTabBody extends StatelessWidget {
                                 const _OrdersLiveSnapshot(orders: []);
                             final activeOrder = live.activeOrder;
                             final pastOrders = live.pastOrders;
+                            final recentPastOrders = pastOrders
+                                .take(3)
+                                .toList(growable: false);
                             return SingleChildScrollView(
                               physics: const BouncingScrollPhysics(),
                               child: Column(
@@ -798,9 +885,13 @@ class _OrdersTabBody extends StatelessWidget {
                                       26,
                                     ),
                                   ),
-                                  const _ProfileSectionHeader(
+                                  _ProfileSectionHeader(
                                     title: 'Recent Orders',
                                     actionLabel: 'View All',
+                                    onActionTap: () => _openOrderHistory(
+                                      context,
+                                      live.receipts,
+                                    ),
                                   ),
                                   SizedBox(
                                     height: _clampDouble(
@@ -831,12 +922,16 @@ class _OrdersTabBody extends StatelessWidget {
                                   else
                                     Column(
                                       children: List.generate(
-                                        pastOrders.length,
+                                        recentPastOrders.length,
                                         (index) {
+                                          final recentOrder =
+                                              recentPastOrders[index];
                                           return Padding(
                                             padding: EdgeInsets.only(
                                               bottom:
-                                                  index == pastOrders.length - 1
+                                                  index ==
+                                                      recentPastOrders.length -
+                                                          1
                                                   ? 0
                                                   : _clampDouble(
                                                       14 * metrics.scale,
@@ -845,11 +940,12 @@ class _OrdersTabBody extends StatelessWidget {
                                                     ),
                                             ),
                                             child: _PastOrderCard(
-                                              data: pastOrders[index],
+                                              data: recentOrder,
                                               metrics: metrics,
                                               onReorder: () =>
-                                                  _showUnavailableReorder(
+                                                  _reorderPastOrder(
                                                     context,
+                                                    recentOrder,
                                                   ),
                                             ),
                                           );
@@ -1446,11 +1542,12 @@ class _OrderReceiptItemTile extends StatelessWidget {
 class _OrdersCartListScreen extends StatelessWidget {
   const _OrdersCartListScreen({required this.carts});
 
+  // ignore: unused_field
   final List<_RestaurantCartData> carts;
 
   String _formatMoney(double value) => '\$${value.toStringAsFixed(2)}';
 
-  Future<CustomerCart?> _fetchLiveCart() async {
+  Future<List<CustomerCart>> _fetchLiveCarts() async {
     final authSessionService = AuthSessionService();
     final session = await authSessionService.readSession();
     if (session == null || session.token.trim().isEmpty) {
@@ -1464,7 +1561,7 @@ class _OrdersCartListScreen extends StatelessWidget {
         authSessionService: authSessionService,
       ),
     );
-    return service.fetchCart(session: session);
+    return service.fetchCarts(session: session);
   }
 
   @override
@@ -1485,8 +1582,8 @@ class _OrdersCartListScreen extends StatelessWidget {
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          child: FutureBuilder<CustomerCart?>(
-            future: _fetchLiveCart(),
+          child: FutureBuilder<List<CustomerCart>>(
+            future: _fetchLiveCarts(),
             builder: (context, snapshot) {
               if (snapshot.connectionState != ConnectionState.done) {
                 return const Center(child: CircularProgressIndicator());
@@ -1506,11 +1603,11 @@ class _OrdersCartListScreen extends StatelessWidget {
                   ),
                 );
               }
-              final cart = snapshot.data;
-              if (cart == null || cart.isEmpty) {
+              final liveCarts = snapshot.data ?? const <CustomerCart>[];
+              if (liveCarts.isEmpty) {
                 return const Center(
                   child: Text(
-                    'No cart yet. Add items from a live restaurant menu first.',
+                    'No carts yet. Add items from restaurant menus first.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Color(0xFF7D6C60),
@@ -1519,49 +1616,61 @@ class _OrdersCartListScreen extends StatelessWidget {
                   ),
                 );
               }
-              final items = _cartLineItemsFromCustomerCart(cart);
-              final coverImageUrl = items.isEmpty ? '' : items.first.imageUrl;
+              final cartsWithItems = liveCarts
+                  .where((cart) => cart.items.isNotEmpty)
+                  .toList(growable: false);
+              if (cartsWithItems.isEmpty) {
+                return const Center(
+                  child: Text(
+                    'No carts yet. Add items from restaurant menus first.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Color(0xFF7D6C60),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                );
+              }
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFF4EC),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: const Color(0xFFF2D8C4)),
-                    ),
-                    child: const Text(
-                      'Checkout supports one restaurant at a time.',
-                      style: TextStyle(
-                        color: Color(0xFF9B5B38),
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
                   Expanded(
                     child: ListView(
                       physics: const BouncingScrollPhysics(),
-                      children: [
-                        _OrdersCartListTile(
-                          restaurantName: cart.restaurantName,
-                          totalItems: cart.totalItems,
-                          subtotalLabel: _formatMoney(cart.subtotal),
-                          coverImageUrl: coverImageUrl,
-                          onTap: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => _OrdersCartScreen(
-                                  initialItems: items,
-                                  restaurantName: cart.restaurantName,
+                      children: List.generate(cartsWithItems.length, (index) {
+                        final cart = cartsWithItems[index];
+                        final items = _cartLineItemsFromCustomerCart(cart);
+                        final coverImageUrl = items.isEmpty
+                            ? ''
+                            : items.first.imageUrl;
+                        return Padding(
+                          padding: EdgeInsets.only(
+                            bottom: index == cartsWithItems.length - 1 ? 0 : 10,
+                          ),
+                          child: _OrdersCartListTile(
+                            restaurantName: cart.restaurantName,
+                            totalItems: cart.totalItems,
+                            subtotalLabel: _formatMoney(cart.subtotal),
+                            coverImageUrl: coverImageUrl,
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => _OrdersCartScreen(
+                                    initialItems: items,
+                                    restaurantName: cart.restaurantName,
+                                    restaurantId: cart.restaurantId,
+                                    cartId: cart.id,
+                                    deliveryFee: cart.deliveryFee,
+                                    totalLbp: cart.totalLbp,
+                                    loyaltyPointsEstimate:
+                                        cart.loyaltyPointsEstimate,
+                                  ),
                                 ),
-                              ),
-                            );
-                          },
-                        ),
-                      ],
+                              );
+                            },
+                          ),
+                        );
+                      }),
                     ),
                   ),
                 ],
@@ -1663,21 +1772,34 @@ class _OrdersCartListTile extends StatelessWidget {
 }
 
 class _OrdersCartScreen extends StatefulWidget {
-  const _OrdersCartScreen({required this.initialItems, this.restaurantName});
+  const _OrdersCartScreen({
+    required this.initialItems,
+    this.restaurantName,
+    this.restaurantId = '',
+    this.cartId = '',
+    this.deliveryFee = 0,
+    this.totalLbp = 0,
+    this.loyaltyPointsEstimate = 0,
+  });
 
   final List<_CartLineItemData> initialItems;
   final String? restaurantName;
+  final String restaurantId;
+  final String cartId;
+  final double deliveryFee;
+  final int totalLbp;
+  final int loyaltyPointsEstimate;
 
   @override
   State<_OrdersCartScreen> createState() => _OrdersCartScreenState();
 }
 
 class _OrdersCartScreenState extends State<_OrdersCartScreen> {
-  static const double _deliveryFee = 2.75;
-  static const double _serviceFee = 1.35;
-
   late List<_CartLineItemData> _items;
   late String _restaurantName;
+  late String _restaurantId;
+  late String _cartId;
+  late double _deliveryFee;
   late final AuthSessionService _authSessionService;
   late final CustomerCartApiService _cartApiService;
   bool _isUpdatingCart = false;
@@ -1699,30 +1821,13 @@ class _OrdersCartScreenState extends State<_OrdersCartScreen> {
     _restaurantName = explicitRestaurant.isNotEmpty
         ? explicitRestaurant
         : fallbackRestaurant;
-    final targetRestaurant = _restaurantName.isEmpty
-        ? fallbackRestaurant
-        : _restaurantName;
-    final normalizedTarget = _normalizeRestaurantKey(targetRestaurant);
-    final removedRestaurants = <String>{};
-    var removedCount = 0;
+    _restaurantId = widget.restaurantId.trim().isEmpty
+        ? _firstRestaurantIdFromItems(widget.initialItems)
+        : widget.restaurantId.trim();
+    _cartId = widget.cartId.trim();
+    _deliveryFee = widget.deliveryFee;
 
     _items = widget.initialItems
-        .where((item) {
-          if (normalizedTarget.isEmpty) {
-            return true;
-          }
-          final resolvedRestaurant = _resolvedCartItemRestaurantName(item);
-          if (resolvedRestaurant.isEmpty) {
-            return true;
-          }
-          final matches =
-              _normalizeRestaurantKey(resolvedRestaurant) == normalizedTarget;
-          if (!matches) {
-            removedCount += 1;
-            removedRestaurants.add(resolvedRestaurant);
-          }
-          return matches;
-        })
         .map(
           (item) => item.copyWith(
             title: item.title,
@@ -1735,27 +1840,7 @@ class _OrdersCartScreenState extends State<_OrdersCartScreen> {
                 : item.restaurantName,
           ),
         )
-        .toList();
-    if (removedCount > 0) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) {
-          return;
-        }
-        final removedLabel = removedRestaurants.join(', ');
-        final removedSource = removedLabel.isEmpty
-            ? 'another restaurant'
-            : removedLabel;
-        ScaffoldMessenger.maybeOf(context)
-          ?..hideCurrentSnackBar()
-          ..showSnackBar(
-            SnackBar(
-              content: Text(
-                'You can order from one restaurant only. Removed $removedCount item${removedCount == 1 ? '' : 's'} from $removedSource.',
-              ),
-            ),
-          );
-      });
-    }
+        .toList(growable: true);
   }
 
   int get _totalItems =>
@@ -1766,7 +1851,7 @@ class _OrdersCartScreenState extends State<_OrdersCartScreen> {
     (total, item) => total + (item.price * item.quantity),
   );
 
-  double get _total => _subtotal + _deliveryFee + _serviceFee;
+  double get _total => _subtotal + _deliveryFee;
 
   String _formatMoney(double value) => '\$${value.toStringAsFixed(2)}';
 
@@ -1900,12 +1985,14 @@ class _OrdersCartScreenState extends State<_OrdersCartScreen> {
       MaterialPageRoute<bool>(
         builder: (_) => _OrdersCheckoutScreen(
           items: List<_CartLineItemData>.from(_items),
-          restaurantId: _firstRestaurantIdFromItems(_items),
+          restaurantId: _restaurantId,
           restaurantName: _restaurantName,
+          cartId: _cartId,
           subtotal: _subtotal,
           deliveryFee: _deliveryFee,
-          serviceFee: _serviceFee,
           totalItems: _totalItems,
+          totalLbp: (_total * 90000).round(),
+          loyaltyPointsEstimate: (_total.floor() * 20),
         ),
       ),
     );
@@ -2049,11 +2136,6 @@ class _OrdersCartScreenState extends State<_OrdersCartScreen> {
                           _OrdersPriceRow(
                             label: 'Delivery fee',
                             value: _formatMoney(_deliveryFee),
-                          ),
-                          const SizedBox(height: 8),
-                          _OrdersPriceRow(
-                            label: 'Service fee',
-                            value: _formatMoney(_serviceFee),
                           ),
                           const SizedBox(height: 10),
                           const Divider(height: 1, color: Color(0xFFEADBCB)),
@@ -2293,10 +2375,6 @@ class _OrdersPriceRow extends StatelessWidget {
   }
 }
 
-enum _CheckoutPaymentMethod { onDelivery, visa, whishMoney }
-
-enum _CheckoutChangeRequest { noNeed, usd50, usd100 }
-
 enum _CheckoutDeliveryMode { now, scheduled }
 
 class _CheckoutScheduledSlot {
@@ -2355,51 +2433,37 @@ class _OrdersCheckoutScreen extends StatefulWidget {
     required this.items,
     required this.restaurantId,
     required this.restaurantName,
+    required this.cartId,
     required this.subtotal,
     required this.deliveryFee,
-    required this.serviceFee,
     required this.totalItems,
+    this.totalLbp = 0,
+    this.loyaltyPointsEstimate = 0,
   });
 
   final List<_CartLineItemData> items;
   final String restaurantId;
   final String restaurantName;
+  final String cartId;
   final double subtotal;
   final double deliveryFee;
-  final double serviceFee;
   final int totalItems;
+  final int totalLbp;
+  final int loyaltyPointsEstimate;
 
   @override
   State<_OrdersCheckoutScreen> createState() => _OrdersCheckoutScreenState();
 }
 
 class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
-  static const double _usdToLbpRate = 89500;
-  static const double _loyaltyDiscountRate = 0.10;
-  static const int _loyaltyPointsPerUsdDiscount = 100;
-  static const List<_CheckoutScheduledSlot> _deliverySlots = [
-    _CheckoutScheduledSlot(dayLabel: 'Today', timeRange: '08:00 AM - 08:15 AM'),
-    _CheckoutScheduledSlot(
-      dayLabel: 'Tomorrow',
-      timeRange: '08:15 AM - 08:30 AM',
-    ),
-    _CheckoutScheduledSlot(
-      dayLabel: 'Monday, May 04',
-      timeRange: '08:30 AM - 08:45 AM',
-    ),
-  ];
+  static const double _usdToLbpRate = 90000;
+  static const int _pointsPerUsd = 20;
 
-  _CheckoutDeliveryMode _deliveryMode = _CheckoutDeliveryMode.now;
-  int _scheduledSlotIndex = 1;
   _CheckoutLocationData _location = const _CheckoutLocationData(
     city: '',
     street: '',
     building: '',
   );
-  _CheckoutPaymentMethod _paymentMethod = _CheckoutPaymentMethod.onDelivery;
-  _CheckoutChangeRequest _changeRequest = _CheckoutChangeRequest.noNeed;
-  bool _useLoyalty = false;
-  bool _saveChangeInWallet = false;
   bool _isPlacingOrder = false;
   late final AuthSessionService _authSessionService;
   late final CustomerOrderApiService _orderApiService;
@@ -2416,87 +2480,24 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
     );
   }
 
-  double get _baseTotalUsd =>
-      widget.subtotal + widget.deliveryFee + widget.serviceFee;
+  double get _totalUsd => widget.subtotal + widget.deliveryFee;
 
-  double get _discountPercent => _useLoyalty ? (_loyaltyDiscountRate * 100) : 0;
+  int get _totalLbp => widget.totalLbp > 0
+      ? widget.totalLbp
+      : (_totalUsd * _usdToLbpRate).round();
 
-  double get _loyaltyDiscountUsd =>
-      _useLoyalty ? (_baseTotalUsd * _loyaltyDiscountRate) : 0;
-
-  int get _loyaltyPointsUsed =>
-      (_loyaltyDiscountUsd * _loyaltyPointsPerUsdDiscount).round();
-
-  double get _totalUsd =>
-      (_baseTotalUsd - _loyaltyDiscountUsd).clamp(0, double.infinity);
-
-  int get _earnedPoints => (_totalUsd * 8).round();
-
-  bool get _cashPayment => _paymentMethod == _CheckoutPaymentMethod.onDelivery;
-
-  _CheckoutScheduledSlot get _selectedScheduledSlot {
-    final maxIndex = _deliverySlots.length - 1;
-    final safeIndex = _scheduledSlotIndex.clamp(0, maxIndex).toInt();
-    return _deliverySlots[safeIndex];
-  }
+  int get _earnedPoints => widget.loyaltyPointsEstimate > 0
+      ? widget.loyaltyPointsEstimate
+      : (_totalUsd.floor() * _pointsPerUsd);
 
   String _formatUsd(double value) => '\$${value.toStringAsFixed(2)}';
 
-  String _formatLbp(double usdValue) {
-    final lbpValue = (usdValue * _usdToLbpRate).round();
+  String _formatLbpFromValue(int lbpValue) {
     final withCommas = lbpValue.toString().replaceAllMapped(
       RegExp(r'\B(?=(\d{3})+(?!\d))'),
       (m) => ',',
     );
     return '$withCommas LBP';
-  }
-
-  String _paymentMethodLabel(_CheckoutPaymentMethod method) {
-    switch (method) {
-      case _CheckoutPaymentMethod.onDelivery:
-        return 'On Delivery';
-      case _CheckoutPaymentMethod.visa:
-        return 'Visa';
-      case _CheckoutPaymentMethod.whishMoney:
-        return 'Whish Money';
-    }
-  }
-
-  String _paymentMethodCode(_CheckoutPaymentMethod method) {
-    switch (method) {
-      case _CheckoutPaymentMethod.onDelivery:
-        return 'cash_on_delivery';
-      case _CheckoutPaymentMethod.visa:
-        return 'visa';
-      case _CheckoutPaymentMethod.whishMoney:
-        return 'whish_money';
-    }
-  }
-
-  String _changeRequestLabel(_CheckoutChangeRequest request) {
-    switch (request) {
-      case _CheckoutChangeRequest.noNeed:
-        return 'No need';
-      case _CheckoutChangeRequest.usd50:
-        return '\$50.00';
-      case _CheckoutChangeRequest.usd100:
-        return '\$100.00';
-    }
-  }
-
-  String get _deliveryPrimaryLabel {
-    if (_deliveryMode == _CheckoutDeliveryMode.now) {
-      return 'Now';
-    }
-    return 'Schedule for later';
-  }
-
-  String get _deliverySecondaryLabel {
-    if (_deliveryMode == _CheckoutDeliveryMode.now) {
-      return 'Deliver immediately';
-    }
-    final slot = _selectedScheduledSlot;
-    return '${slot.dayLabel} • ${slot.timeRange}';
   }
 
   String get _locationPrimaryLabel {
@@ -2517,16 +2518,6 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
       if (_location.landmark.trim().isNotEmpty) _location.landmark,
     ];
     return segments.isEmpty ? 'City, street, building' : segments.join(', ');
-  }
-
-  void _selectPayment(_CheckoutPaymentMethod method) {
-    setState(() {
-      _paymentMethod = method;
-      if (method != _CheckoutPaymentMethod.onDelivery) {
-        _changeRequest = _CheckoutChangeRequest.noNeed;
-        _saveChangeInWallet = false;
-      }
-    });
   }
 
   Future<void> _placeOrder() async {
@@ -2583,6 +2574,7 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
         draft: CustomerOrderDraft(
           restaurantId: widget.restaurantId.trim(),
           restaurantName: widget.restaurantName.trim(),
+          cartId: widget.cartId.trim(),
           items: liveItems
               .map(
                 (item) => CustomerOrderDraftItem(
@@ -2602,21 +2594,15 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
             apartment: _location.apartment,
             landmark: _location.landmark,
           ),
-          paymentMethod: _paymentMethodCode(_paymentMethod),
-          deliveryMode: _deliveryMode == _CheckoutDeliveryMode.now
-              ? 'now'
-              : 'scheduled',
-          scheduledLabel: _deliveryMode == _CheckoutDeliveryMode.scheduled
-              ? _deliverySecondaryLabel
-              : '',
-          changeRequest: _cashPayment
-              ? _changeRequestLabel(_changeRequest)
-              : '',
-          useLoyalty: _useLoyalty,
-          saveChangeInWallet: _saveChangeInWallet,
+          paymentMethod: 'cash_on_delivery',
+          deliveryMode: 'now',
+          scheduledLabel: '',
+          changeRequest: '',
+          useLoyalty: false,
+          saveChangeInWallet: false,
           subtotal: widget.subtotal,
           deliveryFee: widget.deliveryFee,
-          serviceFee: widget.serviceFee,
+          serviceFee: 0,
           total: _totalUsd,
         ),
       );
@@ -2651,29 +2637,6 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
         setState(() => _isPlacingOrder = false);
       }
     }
-  }
-
-  Future<void> _openDeliveryTimeSelector() async {
-    final selection = await showModalBottomSheet<_CheckoutDeliverySelection>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFFF6F2ED),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-      clipBehavior: Clip.none,
-      builder: (context) => _CheckoutDeliveryTimeSheet(
-        initialMode: _deliveryMode,
-        initialSlotIndex: _scheduledSlotIndex,
-        slots: _deliverySlots,
-      ),
-    );
-    if (!mounted || selection == null) {
-      return;
-    }
-    setState(() {
-      _deliveryMode = selection.mode;
-      final maxIndex = _deliverySlots.length - 1;
-      _scheduledSlotIndex = selection.slotIndex.clamp(0, maxIndex).toInt();
-    });
   }
 
   Future<void> _openLocationEditor() async {
@@ -2713,90 +2676,6 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _CheckoutSectionCard(
-                title: 'Delivery Time',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: _openDeliveryTimeSelector,
-                        borderRadius: BorderRadius.circular(14),
-                        child: Ink(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFEFCFA),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: const Color(0xFFE8D8C8)),
-                          ),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 36,
-                                height: 36,
-                                decoration: const BoxDecoration(
-                                  color: Color(0xFFFFF1E7),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Icon(
-                                  _deliveryMode == _CheckoutDeliveryMode.now
-                                      ? Icons.access_time_rounded
-                                      : Icons.calendar_month_rounded,
-                                  color: const Color(0xFFFF7E4D),
-                                  size: 20,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      _deliveryPrimaryLabel,
-                                      style: const TextStyle(
-                                        color: Color(0xFF2D251F),
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      _deliverySecondaryLabel,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Color(0xFF8D7D71),
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const Icon(
-                                Icons.chevron_right_rounded,
-                                color: Color(0xFFB19D8F),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Default is now. Tap to schedule for later.',
-                      style: TextStyle(
-                        color: Color(0xFF8D7D71),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
               _CheckoutSectionCard(
                 title: 'Location',
                 child: Column(
@@ -2878,148 +2757,6 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
               ),
               const SizedBox(height: 12),
               _CheckoutSectionCard(
-                title: 'Payment Method',
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: _CheckoutPaymentMethod.values.map((method) {
-                    final selected = _paymentMethod == method;
-                    return ChoiceChip(
-                      label: Text(_paymentMethodLabel(method)),
-                      selected: selected,
-                      onSelected: (value) {
-                        if (!value) {
-                          return;
-                        }
-                        _selectPayment(method);
-                      },
-                      selectedColor: const Color(0xFFFFE4D2),
-                      side: const BorderSide(color: Color(0xFFEFD9C8)),
-                      labelStyle: TextStyle(
-                        color: selected
-                            ? const Color(0xFFB65D37)
-                            : const Color(0xFF7D6C60),
-                        fontWeight: FontWeight.w700,
-                      ),
-                      backgroundColor: const Color(0xFFFEFCFA),
-                    );
-                  }).toList(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              _CheckoutSectionCard(
-                title: 'Request Change',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: _CheckoutChangeRequest.values.map((request) {
-                        final selected = _changeRequest == request;
-                        return ChoiceChip(
-                          label: Text(_changeRequestLabel(request)),
-                          selected: selected,
-                          onSelected: !_cashPayment
-                              ? null
-                              : (value) {
-                                  if (!value) {
-                                    return;
-                                  }
-                                  setState(() => _changeRequest = request);
-                                },
-                          selectedColor: const Color(0xFFFFE4D2),
-                          labelStyle: TextStyle(
-                            color: selected
-                                ? const Color(0xFFB65D37)
-                                : const Color(0xFF7D6C60),
-                            fontWeight: FontWeight.w700,
-                          ),
-                          side: const BorderSide(color: Color(0xFFEFD9C8)),
-                          backgroundColor: const Color(0xFFFEFCFA),
-                        );
-                      }).toList(),
-                    ),
-                    if (!_cashPayment) ...[
-                      const SizedBox(height: 8),
-                      const Text(
-                        'Change request is available for cash on delivery only.',
-                        style: TextStyle(
-                          color: Color(0xFF8D7D71),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              _CheckoutSectionCard(
-                title: 'Use Loyalty?',
-                child: Row(
-                  children: [
-                    ChoiceChip(
-                      label: const Text('No'),
-                      selected: !_useLoyalty,
-                      onSelected: (_) => setState(() => _useLoyalty = false),
-                      selectedColor: const Color(0xFFFFE4D2),
-                      side: const BorderSide(color: Color(0xFFEFD9C8)),
-                      labelStyle: TextStyle(
-                        color: !_useLoyalty
-                            ? const Color(0xFFB65D37)
-                            : const Color(0xFF7D6C60),
-                        fontWeight: FontWeight.w700,
-                      ),
-                      backgroundColor: const Color(0xFFFEFCFA),
-                    ),
-                    const SizedBox(width: 8),
-                    ChoiceChip(
-                      label: const Text('Yes'),
-                      selected: _useLoyalty,
-                      onSelected: (_) => setState(() => _useLoyalty = true),
-                      selectedColor: const Color(0xFFFFE4D2),
-                      side: const BorderSide(color: Color(0xFFEFD9C8)),
-                      labelStyle: TextStyle(
-                        color: _useLoyalty
-                            ? const Color(0xFFB65D37)
-                            : const Color(0xFF7D6C60),
-                        fontWeight: FontWeight.w700,
-                      ),
-                      backgroundColor: const Color(0xFFFEFCFA),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              _CheckoutSectionCard(
-                title: 'Wallet',
-                child: SwitchListTile.adaptive(
-                  value: _saveChangeInWallet,
-                  onChanged: _cashPayment
-                      ? (value) => setState(() => _saveChangeInWallet = value)
-                      : null,
-                  activeThumbColor: const Color(0xFFFF7E4D),
-                  activeTrackColor: const Color(0xFFFFD4BB),
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text(
-                    'Save change in my wallet',
-                    style: TextStyle(
-                      color: Color(0xFF2D251F),
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  subtitle: const Text(
-                    'Turn on to save your returned cash as wallet credit.',
-                    style: TextStyle(
-                      color: Color(0xFF8D7D71),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              _CheckoutSectionCard(
                 title: 'Receipt Details',
                 child: Column(
                   children: [
@@ -3034,26 +2771,11 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
                     ),
                     const SizedBox(height: 8),
                     _OrdersPriceRow(
-                      label: 'Service fee',
-                      value: _formatUsd(widget.serviceFee),
-                    ),
-                    const SizedBox(height: 8),
-                    _OrdersPriceRow(
                       label: 'Loyalty points used',
-                      value: '$_loyaltyPointsUsed pts',
+                      value: '0 pts',
                     ),
                     const SizedBox(height: 8),
-                    _OrdersPriceRow(
-                      label: 'Discount (%)',
-                      value: '${_discountPercent.toStringAsFixed(0)}%',
-                    ),
-                    if (_loyaltyDiscountUsd > 0) ...[
-                      const SizedBox(height: 8),
-                      _OrdersPriceRow(
-                        label: 'Loyalty discount',
-                        value: '-${_formatUsd(_loyaltyDiscountUsd)}',
-                      ),
-                    ],
+                    _OrdersPriceRow(label: 'Discount', value: _formatUsd(0)),
                     const SizedBox(height: 10),
                     const Divider(height: 1, color: Color(0xFFEADBCB)),
                     const SizedBox(height: 10),
@@ -3065,7 +2787,7 @@ class _OrdersCheckoutScreenState extends State<_OrdersCheckoutScreen> {
                     const SizedBox(height: 8),
                     _OrdersPriceRow(
                       label: 'Total (LBP)',
-                      value: _formatLbp(_totalUsd),
+                      value: _formatLbpFromValue(_totalLbp),
                       highlight: true,
                     ),
                     const SizedBox(height: 12),
@@ -3360,6 +3082,7 @@ class _CheckoutLocationSheetState extends State<_CheckoutLocationSheet> {
   }
 }
 
+// ignore: unused_element
 class _CheckoutDeliveryTimeSheet extends StatefulWidget {
   const _CheckoutDeliveryTimeSheet({
     required this.initialMode,
@@ -4898,14 +4621,30 @@ class _OrdersLiveSnapshot {
 }
 
 _PastOrderEntryData _pastOrderEntryFromAppOrder(AppOrder order) {
+  final reorderItems = order.items
+      .where((item) => item.menuItemId.trim().isNotEmpty)
+      .map(
+        (item) => _CartLineItemData(
+          title: item.title,
+          subtitle: order.itemSummary,
+          imageUrl: '',
+          price: item.unitPrice ?? 0,
+          quantity: item.quantity,
+          restaurantName: order.restaurantName,
+          restaurantId: order.restaurantId,
+          menuItemId: item.menuItemId,
+        ),
+      )
+      .toList(growable: false);
   return _PastOrderEntryData(
+    restaurantId: order.restaurantId,
     title: order.restaurantName,
     summary: order.itemSummary,
     dateLabel: _orderDateLabel(order.createdAt),
     totalLabel: order.totalLabel,
     status: _orderStatusFromBackend(order.status),
     imageUrl: '',
-    reorderItems: const <_CartLineItemData>[],
+    reorderItems: reorderItems,
   );
 }
 
@@ -4956,6 +4695,7 @@ String _orderDateLabel(DateTime? value) {
 
 class _PastOrderEntryData {
   const _PastOrderEntryData({
+    this.restaurantId = '',
     required this.title,
     required this.summary,
     required this.dateLabel,
@@ -4965,6 +4705,7 @@ class _PastOrderEntryData {
     required this.reorderItems,
   });
 
+  final String restaurantId;
   final String title;
   final String summary;
   final String dateLabel;
@@ -5141,10 +4882,6 @@ class _RestaurantCartData {
   String get coverImageUrl => items.isEmpty
       ? 'https://images.unsplash.com/photo-1552566626-52f8b828add9?auto=format&fit=crop&w=900&q=80'
       : items.first.imageUrl;
-}
-
-String _normalizeRestaurantKey(String value) {
-  return value.trim().toLowerCase();
 }
 
 String _firstRestaurantNameFromItems(List<_CartLineItemData> items) {

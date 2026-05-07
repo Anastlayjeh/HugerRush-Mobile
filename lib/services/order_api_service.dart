@@ -68,6 +68,28 @@ class CustomerOrderApiService {
     return AppOrder.fromJson(_extractOrderObject(payload));
   }
 
+  Future<AppOrder> cancelOrder({
+    required AuthSession session,
+    required String orderId,
+  }) async {
+    final cleanedId = orderId.trim();
+    if (cleanedId.isEmpty) {
+      throw const OrderApiException('Order ID is required.');
+    }
+    final result = await _apiClient.request(
+      session: session,
+      method: 'PATCH',
+      endpoint: '/v1/customer/orders/$cleanedId/cancel',
+    );
+    final payload = ApiClient.decodeMap(result.response.body);
+    _throwForFailure(
+      result.response.statusCode,
+      payload,
+      fallback: 'Cancel order is not available yet.',
+    );
+    return AppOrder.fromJson(_extractOrderObject(payload));
+  }
+
   Future<AppOrder?> _postOrder({
     required AuthSession session,
     required Map<String, dynamic> body,
@@ -107,7 +129,7 @@ class CustomerOrderApiService {
         session: session,
         method: 'POST',
         endpoint: '/v1/customer/cart/items',
-        body: item.toCartJson(restaurantId: draft.restaurantId),
+        body: item.toCartJson(),
       );
       final payload = ApiClient.decodeMap(result.response.body);
       _throwForFailure(
@@ -209,6 +231,7 @@ class CustomerOrderDraft {
     this.useLoyalty = false,
     this.saveChangeInWallet = false,
     this.branchId,
+    this.cartId,
   });
 
   final String restaurantId;
@@ -226,6 +249,7 @@ class CustomerOrderDraft {
   final bool useLoyalty;
   final bool saveChangeInWallet;
   final String? branchId;
+  final String? cartId;
 
   bool get canSyncCart =>
       restaurantId.trim().isNotEmpty &&
@@ -234,6 +258,9 @@ class CustomerOrderDraft {
 
   Map<String, dynamic> toOrderJson() {
     return <String, dynamic>{
+      if (cartId != null && cartId!.trim().isNotEmpty)
+        'cart_id': cartId!.trim(),
+      if (restaurantId.trim().isNotEmpty) 'restaurant_id': restaurantId.trim(),
       if (branchId != null && branchId!.trim().isNotEmpty)
         'branch_id': branchId!.trim(),
     };
@@ -267,7 +294,7 @@ class CustomerOrderDraftItem {
     };
   }
 
-  Map<String, dynamic> toCartJson({required String restaurantId}) {
+  Map<String, dynamic> toCartJson() {
     return <String, dynamic>{
       'menu_item_id': menuItemId,
       'quantity': quantity,
@@ -325,6 +352,7 @@ class AppOrder {
     required this.displayId,
     required this.customerName,
     required this.restaurantName,
+    required this.restaurantId,
     required this.status,
     required this.itemSummary,
     required this.total,
@@ -339,6 +367,7 @@ class AppOrder {
   final String displayId;
   final String customerName;
   final String restaurantName;
+  final String restaurantId;
   final String status;
   final String itemSummary;
   final double? total;
@@ -412,6 +441,10 @@ class AppOrder {
       displayId: displayId,
       customerName: customerName,
       restaurantName: restaurantName,
+      restaurantId:
+          _firstString(json, const ['restaurant_id']) ??
+          _firstString(restaurant, const ['id']) ??
+          '',
       status: status,
       itemSummary: itemSummary,
       total: _firstDouble(json, const [
@@ -452,12 +485,14 @@ class AppOrder {
 class AppOrderItem {
   const AppOrderItem({
     required this.title,
+    required this.menuItemId,
     required this.quantity,
     required this.unitPrice,
     required this.total,
   });
 
   final String title;
+  final String menuItemId;
   final int quantity;
   final double? unitPrice;
   final double? total;
@@ -477,6 +512,10 @@ class AppOrderItem {
         'Item';
     return AppOrderItem(
       title: title,
+      menuItemId:
+          _firstString(json, const ['menu_item_id', 'item_id']) ??
+          _firstString(menuItem, const ['id']) ??
+          '',
       quantity: _firstInt(json, const ['quantity', 'qty']) ?? 1,
       unitPrice: _firstDouble(json, const ['unit_price', 'price']),
       total: _firstDouble(json, const ['total', 'line_total', 'subtotal']),

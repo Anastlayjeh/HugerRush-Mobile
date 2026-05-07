@@ -17,6 +17,8 @@ class _MessagesSectionState extends State<_MessagesSection> {
   List<DemoConversationThread> _threads = const <DemoConversationThread>[];
   MessageFilterType _selectedFilter = MessageFilterType.all;
   String? _selectedCustomerName;
+  String _searchQuery = '';
+  Timer? _searchDebounce;
   bool _needsReplyOnly = false;
   bool _isLoading = true;
   String? _error;
@@ -33,7 +35,13 @@ class _MessagesSectionState extends State<_MessagesSection> {
     _loadThreads();
   }
 
-  Future<void> _loadThreads() async {
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadThreads({String? query}) async {
     setState(() {
       _isLoading = true;
       _error = null;
@@ -47,6 +55,7 @@ class _MessagesSectionState extends State<_MessagesSection> {
       }
       final conversations = await _conversationApiService.fetchConversations(
         session: session,
+        query: query ?? _searchQuery,
       );
       if (!mounted) {
         return;
@@ -122,7 +131,27 @@ class _MessagesSectionState extends State<_MessagesSection> {
         (thread) => thread.customerName == _selectedCustomerName,
       );
     }
+    final normalizedSearch = _searchQuery.trim().toLowerCase();
+    if (normalizedSearch.isNotEmpty) {
+      items = items.where((thread) {
+        return thread.customerName.toLowerCase().contains(normalizedSearch) ||
+            thread.lastMessage.toLowerCase().contains(normalizedSearch) ||
+            thread.channelLabel.toLowerCase().contains(normalizedSearch) ||
+            thread.orderLabel.toLowerCase().contains(normalizedSearch);
+      });
+    }
     return items.toList();
+  }
+
+  void _onSearchChanged(String value) {
+    setState(() => _searchQuery = value);
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted) {
+        return;
+      }
+      _loadThreads(query: value);
+    });
   }
 
   void _selectFilter(MessageFilterType filter) {
@@ -201,6 +230,28 @@ class _MessagesSectionState extends State<_MessagesSection> {
                 parent: AlwaysScrollableScrollPhysics(),
               ),
               children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEFCFA),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFE9D7C8)),
+                  ),
+                  child: TextField(
+                    onChanged: _onSearchChanged,
+                    decoration: const InputDecoration(
+                      border: InputBorder.none,
+                      icon: Icon(
+                        Icons.search_rounded,
+                        color: Color(0xFF8D7D71),
+                      ),
+                      hintText: 'Search customers or restaurants',
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  height: _clampDouble(12 * widget.metrics.scale, 8, 12),
+                ),
                 _MessagesHeaderCard(
                   metrics: widget.metrics,
                   restaurantName: widget.restaurantName,
