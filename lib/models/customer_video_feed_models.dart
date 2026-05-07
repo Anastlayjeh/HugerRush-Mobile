@@ -1,3 +1,5 @@
+import '../config/api_config.dart';
+
 class CustomerVideoFeedPage {
   const CustomerVideoFeedPage({required this.items, required this.meta});
 
@@ -89,19 +91,27 @@ class CustomerVideoFeedItem {
   final CustomerVideoViewerState viewerState;
   final DateTime? publishedAt;
 
-  String get playbackUrl {
+  List<String> get playbackUrls {
     final candidates =
         <String>[streamHlsUrl, hlsUrl, playbackUrlValue, videoUrl, mediaUrl]
-            .map((url) => url.trim())
+            .map(ApiConfig.resolveMediaUrl)
             .where((url) => url.isNotEmpty)
             .toList(growable: false);
     if (candidates.isEmpty) {
-      return '';
+      return const <String>[];
     }
-    for (final candidate in candidates) {
-      if (_isHlsUrl(candidate)) {
-        return candidate;
-      }
+
+    final ordered = <String>[
+      ...candidates.where(_isHlsUrl),
+      ...candidates.where((url) => !_isHlsUrl(url)),
+    ];
+    return _distinctStrings(ordered);
+  }
+
+  String get playbackUrl {
+    final candidates = playbackUrls;
+    if (candidates.isEmpty) {
+      return '';
     }
     return candidates.first;
   }
@@ -390,4 +400,15 @@ DateTime? _readDateTime(dynamic value) {
 
 bool _isHlsUrl(String value) {
   return value.toLowerCase().contains('.m3u8');
+}
+
+List<String> _distinctStrings(Iterable<String> values) {
+  final seen = <String>{};
+  final result = <String>[];
+  for (final value in values) {
+    if (seen.add(value)) {
+      result.add(value);
+    }
+  }
+  return result;
 }

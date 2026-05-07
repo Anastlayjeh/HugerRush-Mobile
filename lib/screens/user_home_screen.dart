@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
+import '../config/api_config.dart';
 import '../models/auth_session.dart';
 import '../models/customer_video_feed_models.dart';
 import '../models/demo_app_models.dart';
@@ -100,11 +101,13 @@ String _restaurantVideoMeta(CustomerRestaurantVideoItem item) {
 }
 
 List<RestaurantProfileVideoPreview> _restaurantVideoPreviewsFromItems(
-  List<CustomerRestaurantVideoItem> items,
-) {
+  List<CustomerRestaurantVideoItem> items, {
+  AuthSession? session,
+}) {
   final videos = items
       .where((item) => item.resolvedPlaybackUrl.trim().isNotEmpty)
       .toList(growable: false);
+  final playbackHeaders = _videoPlaybackHeadersForSession(session);
   videos.sort((a, b) {
     final aTime =
         a.publishedAt ?? a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
@@ -113,17 +116,30 @@ List<RestaurantProfileVideoPreview> _restaurantVideoPreviewsFromItems(
     return bTime.compareTo(aTime);
   });
   return videos
-      .map(
-        (video) => RestaurantProfileVideoPreview(
+      .map((video) {
+        final playbackUrls = video.playbackUrls;
+        return RestaurantProfileVideoPreview(
           id: video.id,
           title: video.title,
           meta: _restaurantVideoMeta(video),
-          thumbnailUrl: video.thumbnailUrl,
-          videoUrl: video.resolvedPlaybackUrl,
+          thumbnailUrl: ApiConfig.resolveMediaUrl(video.thumbnailUrl),
+          videoUrl: playbackUrls.isEmpty ? '' : playbackUrls.first,
+          fallbackVideoUrls: playbackUrls.skip(1).toList(growable: false),
           description: video.description,
-        ),
-      )
+          httpHeaders: playbackHeaders,
+        );
+      })
       .toList(growable: false);
+}
+
+Map<String, String> _videoPlaybackHeadersForSession(AuthSession? session) {
+  final token = session?.token.trim();
+  if (token == null || token.isEmpty) {
+    return const <String, String>{};
+  }
+  return Map<String, String>.unmodifiable(<String, String>{
+    'Authorization': 'Bearer $token',
+  });
 }
 
 String _feedCreatorLabel(String restaurantName) {
@@ -171,4 +187,3 @@ const Map<String, String> _customerRestaurantNamesByThreadId = <String, String>{
   't5': 'Green Bowl',
   't6': 'Falafel Spot',
 };
-

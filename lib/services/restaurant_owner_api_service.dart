@@ -1,3 +1,4 @@
+import '../config/api_config.dart';
 import '../models/auth_session.dart';
 import 'api_client.dart';
 import 'authenticated_api_client.dart';
@@ -624,17 +625,15 @@ class RestaurantVideoItem {
       playbackUrlValue,
       videoUrl,
       mediaUrl,
-    ];
+    ].map(ApiConfig.resolveMediaUrl);
     for (final value in candidates.where(_isHlsUrl)) {
-      final cleaned = value.trim();
-      if (cleaned.isNotEmpty) {
-        return cleaned;
+      if (value.isNotEmpty) {
+        return value;
       }
     }
     for (final value in candidates) {
-      final cleaned = value.trim();
-      if (cleaned.isNotEmpty) {
-        return cleaned;
+      if (value.isNotEmpty) {
+        return value;
       }
     }
     return '';

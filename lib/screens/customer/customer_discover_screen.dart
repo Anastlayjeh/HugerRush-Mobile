@@ -999,7 +999,10 @@ class _DiscoverTabBodyState extends State<_DiscoverTabBody> {
             restaurantId: restaurantId,
             perPage: 50,
           );
-          uploadedVideos = _restaurantVideoPreviewsFromItems(videos);
+          uploadedVideos = _restaurantVideoPreviewsFromItems(
+            videos,
+            session: session,
+          );
         } catch (_) {}
         try {
           final points = await _loyaltyApiService.fetchCustomerRestaurantPoints(

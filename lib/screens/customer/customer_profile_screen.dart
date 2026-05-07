@@ -588,7 +588,10 @@ class _FollowingRestaurantsScreenState
           restaurantId: restaurantId,
           perPage: 50,
         );
-        uploadedVideos = _restaurantVideoPreviewsFromItems(videos);
+        uploadedVideos = _restaurantVideoPreviewsFromItems(
+          videos,
+          session: session,
+        );
       } catch (_) {}
       try {
         final reviews = await _restaurantApiService.fetchRestaurantReviews(

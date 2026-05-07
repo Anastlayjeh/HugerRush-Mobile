@@ -776,7 +776,10 @@ class _FeedTabBodyState extends State<_FeedTabBody>
             restaurantId: restaurantId,
             perPage: 50,
           );
-          uploadedVideos = _restaurantVideoPreviewsFromItems(videos);
+          uploadedVideos = _restaurantVideoPreviewsFromItems(
+            videos,
+            session: session,
+          );
         } catch (_) {}
         try {
           final liveReviews = await _restaurantApiService

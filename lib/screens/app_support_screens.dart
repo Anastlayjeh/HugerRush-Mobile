@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import '../config/api_config.dart';
 import '../models/auth_session.dart';
 import '../models/demo_app_models.dart';
 import '../services/auth_api_service.dart';
@@ -1129,7 +1130,9 @@ class RestaurantProfileVideoPreview {
     this.id = '',
     this.thumbnailUrl = '',
     this.videoUrl = '',
+    this.fallbackVideoUrls = const <String>[],
     this.description = '',
+    this.httpHeaders = const <String, String>{},
   });
 
   final String title;
@@ -1137,7 +1140,21 @@ class RestaurantProfileVideoPreview {
   final String id;
   final String thumbnailUrl;
   final String videoUrl;
+  final List<String> fallbackVideoUrls;
   final String description;
+  final Map<String, String> httpHeaders;
+
+  List<String> get playbackUrls {
+    final seen = <String>{};
+    final result = <String>[];
+    for (final url in <String>[videoUrl, ...fallbackVideoUrls]) {
+      final cleaned = url.trim();
+      if (cleaned.isNotEmpty && seen.add(cleaned)) {
+        result.add(cleaned);
+      }
+    }
+    return result;
+  }
 }
 
 class RestaurantProfileReviewPreview {
@@ -2385,7 +2402,7 @@ class _RestaurantProfileVideoGrid extends StatelessWidget {
           return _RestaurantProfileVideoGridTile(
             video: video,
             onTap: () {
-              if (video.videoUrl.trim().isEmpty) {
+              if (video.playbackUrls.isEmpty) {
                 final messenger = ScaffoldMessenger.maybeOf(context);
                 messenger
                   ?..hideCurrentSnackBar()
@@ -2524,31 +2541,94 @@ class _RestaurantProfileVideoDemoScreenState
   }
 
   Future<void> _initializeVideo() async {
-    final resolvedUrl = widget.video.videoUrl.trim();
-    final parsed = Uri.tryParse(resolvedUrl);
-    if (resolvedUrl.isEmpty || parsed == null || !parsed.hasScheme) {
+    final playbackUris = _playbackUris();
+    if (playbackUris.isEmpty) {
       if (!mounted) {
         return;
       }
       setState(() => _hasError = true);
       return;
     }
-    final controller = VideoPlayerController.networkUrl(parsed);
-    _controller = controller;
-    try {
-      await controller.initialize();
-      await controller.setLooping(true);
-      await controller.play();
-      if (!mounted) {
+
+    for (final uri in playbackUris) {
+      final controller = VideoPlayerController.networkUrl(
+        uri,
+        formatHint: _formatHintForUri(uri),
+        httpHeaders: _httpHeadersForUri(uri),
+      );
+      _controller = controller;
+      try {
+        await controller.initialize();
+        await controller.setLooping(true);
+        await controller.play();
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _hasError = false;
+          _isReady = true;
+        });
         return;
+      } catch (error) {
+        debugPrint('Restaurant profile video failed for $uri: $error');
+        if (identical(_controller, controller)) {
+          _controller = null;
+        }
+        await controller.dispose();
       }
-      setState(() => _isReady = true);
-    } catch (_) {
-      if (!mounted) {
-        return;
-      }
-      setState(() => _hasError = true);
     }
+
+    if (!mounted) {
+      return;
+    }
+    setState(() => _hasError = true);
+  }
+
+  List<Uri> _playbackUris() {
+    final seen = <String>{};
+    final result = <Uri>[];
+    for (final url in widget.video.playbackUrls) {
+      final resolved = ApiConfig.resolveMediaUrl(url);
+      final uri = Uri.tryParse(resolved);
+      if (uri == null ||
+          !uri.hasScheme ||
+          uri.host.isEmpty ||
+          (uri.scheme != 'http' && uri.scheme != 'https')) {
+        continue;
+      }
+      final key = uri.toString();
+      if (seen.add(key)) {
+        result.add(uri);
+      }
+    }
+    return result;
+  }
+
+  VideoFormat? _formatHintForUri(Uri uri) {
+    final path = uri.path.toLowerCase();
+    if (path.endsWith('.m3u8')) {
+      return VideoFormat.hls;
+    }
+    if (path.endsWith('.mpd')) {
+      return VideoFormat.dash;
+    }
+    return null;
+  }
+
+  Map<String, String> _httpHeadersForUri(Uri uri) {
+    final headers = Map<String, String>.from(widget.video.httpHeaders);
+    final authorization = headers['Authorization'];
+    if (authorization != null && !_isApiOrigin(uri)) {
+      headers.remove('Authorization');
+    }
+    return headers;
+  }
+
+  bool _isApiOrigin(Uri uri) {
+    final apiUri = Uri.parse(ApiConfig.baseUrl);
+    return uri.scheme == apiUri.scheme &&
+        uri.host == apiUri.host &&
+        uri.port == apiUri.port;
   }
 
   @override

@@ -79,6 +79,37 @@ class ApiConfig {
     return Uri.parse('$baseUrl$normalizedPath');
   }
 
+  static String resolveMediaUrl(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return '';
+    }
+
+    final baseUri = Uri.parse(baseUrl);
+    final parsed = Uri.tryParse(trimmed);
+    if (parsed != null &&
+        parsed.hasScheme &&
+        (parsed.scheme.toLowerCase() == 'http' ||
+            parsed.scheme.toLowerCase() == 'https')) {
+      return _preferHttpsForProductionHost(parsed).toString();
+    }
+
+    if (trimmed.startsWith('//')) {
+      return _preferHttpsForProductionHost(
+        Uri.parse('${baseUri.scheme}:$trimmed'),
+      ).toString();
+    }
+
+    final normalizedPath = trimmed.startsWith('/') ? trimmed : '/$trimmed';
+    if (normalizedPath.startsWith('/v1/')) {
+      return apiUri(normalizedPath).toString();
+    }
+
+    return _preferHttpsForProductionHost(
+      _originUri(baseUri).resolve(normalizedPath),
+    ).toString();
+  }
+
   static String _normalizeEndpointPath(String path) {
     final normalizedPath = path.startsWith('/') ? path : '/$path';
 
@@ -100,6 +131,18 @@ class ApiConfig {
         (uri.scheme.toLowerCase() == 'http' ||
             uri.scheme.toLowerCase() == 'https') &&
         uri.host.isNotEmpty;
+  }
+
+  static Uri _originUri(Uri uri) {
+    return uri.replace(path: '/', query: null, fragment: null);
+  }
+
+  static Uri _preferHttpsForProductionHost(Uri uri) {
+    final productionHost = Uri.parse(productionBaseUrl).host;
+    if (uri.scheme.toLowerCase() == 'http' && uri.host == productionHost) {
+      return uri.replace(scheme: 'https');
+    }
+    return uri;
   }
 
   static String _stripTrailingSlash(String value) {

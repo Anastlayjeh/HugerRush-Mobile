@@ -1,3 +1,4 @@
+import '../config/api_config.dart';
 import '../models/auth_session.dart';
 import 'api_client.dart';
 import 'auth_api_service.dart';
@@ -605,6 +606,7 @@ class CustomerRestaurantVideoItem {
     required this.videoUrl,
     required this.mediaUrl,
     required this.streamPreviewUrl,
+    required this.streamReady,
     required this.status,
     required this.moderationStatus,
     required this.createdAt,
@@ -625,6 +627,7 @@ class CustomerRestaurantVideoItem {
   final String videoUrl;
   final String mediaUrl;
   final String streamPreviewUrl;
+  final bool streamReady;
   final String status;
   final String moderationStatus;
   final DateTime? createdAt;
@@ -634,19 +637,38 @@ class CustomerRestaurantVideoItem {
   final int sharesCount;
   final int commentsCount;
 
+  List<String> get playbackUrls {
+    final streamCandidates = <String>[streamHlsUrl, hlsUrl, playbackUrl]
+        .map(ApiConfig.resolveMediaUrl)
+        .where((url) => url.isNotEmpty)
+        .toList(growable: false);
+
+    final directCandidates = <String>[playbackUrl, videoUrl, mediaUrl]
+        .map(ApiConfig.resolveMediaUrl)
+        .where((url) => url.isNotEmpty)
+        .toList(growable: false);
+
+    final ordered = streamReady
+        ? <String>[
+            ...streamCandidates.where(_isHlsUrl),
+            ...directCandidates.where((url) => !_isHlsUrl(url)),
+            ...streamCandidates.where((url) => !_isHlsUrl(url)),
+            ...directCandidates.where(_isHlsUrl),
+          ]
+        : <String>[
+            ...directCandidates.where((url) => !_isHlsUrl(url)),
+            ...streamCandidates.where((url) => !_isHlsUrl(url)),
+            ...streamCandidates.where(_isHlsUrl),
+            ...directCandidates.where(_isHlsUrl),
+          ];
+
+    return _distinctStrings(ordered);
+  }
+
   String get resolvedPlaybackUrl {
-    final candidates =
-        <String>[streamHlsUrl, hlsUrl, playbackUrl, videoUrl, mediaUrl]
-            .map((url) => url.trim())
-            .where((url) => url.isNotEmpty)
-            .toList(growable: false);
+    final candidates = playbackUrls;
     if (candidates.isEmpty) {
       return '';
-    }
-    for (final candidate in candidates) {
-      if (candidate.toLowerCase().contains('.m3u8')) {
-        return candidate;
-      }
     }
     return candidates.first;
   }
@@ -664,6 +686,7 @@ class CustomerRestaurantVideoItem {
       videoUrl: _readString(json['video_url']) ?? '',
       mediaUrl: _readString(json['media_url']) ?? '',
       streamPreviewUrl: _readString(json['stream_preview_url']) ?? '',
+      streamReady: _readBool(json['stream_ready']) ?? true,
       status: _readString(json['status']) ?? '',
       moderationStatus: _readString(json['moderation_status']) ?? '',
       createdAt: _readDateTime(json['created_at']),
@@ -800,4 +823,19 @@ DateTime? _readDateTime(dynamic value) {
     return DateTime.tryParse(value);
   }
   return null;
+}
+
+bool _isHlsUrl(String value) {
+  return value.toLowerCase().contains('.m3u8');
+}
+
+List<String> _distinctStrings(Iterable<String> values) {
+  final seen = <String>{};
+  final result = <String>[];
+  for (final value in values) {
+    if (seen.add(value)) {
+      result.add(value);
+    }
+  }
+  return result;
 }
