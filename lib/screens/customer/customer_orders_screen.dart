@@ -2156,7 +2156,7 @@ class _OrdersCartScreenState extends State<_OrdersCartScreen> {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              'Applied with ${_loyaltyPointsUsed} points',
+                              'Applied with $_loyaltyPointsUsed points',
                               style: const TextStyle(
                                 color: Color(0xFF2F8A7E),
                                 fontSize: 12.5,

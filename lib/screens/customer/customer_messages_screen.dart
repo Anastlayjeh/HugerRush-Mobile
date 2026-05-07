@@ -551,7 +551,7 @@ class _NewChatRestaurantCard extends StatelessWidget {
           border: Border.all(color: const Color(0xFFE9D7C8)),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF231A16).withOpacity(0.04),
+              color: const Color(0xFF231A16).withValues(alpha: 0.04),
               blurRadius: 10,
               offset: const Offset(0, 4),
             ),

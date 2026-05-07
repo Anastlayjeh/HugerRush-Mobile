@@ -59,14 +59,6 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
     }
   }
 
-  String get _userHandle {
-    final cleaned = _customerProfileData.fullName.trim();
-    if (cleaned.isEmpty) {
-      return 'FoodExplorer';
-    }
-    return cleaned.replaceAll(RegExp(r'\s+'), '');
-  }
-
   void _openProfileMenu() {
     _scaffoldKey.currentState?.openEndDrawer();
   }
@@ -201,9 +193,6 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
     final showOrders = _selectedBottomIndex == 2;
     final showMessages = _selectedBottomIndex == 3;
     final showProfile = _selectedBottomIndex == 4;
-    final savedPlaces = _savedPlacesFromHeartedRestaurants(
-      repository: DemoAppRepository.instance,
-    );
     final followedRestaurantPosts = _followedRestaurantPosts();
     return Scaffold(
       key: _scaffoldKey,

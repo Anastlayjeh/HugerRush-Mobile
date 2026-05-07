@@ -124,6 +124,8 @@ class _ProfileTabBody extends StatelessWidget {
                 userHandle: displayHandle,
                 userEmail: displayEmail,
                 userAvatarUrl: displayAvatarUrl,
+                userAvatarBytes: null,
+                accountLabel: profile?.role,
                 followingCountLabel: _formatCompactCount(
                   summary?.followingCount ?? followedRestaurants.length,
                 ),
@@ -269,180 +271,6 @@ class _ProfileTabBody extends StatelessWidget {
     );
   }
 
-  String? _resolveRestaurantIdForSavedPlace(_SavedPlaceData place) {
-    final normalizedName = place.title.trim().toLowerCase();
-    final normalizedHandle = place.handle.trim().toLowerCase().replaceFirst(
-      '@',
-      '',
-    );
-    for (final post in followedRestaurants) {
-      final candidateId = post.restaurantId?.trim();
-      if (candidateId == null || candidateId.isEmpty) {
-        continue;
-      }
-      final postName = post.restaurantName.trim().toLowerCase();
-      final postHandle = post.restaurantHandle
-          .trim()
-          .toLowerCase()
-          .replaceFirst('@', '');
-      if (postName == normalizedName || postHandle == normalizedHandle) {
-        return candidateId;
-      }
-    }
-    return null;
-  }
-
-  Future<void> _openSavedPlaceProfile(
-    BuildContext context,
-    _SavedPlaceData place,
-  ) async {
-    final restaurantId = _resolveRestaurantIdForSavedPlace(place);
-    var resolvedPlace = place;
-    var menuItems = const <RestaurantMenuItem>[];
-    var uploadedVideos = const <RestaurantProfileVideoPreview>[];
-    var reviewPreviews = const <RestaurantProfileReviewPreview>[];
-    String? profileImageUrl;
-    String? loyaltyPointsLabel;
-    final cleanedRestaurantId = restaurantId?.trim() ?? '';
-    if (cleanedRestaurantId.isNotEmpty) {
-      final authSessionService = AuthSessionService();
-      final session = await authSessionService.readSession();
-      if (session != null && session.token.trim().isNotEmpty) {
-        final authenticatedClient = AuthenticatedApiClient(
-          authApiService: AuthApiService(),
-          authSessionService: authSessionService,
-        );
-        final restaurantApi = CustomerRestaurantApiService(
-          apiClient: authenticatedClient,
-        );
-        final loyaltyApi = LoyaltyApiService(apiClient: authenticatedClient);
-        try {
-          final details = await restaurantApi.fetchRestaurant(
-            session: session,
-            restaurantId: cleanedRestaurantId,
-          );
-          resolvedPlace = _SavedPlaceData(
-            title: details.name,
-            subtitle: details.categoryLabel.trim().isEmpty
-                ? place.subtitle
-                : details.categoryLabel.trim(),
-            handle: details.id.isEmpty
-                ? place.handle
-                : 'restaurant-${details.id}',
-            cuisineSummary: details.categoryLabel,
-            caption: details.description.trim().isEmpty
-                ? place.caption
-                : details.description.trim(),
-            rating: details.averageRating ?? place.rating,
-            phoneLabel: details.phone.trim().isEmpty
-                ? place.phoneLabel
-                : details.phone.trim(),
-            locationLabel: details.address.trim().isEmpty
-                ? place.locationLabel
-                : details.address.trim(),
-            followersCount: details.followersCount,
-            icon: place.icon,
-          );
-          profileImageUrl = details.profilePhotoUrl.trim().isEmpty
-              ? null
-              : details.profilePhotoUrl.trim();
-        } catch (_) {}
-        try {
-          menuItems = await restaurantApi.fetchRestaurantMenu(
-            session: session,
-            restaurantId: cleanedRestaurantId,
-          );
-        } catch (_) {}
-        try {
-          final videos = await restaurantApi.fetchRestaurantVideos(
-            session: session,
-            restaurantId: cleanedRestaurantId,
-            perPage: 50,
-          );
-          uploadedVideos = _restaurantVideoPreviewsFromItems(videos);
-        } catch (_) {}
-        try {
-          final reviews = await restaurantApi.fetchRestaurantReviews(
-            session: session,
-            restaurantId: cleanedRestaurantId,
-            perPage: 50,
-          );
-          reviewPreviews = reviews
-              .map((review) {
-                final createdAt = review.createdAt.toLocal();
-                return RestaurantProfileReviewPreview(
-                  customerName: review.customerName,
-                  rating: review.rating,
-                  comment: review.comment,
-                  timeLabel: _formatRelativeTime(createdAt),
-                  orderLabel: review.orderLabel,
-                );
-              })
-              .toList(growable: false);
-        } catch (_) {}
-        try {
-          final points = await loyaltyApi.fetchCustomerRestaurantPoints(
-            session: session,
-            restaurantId: cleanedRestaurantId,
-          );
-          loyaltyPointsLabel = 'Your loyalty points: ${points.pointsBalance}';
-        } catch (_) {}
-      }
-    }
-    if (!context.mounted) {
-      return;
-    }
-
-    await showRestaurantProfilePopup(
-      context,
-      restaurantName: resolvedPlace.title,
-      handle: resolvedPlace.handle,
-      rating: resolvedPlace.rating,
-      caption: resolvedPlace.caption,
-      restaurantId: cleanedRestaurantId.isEmpty ? null : cleanedRestaurantId,
-      cuisineSummary: resolvedPlace.cuisineSummary,
-      phoneLabel: resolvedPlace.phoneLabel,
-      locationLabel: resolvedPlace.locationLabel,
-      followersCountLabel:
-          '${_formatCompactCount(resolvedPlace.followersCount)} followers',
-      profileImageUrl: profileImageUrl,
-      loyaltyPointsLabel: loyaltyPointsLabel,
-      allowAddToCart: true,
-      menuItems: menuItems,
-      uploadedVideos: uploadedVideos,
-      showMenuCategoryFilter: true,
-      showFollowButton: true,
-      showSaveButton: true,
-      reviews: reviewPreviews,
-      onOpenReviews: () {
-        openRestaurantReviewsPage(
-          context,
-          restaurantName: resolvedPlace.title,
-          rating: resolvedPlace.rating,
-          restaurantId: cleanedRestaurantId.isEmpty
-              ? null
-              : cleanedRestaurantId,
-          reviews: reviewPreviews,
-        );
-      },
-      onAddToCart: (item) {
-        final messenger = ScaffoldMessenger.maybeOf(context);
-        if (messenger == null) {
-          return;
-        }
-        messenger
-          ..hideCurrentSnackBar()
-          ..showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Saved-place checkout is not available yet. Open a live restaurant menu to add items.',
-              ),
-            ),
-          );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -458,7 +286,6 @@ class _ProfileTabBody extends StatelessWidget {
             maxHeight: safeHeight > 0 ? safeHeight : constraints.maxHeight,
           ),
         );
-        final followedRestaurants = this.followedRestaurants;
         final navBarBottomInset = safeAreaPadding.bottom;
         final navBarTotalHeight = metrics.navHeight + navBarBottomInset;
         return Stack(
@@ -2908,85 +2735,6 @@ class _FoodThumb extends StatelessWidget {
   }
 }
 
-class _SavedPlaceTile extends StatelessWidget {
-  const _SavedPlaceTile({
-    required this.data,
-    required this.metrics,
-    this.onTap,
-  });
-
-  final _SavedPlaceData data;
-  final _ResponsiveMetrics metrics;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: _clampDouble(18 * metrics.scale, 14, 18),
-            vertical: _clampDouble(16 * metrics.scale, 12, 16),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: _clampDouble(50 * metrics.scale, 42, 50),
-                height: _clampDouble(50 * metrics.scale, 42, 50),
-                decoration: const BoxDecoration(
-                  color: Color(0xFFF4F0EC),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  data.icon,
-                  color: const Color(0xFF7A6B61),
-                  size: _clampDouble(26 * metrics.scale, 20, 26),
-                ),
-              ),
-              SizedBox(width: _clampDouble(14 * metrics.scale, 10, 14)),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      data.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: const Color(0xFF231A16),
-                        fontSize: _clampDouble(18 * metrics.scale, 14, 18),
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    SizedBox(height: _clampDouble(4 * metrics.scale, 2, 4)),
-                    Text(
-                      data.subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: const Color(0xFF847468),
-                        fontSize: _clampDouble(15 * metrics.scale, 11, 15),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(
-                Icons.favorite_rounded,
-                color: const Color(0xFFFF7E4D),
-                size: _clampDouble(28 * metrics.scale, 22, 28),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _ProfileSettingsTile extends StatelessWidget {
   const _ProfileSettingsTile({
     required this.data,
@@ -3038,32 +2786,6 @@ class _ProfileSettingsTile extends StatelessWidget {
       ),
     );
   }
-}
-
-class _SavedPlaceData {
-  const _SavedPlaceData({
-    required this.title,
-    required this.subtitle,
-    required this.handle,
-    required this.rating,
-    required this.caption,
-    required this.cuisineSummary,
-    required this.phoneLabel,
-    required this.locationLabel,
-    required this.followersCount,
-    required this.icon,
-  });
-
-  final String title;
-  final String subtitle;
-  final String handle;
-  final double rating;
-  final String caption;
-  final String cuisineSummary;
-  final String phoneLabel;
-  final String locationLabel;
-  final int followersCount;
-  final IconData icon;
 }
 
 class _EditableCustomerProfileData {

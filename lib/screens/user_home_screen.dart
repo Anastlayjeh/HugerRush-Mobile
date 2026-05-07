@@ -149,13 +149,6 @@ String _feedTagFromName(String value) {
   return cleaned.isEmpty ? '#food' : '#$cleaned';
 }
 
-List<DemoFeedPost> _customerFeedPostsSnapshot(DemoAppRepository repository) {
-  return <DemoFeedPost>[
-    repository.getFeedPost(following: false),
-    repository.getFeedPost(following: true),
-  ];
-}
-
 List<DemoFeedPost> _followingRestaurantsFromPosts(List<DemoFeedPost> posts) {
   final uniqueByHandle = <String, DemoFeedPost>{};
   for (final post in posts) {
@@ -179,47 +172,3 @@ const Map<String, String> _customerRestaurantNamesByThreadId = <String, String>{
   't6': 'Falafel Spot',
 };
 
-String _savedPlaceKey({required String title, required String handle}) {
-  final normalizedHandle = handle.trim().toLowerCase();
-  if (normalizedHandle.isNotEmpty) {
-    return normalizedHandle;
-  }
-  return title.trim().toLowerCase();
-}
-
-_SavedPlaceData _savedPlaceFromFeedPost(DemoFeedPost post) {
-  return _SavedPlaceData(
-    title: post.restaurantName,
-    subtitle: 'Saved from profile - @${post.restaurantHandle}',
-    handle: post.restaurantHandle,
-    rating: post.rating,
-    caption: post.caption,
-    cuisineSummary: 'Trending Restaurant',
-    phoneLabel: '+961 1 554 100',
-    locationLabel: 'Saved from feed',
-    followersCount: post.followersCount,
-    icon: Icons.restaurant_rounded,
-  );
-}
-
-List<_SavedPlaceData> _savedPlacesFromHeartedRestaurants({
-  required DemoAppRepository repository,
-}) {
-  final savedByKey = <String, _SavedPlaceData>{};
-
-  for (final post in _customerFeedPostsSnapshot(repository)) {
-    if (!isCustomerRestaurantSaved(
-      restaurantName: post.restaurantName,
-      handle: post.restaurantHandle,
-    )) {
-      continue;
-    }
-    final saved = _savedPlaceFromFeedPost(post);
-    savedByKey[_savedPlaceKey(title: saved.title, handle: saved.handle)] =
-        saved;
-  }
-
-  final items = savedByKey.values.toList()
-    ..sort((a, b) => a.title.compareTo(b.title));
-  return items;
-}
