@@ -80,6 +80,24 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
     return digits.length >= 3 && digits.length <= 10;
   }
 
+  String _buildRestaurantRegistrationDescription({
+    required String cuisine,
+    required String country,
+    required String city,
+    required String street,
+    required String postalCode,
+  }) {
+    final details = <String>[
+      'Cuisine: $cuisine',
+      'Country: $country',
+      'City: $city',
+      'Street: $street',
+      'Postal code: $postalCode',
+    ];
+
+    return details.join('\n');
+  }
+
   void _openPlaceholderPage({required String title, required String message}) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -169,13 +187,15 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
       payload = {
         'name': restaurantName,
         'restaurant_name': restaurantName,
-        'cuisine_type': cuisine,
+        'restaurant_description': _buildRestaurantRegistrationDescription(
+          cuisine: cuisine,
+          country: country,
+          city: city,
+          street: street,
+          postalCode: postalCode,
+        ),
         'email': email,
         'phone': phone,
-        'country': country,
-        'city': city,
-        'street': street,
-        'postal_code': postalCode,
         'password': password,
         'password_confirmation': confirmPassword,
         'role': 'restaurant_owner',
@@ -195,13 +215,20 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
 
     setState(() => _isSubmitting = true);
     try {
-      final result = await _authApiService.register(payload: payload);
+      final result = _type == RegistrationType.hungryUser
+          ? await _authApiService.register(payload: payload)
+          : await _authApiService.requestRestaurantApproval(payload: payload);
       if (!mounted) {
         return;
       }
+      final message = result.message.trim().isNotEmpty
+          ? result.message
+          : _type == RegistrationType.hungryUser
+          ? 'Registration successful.'
+          : 'Your registration request has been sent for admin review.';
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text(result.message)));
+      ).showSnackBar(SnackBar(content: Text(message)));
       Navigator.of(context).pop();
     } on AuthApiException catch (e) {
       if (!mounted) {

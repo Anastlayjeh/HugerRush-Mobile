@@ -72,6 +72,68 @@ void main() {
       },
     );
 
+    test('register throws if response does not include an auth token', () async {
+      final service = AuthApiService(
+        client: MockClient((request) async {
+          return http.Response(
+            '{"message":"Registration successful.","data":{"user":{"id":1}}}',
+            201,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      expect(
+        () => service.register(
+          payload: {
+            'name': 'Owner',
+            'email': 'owner@example.com',
+            'password': 'Password123!',
+            'password_confirmation': 'Password123!',
+            'role': 'restaurant_owner',
+          },
+        ),
+        throwsA(
+          isA<AuthApiException>().having(
+            (e) => e.message,
+            'message',
+            contains('auth token'),
+          ),
+        ),
+      );
+    });
+
+    test('requestRestaurantApproval allows success response without token', () async {
+      late http.Request capturedRequest;
+      final service = AuthApiService(
+        client: MockClient((request) async {
+          capturedRequest = request;
+          return http.Response(
+            '{"message":"Registration request submitted.","data":{"status":"pending"}}',
+            201,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      final result = await service.requestRestaurantApproval(
+        payload: {
+          'name': 'Bella Kitchen',
+          'restaurant_name': 'Bella Kitchen',
+          'restaurant_description': 'Cuisine: Italian',
+          'email': 'bella@example.com',
+          'phone': '+96170000000',
+          'password': 'Password123!',
+          'password_confirmation': 'Password123!',
+          'role': 'restaurant_owner',
+        },
+      );
+
+      expect(capturedRequest.url.path, '/api/v1/auth/register');
+      expect(result.token, isNull);
+      expect(result.message, 'Registration request submitted.');
+    });
+
     test(
       'forgotPassword posts email to the v1 forgot password endpoint',
       () async {

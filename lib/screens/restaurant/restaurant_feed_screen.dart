@@ -2,6 +2,8 @@ part of '../restaurant_feed_screen.dart';
 
 enum _VideoHoldAction { none, pause, speed2x }
 
+enum _FeedLoadResult { loaded, permissionDenied, failed }
+
 class RestaurantFeedScreen extends StatefulWidget {
   const RestaurantFeedScreen({
     super.key,
@@ -34,6 +36,8 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   final _authSessionService = AuthSessionService();
   final _demoRepository = DemoAppRepository.instance;
   final Map<String, DemoFeedPost> _feedPostsById = <String, DemoFeedPost>{};
+  final Map<String, CustomerVideoFeedItem> _feedItemsByPostId =
+      <String, CustomerVideoFeedItem>{};
   final Map<String, Offset> _lastDoubleTapOffsetsByPostId = <String, Offset>{};
   final List<_FeedLikeBurstData> _activeLikeBursts = <_FeedLikeBurstData>[];
   final Set<String> _pendingDoubleTapLikePostIds = <String>{};
@@ -56,7 +60,11 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   final List<bool> _videoErrorLogged = <bool>[];
   int _currentVideoIndex = 0;
   int _videoPlaybackSyncVersion = 0;
+  int _feedRequestId = 0;
+  int _nextFeedPage = 1;
   int _nextLikeBurstId = 0;
+  bool _hasMoreFeed = true;
+  bool _isLoadingMoreFeed = false;
   bool _isVideoHoldActive = false;
   _VideoHoldAction _videoHoldAction = _VideoHoldAction.none;
   bool _isVideoManuallyPaused = false;
@@ -190,83 +198,216 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   }
 
   Future<void> _refreshRestaurantVideos() async {
+    final requestId = ++_feedRequestId;
+    _nextFeedPage = 1;
+    _hasMoreFeed = true;
+    _isLoadingMoreFeed = false;
+    if (mounted) {
+      setState(() {
+        _resetFeedVideosState();
+        _isLoadingFeedVideos = true;
+        _feedVideosError = null;
+      });
+    }
+
     final session = await _resolveSession();
+    if (requestId != _feedRequestId) {
+      return;
+    }
     if (session == null) {
       if (!mounted) {
         return;
       }
       setState(() {
         _isLoadingFeedVideos = false;
-        _feedVideosError = 'Please log in again to load restaurant videos.';
+        _feedVideosError = 'Please log in again to load your video feed.';
       });
       return;
     }
-    if (mounted) {
+
+    final ownerVideos = await _refreshUploadedVideos(session);
+    final feedResult = await _loadFeedPage(
+      reset: true,
+      requestId: requestId,
+      sessionOverride: session,
+    );
+    if (feedResult == _FeedLoadResult.permissionDenied &&
+        mounted &&
+        _feedVideos.isEmpty) {
       setState(() {
-        _isLoadingFeedVideos = true;
-        _feedVideosError = null;
+        _replaceFeedVideosFromOwnerVideos(ownerVideos);
+        _hasMoreFeed = false;
+        _isLoadingFeedVideos = false;
+        _isLoadingMoreFeed = false;
+        _feedVideosError = _feedVideos.isEmpty ? _emptyFeedMessage() : null;
       });
+      await _syncVideoPlayback();
     }
-    var ownerVideos = const <RestaurantVideoItem>[];
+  }
+
+  Future<List<RestaurantVideoItem>> _refreshUploadedVideos(
+    AuthSession session,
+  ) async {
     try {
-      ownerVideos = await _ownerApiService.fetchVideos(session: session);
+      final ownerVideos = await _ownerApiService.fetchVideos(session: session);
+      if (!mounted) {
+        return ownerVideos;
+      }
+      setState(() {
+        _uploadedVideos
+          ..clear()
+          ..addAll(ownerVideos.map(_uploadedVideoFromApiItem));
+      });
+      return ownerVideos;
     } catch (error) {
       debugPrint('Restaurant owner videos refresh failed: $error');
+      return const <RestaurantVideoItem>[];
+    }
+  }
+
+  Future<_FeedLoadResult> _loadFeedPage({
+    required bool reset,
+    int? requestId,
+    AuthSession? sessionOverride,
+  }) async {
+    if (_isLoadingMoreFeed && !reset) {
+      return _FeedLoadResult.loaded;
+    }
+    final activeRequestId = requestId ?? _feedRequestId;
+    final session = sessionOverride ?? await _resolveSession();
+    if (activeRequestId != _feedRequestId) {
+      return _FeedLoadResult.failed;
+    }
+    if (session == null) {
+      if (!mounted) {
+        return _FeedLoadResult.failed;
+      }
+      setState(() {
+        _isLoadingFeedVideos = false;
+        _isLoadingMoreFeed = false;
+        _feedVideosError = 'Please log in again to load your video feed.';
+      });
+      return _FeedLoadResult.failed;
+    }
+
+    if (!reset) {
+      if (!_hasMoreFeed) {
+        return _FeedLoadResult.loaded;
+      }
+      if (mounted) {
+        setState(() => _isLoadingMoreFeed = true);
+      }
     }
 
     try {
-      var feedPage = await _videoFeedApiService.fetchFeed(
+      var page = await _videoFeedApiService.fetchFeed(
         session: session,
-        page: 1,
+        page: _nextFeedPage,
         perPage: 15,
       );
-      var nextFeedPage = feedPage.meta.currentPage + 1;
-      var hasMoreFeed = feedPage.meta.hasMore;
-      var visibleItems = _visibleFeedItems(feedPage.items);
+      var nextFeedPage = page.meta.currentPage + 1;
+      var hasMoreFeed = page.meta.hasMore;
+      var visibleItems = _visibleFeedItems(page.items);
 
-      while (_isFollowingFeedSelected && visibleItems.isEmpty && hasMoreFeed) {
-        feedPage = await _videoFeedApiService.fetchFeed(
+      while (_isFollowingFeedSelected &&
+          visibleItems.isEmpty &&
+          hasMoreFeed &&
+          activeRequestId == _feedRequestId) {
+        page = await _videoFeedApiService.fetchFeed(
           session: session,
           page: nextFeedPage,
           perPage: 15,
         );
-        nextFeedPage = feedPage.meta.currentPage + 1;
-        hasMoreFeed = feedPage.meta.hasMore;
-        visibleItems = _visibleFeedItems(feedPage.items);
+        nextFeedPage = page.meta.currentPage + 1;
+        hasMoreFeed = page.meta.hasMore;
+        visibleItems = _visibleFeedItems(page.items);
+      }
+      if (activeRequestId != _feedRequestId) {
+        return _FeedLoadResult.failed;
       }
       if (!mounted) {
-        return;
+        return _FeedLoadResult.loaded;
       }
-      final hasGlobalFeedVideos = visibleItems.isNotEmpty;
       setState(() {
-        _uploadedVideos
-          ..clear()
-          ..addAll(ownerVideos.map(_uploadedVideoFromApiItem));
-        if (hasGlobalFeedVideos) {
-          _replaceFeedVideos(visibleItems);
-        } else {
-          _replaceFeedVideosFromOwnerVideos(ownerVideos);
-        }
+        _appendFeedItems(visibleItems);
+        _nextFeedPage = nextFeedPage;
+        _hasMoreFeed = hasMoreFeed;
         _isLoadingFeedVideos = false;
+        _isLoadingMoreFeed = false;
+        _feedVideosError = _feedVideos.isEmpty ? _emptyFeedMessage() : null;
+      });
+      await _syncVideoPlayback();
+      return _FeedLoadResult.loaded;
+    } on AuthApiException catch (error) {
+      final isPermissionDenied = error.message.toLowerCase().contains(
+        'permission',
+      );
+      if (isPermissionDenied) {
+        if (activeRequestId != _feedRequestId) {
+          return _FeedLoadResult.failed;
+        }
+        if (!mounted) {
+          return _FeedLoadResult.permissionDenied;
+        }
+        setState(() {
+          _isLoadingFeedVideos = false;
+          _isLoadingMoreFeed = false;
+          _hasMoreFeed = false;
+          _feedVideosError = _feedVideos.isEmpty
+              ? 'Your restaurant role cannot access the customer feed yet.'
+              : null;
+        });
+        return _FeedLoadResult.permissionDenied;
+      }
+      if (activeRequestId != _feedRequestId) {
+        return _FeedLoadResult.failed;
+      }
+      if (!mounted) {
+        return _FeedLoadResult.failed;
+      }
+      setState(() {
+        _isLoadingFeedVideos = false;
+        _isLoadingMoreFeed = false;
         _feedVideosError = _feedVideos.isEmpty
-            ? _emptyFeedMessage()
+            ? 'Unable to load videos. Please try again.'
             : null;
       });
+      return _FeedLoadResult.failed;
     } catch (error) {
       debugPrint('Restaurant global feed refresh failed: $error');
+      if (activeRequestId != _feedRequestId) {
+        return _FeedLoadResult.failed;
+      }
       if (!mounted) {
-        return;
+        return _FeedLoadResult.failed;
       }
       setState(() {
-        _uploadedVideos
-          ..clear()
-          ..addAll(ownerVideos.map(_uploadedVideoFromApiItem));
-        _replaceFeedVideosFromOwnerVideos(ownerVideos);
         _isLoadingFeedVideos = false;
+        _isLoadingMoreFeed = false;
         _feedVideosError = _feedVideos.isEmpty
-            ? 'Unable to load feed videos. Please try again.'
+            ? 'Unable to load videos. Please try again.'
             : null;
       });
+      return _FeedLoadResult.failed;
+    }
+  }
+
+  void _appendFeedItems(List<CustomerVideoFeedItem> items) {
+    for (final item in items) {
+      if (item.id.trim().isEmpty ||
+          !_isFeedItemVisibleForSelectedTopTab(item)) {
+        continue;
+      }
+      if (_feedItemsByPostId.containsKey(item.id)) {
+        continue;
+      }
+      final video = _FeedVideoPostData.fromFeedItem(item);
+      final post = _postFromFeedItem(item);
+      _feedItemsByPostId[item.id] = item;
+      _feedVideos.add(video);
+      _feedPostsById[video.postId] = post;
+      _videoControllers.add(_buildFeedVideoController(video));
+      _videoErrorLogged.add(false);
     }
   }
 
@@ -279,7 +420,7 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
   }
 
   bool _isFeedItemVisibleForSelectedTopTab(CustomerVideoFeedItem item) {
-    if (!item.isApprovedForFeed || item.playbackUrl.isEmpty) {
+    if (!item.isApprovedForFeed) {
       return false;
     }
     if (!_isFollowingFeedSelected) {
@@ -295,28 +436,13 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     }
     _feedVideos.clear();
     _feedPostsById.clear();
+    _feedItemsByPostId.clear();
     _videoControllers.clear();
     _videoErrorLogged.clear();
     _currentVideoIndex = 0;
     _isVideoHoldActive = false;
     _videoHoldAction = _VideoHoldAction.none;
     _isVideoManuallyPaused = false;
-  }
-
-  void _replaceFeedVideos(List<CustomerVideoFeedItem> videos) {
-    _resetFeedVideosState();
-
-    for (final item in videos) {
-      if (!_isFeedItemVisibleForSelectedTopTab(item)) {
-        continue;
-      }
-      final video = _FeedVideoPostData.fromFeedItem(item);
-      final post = _postFromFeedItem(item);
-      _feedVideos.add(video);
-      _feedPostsById[video.postId] = post;
-      _videoControllers.add(_buildFeedVideoController(video));
-      _videoErrorLogged.add(false);
-    }
   }
 
   void _replaceFeedVideosFromOwnerVideos(List<RestaurantVideoItem> videos) {
@@ -332,16 +458,23 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     }
   }
 
-  List<RestaurantVideoItem> _ownerVideosForFeed(List<RestaurantVideoItem> videos) {
-    final published = videos.where((video) {
-      return video.canAppearPublished && video.playbackUrl.trim().isNotEmpty;
-    }).toList(growable: false);
+  List<RestaurantVideoItem> _ownerVideosForFeed(
+    List<RestaurantVideoItem> videos,
+  ) {
+    final published = videos
+        .where((video) {
+          return video.canAppearPublished &&
+              video.playbackUrl.trim().isNotEmpty;
+        })
+        .toList(growable: false);
     if (published.isNotEmpty) {
       return published;
     }
-    return videos.where((video) {
-      return video.playbackUrl.trim().isNotEmpty;
-    }).toList(growable: false);
+    return videos
+        .where((video) {
+          return video.playbackUrl.trim().isNotEmpty;
+        })
+        .toList(growable: false);
   }
 
   VideoPlayerController _buildFeedVideoController(_FeedVideoPostData video) {
@@ -1160,6 +1293,9 @@ class _RestaurantFeedScreenState extends State<RestaurantFeedScreen> {
     unawaited(
       _syncVideoPlayback(resetCurrentToStart: true, resetInactiveToStart: true),
     );
+    if (index >= _feedVideos.length - 3) {
+      unawaited(_loadFeedPage(reset: false, requestId: _feedRequestId));
+    }
   }
 
   Future<void> _syncVideoPlayback({
