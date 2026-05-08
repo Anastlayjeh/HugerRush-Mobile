@@ -37,7 +37,21 @@ class AuthApiService {
   }
 
   Future<AuthResult> register({required Map<String, dynamic> payload}) {
-    return _sendAuthRequest(endpoint: '/v1/auth/register', payload: payload);
+    return _sendAuthRequest(
+      endpoint: '/v1/auth/register',
+      payload: payload,
+      requireToken: true,
+    );
+  }
+
+  Future<AuthResult> requestRestaurantApproval({
+    required Map<String, dynamic> payload,
+  }) {
+    return _sendAuthRequest(
+      endpoint: '/v1/auth/register',
+      payload: payload,
+      requireToken: false,
+    );
   }
 
   Future<String> forgotPassword({required String email}) async {
@@ -144,6 +158,7 @@ class AuthApiService {
   Future<AuthResult> _sendAuthRequest({
     required String endpoint,
     required Map<String, dynamic> payload,
+    bool requireToken = true,
   }) async {
     http.Response response;
     try {
@@ -168,7 +183,8 @@ class AuthApiService {
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
       final result = AuthResult.fromJson(data);
-      if (result.token == null || result.token!.trim().isEmpty) {
+      if (requireToken &&
+          (result.token == null || result.token!.trim().isEmpty)) {
         throw const AuthApiException(
           'Login succeeded but the server did not return an auth token.',
         );
