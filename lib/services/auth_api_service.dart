@@ -8,6 +8,22 @@ class AuthApiService {
     : _apiClient = ApiClient(client: client);
 
   static const String deviceName = 'hunger-rush-mobile';
+  static const Set<String> _restaurantRegistrationRoles = <String>{
+    'restaurant',
+    'restaurant_owner',
+    'restaurant_admin',
+    'vendor',
+    'merchant',
+  };
+  static const Set<String> _restaurantRegistrationAllowedKeys = <String>{
+    'name',
+    'email',
+    'phone',
+    'password',
+    'password_confirmation',
+    'role',
+    'device_name',
+  };
   static const String forgotPasswordSuccessMessage =
       'A reset password link has been sent.';
 
@@ -37,7 +53,11 @@ class AuthApiService {
   }
 
   Future<AuthResult> register({required Map<String, dynamic> payload}) {
-    return _sendAuthRequest(endpoint: '/v1/auth/register', payload: payload);
+    final normalizedPayload = _normalizeRegistrationPayload(payload);
+    return _sendAuthRequest(
+      endpoint: '/v1/auth/register',
+      payload: normalizedPayload,
+    );
   }
 
   Future<String> forgotPassword({required String email}) async {
@@ -212,6 +232,50 @@ class AuthApiService {
     throw AuthApiException(
       '${ApiClient.errorMessageForStatus(response.statusCode, data, fallback: fallback)} (HTTP ${response.statusCode})',
     );
+  }
+
+  Map<String, dynamic> _normalizeRegistrationPayload(
+    Map<String, dynamic> payload,
+  ) {
+    final role = _normalizeRole(payload['role']);
+    if (role == null || !_restaurantRegistrationRoles.contains(role)) {
+      return payload;
+    }
+
+    final normalizedPayload = <String, dynamic>{};
+    for (final entry in payload.entries) {
+      if (_restaurantRegistrationAllowedKeys.contains(entry.key)) {
+        normalizedPayload[entry.key] = entry.value;
+      }
+    }
+
+    if (!_hasTextValue(normalizedPayload['role'])) {
+      normalizedPayload['role'] = 'restaurant_owner';
+    }
+    if (!_hasTextValue(normalizedPayload['device_name'])) {
+      normalizedPayload['device_name'] = deviceName;
+    }
+
+    return normalizedPayload;
+  }
+
+  String? _normalizeRole(dynamic value) {
+    if (value is! String) {
+      return null;
+    }
+
+    final normalized = value.trim().toLowerCase().replaceAll(
+      RegExp(r'[\s-]+'),
+      '_',
+    );
+    return normalized.isEmpty ? null : normalized;
+  }
+
+  bool _hasTextValue(dynamic value) {
+    if (value is String) {
+      return value.trim().isNotEmpty;
+    }
+    return value != null;
   }
 }
 

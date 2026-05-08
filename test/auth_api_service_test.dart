@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -120,6 +122,93 @@ void main() {
           ),
         ),
       );
+    });
+
+    test(
+      'register strips unsupported restaurant fields before posting',
+      () async {
+        late http.Request capturedRequest;
+
+        final service = AuthApiService(
+          client: MockClient((request) async {
+            capturedRequest = request;
+            return http.Response(
+              '{"message":"Registered","data":{"token":"token-1"}}',
+              201,
+              headers: {'content-type': 'application/json'},
+            );
+          }),
+        );
+
+        final result = await service.register(
+          payload: <String, dynamic>{
+            'name': 'Bella Italia',
+            'restaurant_name': 'Bella Italia',
+            'cuisine_type': 'Italian',
+            'email': 'owner@example.com',
+            'phone': '+96170000000',
+            'country': 'Lebanon',
+            'city': 'Beirut',
+            'street': 'Main Street',
+            'postal_code': '12345',
+            'password': 'secure-pass',
+            'password_confirmation': 'secure-pass',
+            'role': 'restaurant_owner',
+            'device_name': '  ',
+          },
+        );
+
+        final body = jsonDecode(capturedRequest.body) as Map<String, dynamic>;
+
+        expect(capturedRequest.url.path, '/api/v1/auth/register');
+        expect(body['name'], 'Bella Italia');
+        expect(body['email'], 'owner@example.com');
+        expect(body['phone'], '+96170000000');
+        expect(body['password'], 'secure-pass');
+        expect(body['password_confirmation'], 'secure-pass');
+        expect(body['role'], 'restaurant_owner');
+        expect(body['device_name'], AuthApiService.deviceName);
+        expect(body.containsKey('restaurant_name'), isFalse);
+        expect(body.containsKey('cuisine_type'), isFalse);
+        expect(body.containsKey('country'), isFalse);
+        expect(body.containsKey('city'), isFalse);
+        expect(body.containsKey('street'), isFalse);
+        expect(body.containsKey('postal_code'), isFalse);
+        expect(result.token, 'token-1');
+      },
+    );
+
+    test('register keeps non-restaurant payload unchanged', () async {
+      late http.Request capturedRequest;
+
+      final service = AuthApiService(
+        client: MockClient((request) async {
+          capturedRequest = request;
+          return http.Response(
+            '{"message":"Registered","data":{"token":"token-2"}}',
+            201,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      await service.register(
+        payload: <String, dynamic>{
+          'name': 'Customer',
+          'email': 'customer@example.com',
+          'phone': '+96171111111',
+          'password': 'secure-pass',
+          'password_confirmation': 'secure-pass',
+          'role': 'customer',
+          'device_name': 'custom-device',
+          'referral_code': 'WELCOME10',
+        },
+      );
+
+      final body = jsonDecode(capturedRequest.body) as Map<String, dynamic>;
+      expect(body['role'], 'customer');
+      expect(body['device_name'], 'custom-device');
+      expect(body['referral_code'], 'WELCOME10');
     });
   });
 }
